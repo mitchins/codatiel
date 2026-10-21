@@ -21,7 +21,8 @@ def run(cmd: list[str], cwd: Path | None = None, timeout: int = 60) -> subproces
     # deliberately kept: it only restricts upward discovery (safer).
     for var in ("GIT_EXTERNAL_DIFF", "GIT_DIR", "GIT_WORK_TREE",
                 "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-                "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR"):
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR",
+                "GIT_NAMESPACE"):
         env.pop(var, None)
     env["GIT_PAGER"] = "cat"
     return subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True,

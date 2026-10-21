@@ -122,6 +122,14 @@ def scan_pair(*, base_dir: Path, head_dir: Path, base_sha: str, head_sha: str,
 
     detector = DocsCodeDetector()
     retrieved_pairs: list[list[str]] = []
+    # Repository-wide surfaces are computed once per scan, not once per
+    # changed file: re-reading every file for every pair is O(N*M).
+    head_pool = _head_tree(head_dir)
+    head_names, head_aliases, scanned_files, _head_rel = facts_mod.enumerate_code_names(head_dir)
+    base_names, _base_aliases, _base_scanned, _base_rel = facts_mod.enumerate_code_names(base_dir)
+    surfaces = {"head_pool": head_pool, "head_names": head_names,
+                "head_aliases": head_aliases, "scanned_files": scanned_files,
+                "base_names": base_names}
     for row in changes:
         path = row.get("path", "")
         if not _is_doc_or_code(path):
@@ -130,7 +138,8 @@ def scan_pair(*, base_dir: Path, head_dir: Path, base_sha: str, head_sha: str,
         changed_is_docs = info["category"] == "docs"
         pair = _examine_changed_file(
             base_dir, head_dir, base_sha, head_sha, path, changed_is_docs,
-            detector, evidence, facts, candidates, proofs, findings, verifications)
+            detector, evidence, facts, candidates, proofs, findings, verifications,
+            surfaces=surfaces)
         examined += 1 if pair else 0
         if pair:
             retrieved_pairs.append(pair)
@@ -192,8 +201,8 @@ def _head_tree(head_dir: Path) -> dict[str, str]:
 
 
 def _examine_changed_file(base_dir, head_dir, base_sha, head_sha, path, changed_is_docs,
-                          detector, evidence, facts, candidates, proofs, findings,
-                          verifications) -> list[str] | None:
+                           detector, evidence, facts, candidates, proofs, findings,
+                           verifications, surfaces: dict | None = None) -> list[str] | None:
     """Examine one changed file against its best counterpart.
 
     Returns [changed, counterpart] when a pair was examined, else None.
@@ -201,7 +210,10 @@ def _examine_changed_file(base_dir, head_dir, base_sha, head_sha, path, changed_
     sides = _read_all(base_dir, head_dir, base_sha, head_sha, path, evidence)
     if sides["head"] is None:
         return None
-    head_pool = _head_tree(head_dir)
+    head_pool = (surfaces or {}).get("head_pool")
+    if head_pool is None:
+        head_pool = _head_tree(head_dir)
+
     if changed_is_docs:
         query_text = "\n".join(sides["head"] or [])
         pool = {p: c for p, c in head_pool.items() if not p.lower().endswith(DOC_EXTS)}
@@ -233,7 +245,7 @@ def _examine_changed_file(base_dir, head_dir, base_sha, head_sha, path, changed_
     _run_class_pipelines(base_dir, head_dir, base_sha, head_sha, path, counterpart,
                          sides, cp_sides, anchor, cp_anchor, changed_is_docs,
                          detector, evidence, facts, candidates, proofs, findings,
-                         verifications)
+                         verifications, surfaces=surfaces)
     for row in candidates[before:]:
         row["retrieval_weak"] = weak_retrieval
     return [path, counterpart]
@@ -242,7 +254,7 @@ def _examine_changed_file(base_dir, head_dir, base_sha, head_sha, path, changed_
 def _run_class_pipelines(base_dir, head_dir, base_sha, head_sha, path, counterpart,
                          sides, cp_sides, anchor, cp_anchor, changed_is_docs,
                          detector, evidence, facts, candidates, proofs, findings,
-                         verifications) -> None:
+                         verifications, surfaces: dict | None = None) -> None:
     code_path, doc_path = (counterpart, path) if changed_is_docs else (path, counterpart)
     code_sides = cp_sides if changed_is_docs else sides
     doc_sides = sides if changed_is_docs else cp_sides
@@ -263,7 +275,7 @@ def _run_class_pipelines(base_dir, head_dir, base_sha, head_sha, path, counterpa
     _run_named(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                head_dir, base_dir, anchor, cp_anchor, evidence, facts, candidates, proofs,
                findings, verifications, detector, direction=direction,
-               base_sha=base_sha, head_sha=head_sha)
+               base_sha=base_sha, head_sha=head_sha, surfaces=surfaces)
     # ---- allowed ----
     _run_allowed(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                  anchor, cp_anchor, evidence, facts, candidates, proofs,
@@ -384,16 +396,22 @@ def _match_fact(facts_list: list[dict], target: dict) -> dict | None:
 def _run_named(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                head_dir, base_dir, anchor, cp_anchor, evidence, facts, candidates, proofs,
                findings, verifications, detector, direction="code_changed",
-               base_sha: str = "", head_sha: str = "") -> None:
+               base_sha: str = "", head_sha: str = "", surfaces: dict | None = None) -> None:
     head_doc_facts = facts_mod.bind_facts(
         facts_mod.extract_doc_names(doc_path, head_doc), doc_path, "head", head_sha, evidence)
     if not head_doc_facts:
         return
-    head_names, head_aliases, scanned_files, _rel = facts_mod.enumerate_code_names(head_dir)
-    # Baseline provision is repo-wide, like the head surface: "X existed
-    # in the consistent baseline" is a repository property, not a
-    # single-file one. (Replay recomputes the same way.)
-    base_names, _base_aliases, _base_scanned, _base_rel = facts_mod.enumerate_code_names(base_dir)
+    if surfaces is not None:
+        head_names = surfaces["head_names"]
+        head_aliases = surfaces["head_aliases"]
+        scanned_files = surfaces["scanned_files"]
+        base_names = surfaces["base_names"]
+    else:
+        head_names, head_aliases, scanned_files, _rel = facts_mod.enumerate_code_names(head_dir)
+        # Baseline provision is repo-wide, like the head surface: "X existed
+        # in the consistent baseline" is a repository property, not a
+        # single-file one. (Replay recomputes the same way.)
+        base_names, _base_aliases, _base_scanned, _base_rel = facts_mod.enumerate_code_names(base_dir)
     for doc_fact in head_doc_facts:
         formed = cand_mod.form_named_candidate(
             doc_fact, [{"name": n} for n in head_names if n == doc_fact["name"]])

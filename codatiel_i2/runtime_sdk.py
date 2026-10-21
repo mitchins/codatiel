@@ -739,12 +739,6 @@ def _merge_same_role(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             message["content"] = _order_assistant_blocks(
                 message["content"], "assistant")
     return merged
-    if isinstance(content, str):
-        return content
-    parts = [p.get("text", "") for p in content
-             if isinstance(p, dict) and p.get("type") in
-             ("input_text", "output_text", "text")]
-    return "\n".join(p for p in parts if p)
 
 
 def run_review(*, instructions: str, user_input: str, tools: list[Any],
