@@ -27,11 +27,7 @@ from codatiel_i2.detectors.docs_code import facts as facts_mod
 from codatiel_i2.detectors.docs_code import validators as validators_mod
 from codatiel_i2.tools import read_file as rf_mod
 
-try:
-    # Pure deterministic normalization shared with the B5 harness.
-    from eval.docs_code import normalize as _NORM
-except Exception:  # pragma: no cover
-    _NORM = None  # type: ignore
+from codatiel_i2.detectors.docs_code import normalize as _NORM
 
 DOC_EXTS = (".md", ".mdx", ".rst")
 CODE_EXTS = (".py", ".ts", ".tsx", ".js", ".go", ".swift", ".rs")
@@ -168,8 +164,6 @@ def _read_all(base_dir: Path, head_dir: Path, base_sha: str, head_sha: str,
 
 def _retrieve_counterparts(query_text: str, pool: dict[str, str],
                            exclude: set[str], top_k: int = 5) -> list[tuple[str, float]]:
-    if _NORM is None:
-        return []
     query = _NORM.normalize_text(query_text)
     scored = []
     for path, content in pool.items():
