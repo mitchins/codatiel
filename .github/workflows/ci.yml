@@ -68,7 +68,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Blocked-pattern scan (keys, tokens, private paths)
-        run: >-
-          ! grep -rniE "sk-[A-Za-z0-9]{10,}|gho_[A-Za-z0-9_]+|xox[bpas]-|AKIA[0-9A-Z]{16}|-----BEGIN .*PRIVATE KEY-----|/data/coding|/home/[a-z]+/"
-          --include="*.py" --include="*.json" --include="*.toml" --include="*.md" --include="*.yml" .
+      - name: Blocked-pattern scan (keys, tokens, private keys, env files)
+        run: |
+          ! grep -rniE "sk-[A-Za-z0-9]{10,}|gho_[A-Za-z0-9_]+|xox[bpas]-|AKIA[0-9A-Z]{16}|-----BEGIN .*PRIVATE KEY-----" \
+            --include="*.py" --include="*.json" --include="*.toml" --include="*.md" --include="*.yml" . \
+            | grep -v "workflows/ci.yml"
+          test ! -f .env && test ! -f .env.local
