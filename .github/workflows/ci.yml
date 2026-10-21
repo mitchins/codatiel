@@ -39,10 +39,11 @@ jobs:
           tests/test_investigation_tools.py
           tests/test_workspace_identity.py
           tests/test_workspace_fallback.py
-          tests/test_haiku_adapter_mapping.py
-          tests/test_file_accounting.py
+          tests/test_haiku_adapter_mapping.py tests/test_file_accounting.py
           tests/test_m7_cost_statement.py
-          tests/test_m7_evidence_replay.py -q
+          tests/test_m7_evidence_replay.py tests/test_tailer_retry.py
+          tests/test_index_skeleton.py -q
+
       - name: CLI smoke test (scripted review + fixture digest, no inference)
         run: |
           python - <<'EOF'
