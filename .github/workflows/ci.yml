@@ -56,7 +56,8 @@ jobs:
           subprocess.run(["git", "-C", root, "commit", "-qam", "h"], check=True)
           head = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
           sc = tmp / "s.json"
-          sc.write_text(json.dumps({"turns": [], "final": {"status": "silence", "summary": "ci", "findings": []}}))
+          sc.write_text(json.dumps({"turns": [{"tool": "read_file", "args": {"path": "a.py", "revision": "head"}}],
+                                    "final": {"status": "silence", "summary": "ci", "findings": []}}))
           out = S.review_local(root, base, head, model=S.scripted_model_from_scenario(str(sc)),
                                model_name="scripted:ci", runs_root=tmp / "runs", work_root=tmp / "work")
           assert out["status"] == "complete", out
