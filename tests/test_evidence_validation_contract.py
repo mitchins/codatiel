@@ -472,3 +472,16 @@ def test_form_b_forgery_reaches_the_targeted_layer(pair):
     # Unchanged control for this mutation family still passes.
     assert _validate(pair, _finding([ev["evidence_id"]], start=5, end=5),
                      {ev["evidence_id"]: ev}).state == V.ATTESTED
+
+
+def test_forged_excerpt_with_original_digest_fails_integrity(pair):
+    """Form B+ : forged excerpt + ORIGINAL digest + recomputed ID must fail
+    at integrity (digest-vs-excerpt binding), not slip through to replay."""
+    ev = _read(pair["work"], "app.py", "head", 5, 5)
+    forged = dict(ev, excerpt="forged bytes")
+    assert forged["content_digest"] == ev["content_digest"]
+    forged["evidence_id"] = expected_evidence_id(forged)
+    assert forged["evidence_id"] != ev["evidence_id"]
+    result = _validate(pair, _finding([forged["evidence_id"]], start=5, end=5),
+                       {forged["evidence_id"]: forged})
+    assert (result.state, result.code) == (V.REJECTED, V.EVIDENCE_ID_INTEGRITY)

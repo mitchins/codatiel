@@ -119,5 +119,9 @@ def _py_symbols(text: str):
                 # classes must not overwrite each other on INSERT OR REPLACE.
                 yield {"type": kind, "id": ".".join((*scope, child.name))}, start, end, snippet
                 yield from visit(child, (*scope, child.name))
+            else:
+                # Recurse into non-definition nodes (if/try/with blocks) with
+                # the scope unchanged so nested definitions are still indexed.
+                yield from visit(child, scope)
 
     yield from visit(tree, ())
