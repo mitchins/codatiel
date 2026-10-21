@@ -23,7 +23,7 @@ from typing import Any
 
 BACKENDS = ("luna", "haiku", "gemma")
 
-_PROFILE_PATH = Path(__file__).resolve().parent.parent / "config" / "model_profiles.json"
+_PROFILE_PATH = Path(__file__).resolve().parent / "config" / "model_profiles.json"
 
 
 def load_profiles() -> dict[str, dict]:

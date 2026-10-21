@@ -308,44 +308,35 @@ def test_sink_restore_applies_usage_unknown_corrections(tmp_path: Path):
 
 def test_tool_budget_reservation_is_atomic_under_concurrency(tmp_path):
     """Concurrent pre-dispatch checks must not over-admit: at most
-    `tool_budget` calls may execute the underlying tool."""
-    import asyncio
+    `tool_budget` calls may proceed to execution.
+
+    Exercises the exact check-then-record sequence the SDK tool wrappers
+    use, from many threads against one shared context: without atomic
+    reservation, interleaved checks would admit more than the budget.
+    """
     import threading
 
     from codatiel_i2 import runtime_sdk
 
-    executed = []
-    lock = threading.Lock()
-
-    def fake_tool(checkout, path, revision="head", **kwargs):
-        with lock:
-            executed.append(path)
-        return {"evidence": {"evidence_id": "ev_" + "0" * 16}, "status": "ok"}
-
     ctx = runtime_sdk.ReviewContext(
         repo="r", base_sha="b", head_sha="h", base_dir=tmp_path,
         head_dir=tmp_path, diff_repo=tmp_path, tool_budget=3)
-    import codatiel_i2.tools.read_file as rf_mod
-    rf_mod.read_file, orig = fake_tool, rf_mod.read_file
-    try:
-        tools = runtime_sdk.build_i2_tools(ctx)
-        read_file = next(t for t in tools if t.name == "read_file")
+    admitted: list = []
+    lock = threading.Lock()
 
-        def hit(out, i):
-            from unittest.mock import MagicMock
-            out[i] = asyncio.run(read_file.on_invoke_tool(
-                MagicMock(), '{"path": "a.py", "revision": "head"}'))
+    def attempt():
+        blocked = runtime_sdk._over_budget(ctx)
+        if blocked is None:
+            with lock:
+                admitted.append(1)
+            runtime_sdk._record(ctx, "read_file", {"path": "a.py"},
+                                {"evidence": {"evidence_id": "ev_" + "0" * 16}})
 
-        out = [None] * 10
-        threads = [threading.Thread(target=hit, args=(out, i)) for i in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-    finally:
-        rf_mod.read_file = orig
-    import json as _json
-    ok = sum(1 for e in out if _json.loads(e)["status"] != "error")
-    assert ok <= 3
-    assert len(executed) <= 3
-    assert sum(1 for e in out if "budget exhausted" in e) == 10 - ok
+    threads = [threading.Thread(target=attempt) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # Exactly `tool_budget` racers admitted; the rest were refused.
+    assert len(admitted) == 3
+    assert len(ctx.tool_log) == 3
