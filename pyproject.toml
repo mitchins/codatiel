@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codatiel-i2"
+version = "0.1.0"
+description = "Codatiel Iteration 2 — self-hosted semantic regression scanner for pull requests"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+    # R1/R2 retrieval-bank tests: syntax-aware chunking + ranking math.
+    "tree-sitter>=0.25",
+    "tree-sitter-python>=0.25",
+    "tree-sitter-go>=0.25",
+    "tree-sitter-typescript>=0.23",
+    "tree-sitter-javascript>=0.25",
+    "tree-sitter-rust>=0.24",
+    "numpy>=2.0",
+    # R1 semantic tests re-encode with sentence-transformers on CUDA.
+    "sentence-transformers>=3.0",
+    # test_no_embedding_or_model_loads asserts torch imports without CUDA.
+    # On CUDA hosts install the CUDA build, e.g.:
+    #   pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu128
+    "torch",
+]
+sdk = ["openai-agents>=0.17", "openai>=2.0", "anthropic>=1.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["codatiel_i2*"]
+
+[tool.setuptools.package-data]
+codatiel_i2 = ["config/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

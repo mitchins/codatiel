@@ -1,0 +1,87 @@
+{
+  "schema_version": "codatiel_i2.model_profiles.v1",
+  "profiles": [
+    {
+      "profile": "gemma_26b_main",
+      "provider": "openai_compatible",
+      "model": "reinforce20001/gemma4-26b-a4b-it-qat-w4a16-ct",
+      "base_url": "http://192.168.1.14:8000/v1",
+      "role": "main_verifier",
+      "expected_context": 110000,
+      "cost_tier": "local",
+      "enabled_by_default": true
+    },
+    {
+      "profile": "fastcontext_8b_breadth",
+      "provider": "openai_compatible",
+      "model": "fastcontext-8b",
+      "base_url": "http://192.168.1.14:8001/v1",
+      "role": "breadth_explorer",
+      "expected_context": 32000,
+      "cost_tier": "local",
+      "enabled_by_default": false
+    },
+    {
+      "profile": "frognano_4b_breadth",
+      "provider": "openai_compatible",
+      "model": "frognano-4b",
+      "base_url": "http://192.168.1.14:8002/v1",
+      "role": "breadth_explorer",
+      "expected_context": 16000,
+      "cost_tier": "local",
+      "enabled_by_default": false
+    },
+    {
+      "profile": "luna_review",
+      "backend": "luna",
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "role": "review_backend",
+      "privacy": "OPENAI_STANDARD_API_NO_TRAINING",
+      "store": false,
+      "rate_usd_per_mtok": {
+        "input": 0.1,
+        "output": 0.5
+      },
+      "rate_status": "standard_verified_2026-10-20_official_docs",
+      "max_usd_per_review": 5.0,
+      "credential_env": "OPENAI_API_KEY",
+      "expected_context": 400000
+    },
+    {
+      "profile": "haiku_review",
+      "backend": "haiku",
+      "provider": "anthropic",
+      "model": "claude-haiku-5-5",
+      "role": "review_backend",
+      "privacy": "ANTHROPIC_COMMERCIAL_NO_TRAINING_DEFAULT",
+      "retention": "30d_standard",
+      "thinking": "adaptive_default",
+      "rate_usd_per_mtok": {
+        "input": 0.1,
+        "output": 0.5
+      },
+      "rate_status": "standard_tier_verified_2026-10",
+      "max_usd_per_review": 5.0,
+      "credential_env": "ANTHROPIC_API_KEY",
+      "expected_context": 200000
+    },
+    {
+      "profile": "gemma_review",
+      "backend": "gemma",
+      "provider": "openai_compatible",
+      "model": "reinforce20001/gemma4-26b-a4b-it-qat-w4a16-ct",
+      "base_url": "http://192.168.1.14:8000/v1",
+      "role": "review_backend",
+      "privacy": "local_inference_no_third_party_transmission",
+      "rate_usd_per_mtok": {
+        "input": 0.0,
+        "output": 0.0
+      },
+      "rate_status": "local_zero_cost",
+      "max_usd_per_review": 0.0,
+      "credential_env": "",
+      "expected_context": 110000
+    }
+  ]
+}

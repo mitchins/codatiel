@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv*/
+runs/
+# Local workspaces may hold full checkouts of reviewed (possibly private) repos.
+.codatiel-i2-work/
+# Tailer state lives next to runs, never in version control.
+tailer_state.json
+# M7.1 frozen source fixtures: private bytes stay local; only manifest metadata is committed
+eval/.m7_fixture_store/
+.index/
+*.tar.gz
+# R3a docmat snapshot cache (multi-GB matrices; reproducible, never commit)
+.docmat_cache/
+eval/auth3r/.docmat_cache/
