@@ -267,9 +267,13 @@ def prepare_github_workspace(repo: str, pr: int, work_root: Path, clone_url: str
         for refspec in (f"pull/{pr}/head:refs/remotes/origin/pr-{pr}",):
             subprocess.run(["git", "-C", str(checkout_dir), "fetch", "origin", refspec],
                            capture_output=True, text=True, timeout=300)
-        if head_sha:
-            subprocess.run(["git", "-C", str(checkout_dir), "fetch", "origin", head_sha],
-                           capture_output=True, text=True, timeout=300)
+        # Fetch both endpoints: a reused clone predates the base advance,
+        # and materialising base_sha from stale objects would fail or,
+        # worse, resolve the wrong history.
+        for sha in (head_sha, base_sha):
+            if sha:
+                subprocess.run(["git", "-C", str(checkout_dir), "fetch", "origin", sha],
+                               capture_output=True, text=True, timeout=300)
         target = head_sha or f"origin/pr-{pr}"
         proc = subprocess.run(["git", "-C", str(checkout_dir), "checkout", "--detach", target],
                               capture_output=True, text=True, timeout=120)

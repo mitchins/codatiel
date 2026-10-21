@@ -499,6 +499,16 @@ def validate_model_finding(
                     check.failures.append((EVIDENCE_ID_INTEGRITY,
                                            f"{evidence_id} does not match its recorded contents"))
                     failures.append((_INTEGRITY_RANK, index, EVIDENCE_ID_INTEGRITY, check.failures[-1][1]))
+                elif evidence_mod._digest_for(
+                        str(record.get("kind") or ""), str(record.get("excerpt") or ""),
+                        str(record.get("fact") or "")) != record.get("content_digest"):
+                    # The ID binds the excerpt and replay binds the digest to
+                    # disk bytes; this binds the digest to the excerpt, so a
+                    # doctored excerpt with recomputed ID cannot attest.
+                    check.status = "failed"
+                    check.failures.append((EVIDENCE_ID_INTEGRITY,
+                                           f"{evidence_id} content_digest does not match its recorded excerpt"))
+                    failures.append((_INTEGRITY_RANK, index, EVIDENCE_ID_INTEGRITY, check.failures[-1][1]))
             except Exception as exc:
                 check.status = "failed"
                 check.failures.append((EVIDENCE_ID_INTEGRITY,

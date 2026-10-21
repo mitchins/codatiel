@@ -73,7 +73,7 @@ def build_index(checkout_dir: Path, repo_id: str, expected_sha: str, conn) -> di
         except Exception:
             continue
         digest = sha256_text(text)
-        lines = text.count("\n") + 1
+        lines = len(text.splitlines())
         conn.execute(
             "INSERT OR REPLACE INTO file (repo_id, commit_sha, path, content_hash, language, line_count)"
             " VALUES (?,?,?,?,?,?)",
@@ -107,10 +107,17 @@ def _py_symbols(text: str):
     except Exception:
         return
     lines = text.splitlines()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            start = node.lineno
-            end = getattr(node, "end_lineno", start) or start
-            snippet = "\n".join(lines[start - 1:end])[:4000]
-            kind = "function" if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else "class"
-            yield {"type": kind, "id": node.name}, start, end, snippet
+
+    def visit(node, scope: tuple[str, ...]):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                start = child.lineno
+                end = getattr(child, "end_lineno", start) or start
+                snippet = "\n".join(lines[start - 1:end])[:4000]
+                kind = "function" if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else "class"
+                # Scope-qualified id: two __init__ methods in different
+                # classes must not overwrite each other on INSERT OR REPLACE.
+                yield {"type": kind, "id": ".".join((*scope, child.name))}, start, end, snippet
+                yield from visit(child, (*scope, child.name))
+
+    yield from visit(tree, ())

@@ -292,6 +292,8 @@ def extract_sem_error(path: str, lines: list[str]) -> list[dict]:
     for m in re.finditer(
             r'["\']?(code|error|message|detail)["\']?\s*:|=',
             text.replace("==", "\x00").replace("===", "\x00")):
+        if m.group(1) is None:
+            continue  # bare '=' carries no key
         errkeys.setdefault(_lineno(text, m.start()), set()).add(m.group(1))
     for m in re.finditer(r"(?:==|===)\s*[\"']([A-Za-z_][\w]*)[\"']", text):
         ln = _lineno(text, m.start())

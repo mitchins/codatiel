@@ -808,22 +808,22 @@ def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
     import hashlib as _hashlib
 
     body_sha256 = _hashlib.sha256(text.encode("utf-8")).hexdigest()
-    send = transport or (lambda t, s, b: _smtp2go_send(t, sender, s, b))
-    receipt = send(to, subj, text)
+    # Durable pre-send record: the exact body and its hash are persisted
+    # BEFORE transport, so an accepted-but-unpreserved digest cannot recur.
     record = {"to": to, "sender": sender, "subject": subj,
               "run_id": run.get("run_id"), "repo": run.get("repo"),
-              "transport_receipt": receipt,
-              # Durable pre-send record: exact body retained with its content
-              # hash so a accepted-but-unpreserved digest cannot recur.
-              # Digests carry no private source by contract; no secrets here.
-              "body_sha256": body_sha256, "body": text}
+              "body_sha256": body_sha256, "body": text,
+              "transport_receipt": None}
+    write_json(run_dir / "delivery.json", record)
+    send = transport or (lambda t, s, b: _smtp2go_send(t, sender, s, b))
+    receipt = send(to, subj, text)
+    record["transport_receipt"] = receipt
     write_json(run_dir / "delivery.json", record)
     return record
 
 
+
 def _smtp2go_send(to: list[str], sender: str, subject: str,
                   text_body: str) -> dict:
-    import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "eval"))
-    from smtp2go_client import send_email
+    from codatiel_i2.delivery.smtp2go import send_email
     return send_email(to, sender, subject, text_body)

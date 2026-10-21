@@ -86,6 +86,20 @@ def _record(ctx: ReviewContext, name: str, args: dict[str, Any], result: dict) -
     return json.dumps(result, default=str)
 
 
+def _over_budget(ctx: ReviewContext) -> str | None:
+    """Pre-dispatch budget gate: refuse the call before doing any work.
+
+    The ledger check in `_record` stays as the post-dispatch backstop, but
+    over-budget calls must not trigger repository scans, diffs, or searches
+    whose results are then thrown away.
+    """
+    if len(ctx.tool_log) >= ctx.tool_budget:
+        return json.dumps({"status": "error",
+                           "error": f"tool budget exhausted ({ctx.tool_budget} calls); "
+                                    "ending investigation within bounded resources"})
+    return None
+
+
 def build_i2_tools(ctx: ReviewContext) -> list[Any]:
     """Expose I2 revision-bound source tools as SDK function tools."""
     agents = require_sdk()
@@ -101,6 +115,9 @@ def build_i2_tools(ctx: ReviewContext) -> list[Any]:
     def read_file(path: str, revision: str = "head",
                   start_line: int = 1, end_line: int = 0) -> str:
         """Read exact source lines from the pinned BASE or HEAD checkout."""
+        blocked = _over_budget(ctx)
+        if blocked is not None:
+            return blocked
         checkout = ctx.base_dir if revision == "base" else ctx.head_dir
         args = {"path": path, "revision": revision,
                 "start_line": start_line, "end_line": end_line or None}
@@ -116,6 +133,9 @@ def build_i2_tools(ctx: ReviewContext) -> list[Any]:
     @agents.function_tool
     def diff_window(path: str, context_lines: int = 40) -> str:
         """Return the unified BASE..HEAD diff for one path with evidence anchor."""
+        blocked = _over_budget(ctx)
+        if blocked is not None:
+            return blocked
         args = {"path": path, "context_lines": context_lines}
         try:
             result = i2_diff_window(ctx.diff_repo, ctx.base_sha, ctx.head_sha,
@@ -128,6 +148,9 @@ def build_i2_tools(ctx: ReviewContext) -> list[Any]:
     def search_code(query: str, revision: str = "head",
                     max_results: int = 50) -> str:
         """Path-confined code search over the pinned BASE or HEAD checkout."""
+        blocked = _over_budget(ctx)
+        if blocked is not None:
+            return blocked
         checkout = ctx.base_dir if revision == "base" else ctx.head_dir
         args = {"query": query, "revision": revision, "max_results": max_results}
         try:
@@ -142,6 +165,9 @@ def build_i2_tools(ctx: ReviewContext) -> list[Any]:
     def find_definition(symbol: str, revision: str = "head") -> str:
         """Find the definition of a Python symbol (classes/functions) in the
         pinned checkout. Python AST only; other languages unsupported."""
+        blocked = _over_budget(ctx)
+        if blocked is not None:
+            return blocked
         checkout = ctx.base_dir if revision == "base" else ctx.head_dir
         args = {"symbol": symbol, "revision": revision}
         try:
@@ -159,6 +185,9 @@ def build_i2_tools(ctx: ReviewContext) -> list[Any]:
         call, and membership tests are NOT returned (an empty result never
         means 'no references'). Use search_code for those. Any hit must be
         confirmed with read_file before being relied on."""
+        blocked = _over_budget(ctx)
+        if blocked is not None:
+            return blocked
         checkout = ctx.base_dir if revision == "base" else ctx.head_dir
         args = {"symbol": symbol, "revision": revision}
         try:
@@ -174,6 +203,9 @@ def build_i2_tools(ctx: ReviewContext) -> list[Any]:
         """Heuristic related-file suggestions (same dir, name overlap, same
         extension) for the HEAD checkout. No evidence attached; confirm with
         read_file. Navigation aid only, never a finding source."""
+        blocked = _over_budget(ctx)
+        if blocked is not None:
+            return blocked
         args = {"path": path}
         try:
             result = i2_related_files(ctx.head_dir, path)
@@ -188,6 +220,9 @@ def build_i2_tools(ctx: ReviewContext) -> list[Any]:
         fallback is disabled; project docs must be read with read_file/
         search_code at an explicit revision. Returns not_found without a
         configured vendor cache."""
+        blocked = _over_budget(ctx)
+        if blocked is not None:
+            return blocked
         import os
         args = {"query": query, "package": package, "version": version}
         try:

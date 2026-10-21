@@ -287,3 +287,20 @@ def test_sink_is_durable_and_restores_without_double_debit(tmp_path: Path):
     restarted.restore_sink(sink)
     assert restarted.record_response("r1", _usage(in_tokens=100, out_tokens=10)) is False
     assert restarted.to_record()["usage"] == {"requests": 2, "input_tokens": 300, "output_tokens": 30}
+
+
+def test_sink_restore_applies_usage_unknown_corrections(tmp_path: Path):
+    from codatiel_i2.core.spend import SpendLedger
+
+    ledger = SpendLedger(rate={"input": 0.10, "output": 0.50}, rate_status="priced", ceiling_usd=5.0)
+    sink = tmp_path / "sink.jsonl"
+    ledger.attach_sink(sink)
+    ledger.record_response("r1", _usage(in_tokens=100, out_tokens=10))
+    ledger.mark_unknown("r1")
+    # Crash recovery must keep the unknown marking, not resurrect confirmed zeros.
+    restarted = SpendLedger(rate={"input": 0.10, "output": 0.50}, rate_status="priced", ceiling_usd=5.0)
+    restarted.restore_sink(sink)
+    record = restarted.to_record()
+    assert record["unknown_requests"] == 1
+    assert record["unknown_response_ids"] == ["r1"]
+    assert record["usd_estimate"] is None

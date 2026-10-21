@@ -91,7 +91,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "deliver-shadow":
         payload = cmd_deliver_shadow(args)
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-        return 0 if "transport_receipt" in payload else 1
+        receipt = payload.get("transport_receipt") or {}
+        delivered = (bool(receipt.get("parsed"))
+                     and not receipt.get("failed")
+                     and int(receipt.get("succeeded") or 0) == len(payload.get("to") or []))
+        return 0 if delivered else 1
     return 1
 
 
@@ -231,6 +235,7 @@ def cmd_review(args) -> dict:
     rate: dict[str, Any] = {}
     rate_status = "unconfirmed"
     model_settings = None
+    profile_ceiling: float | None = None
     if spec.startswith("scripted:"):
         try:
             model = service_mod.scripted_model_from_scenario(spec[len("scripted:"):])
@@ -249,17 +254,24 @@ def cmd_review(args) -> dict:
         model_name = f"{spec}:{resolved['model']}"
         rate = resolved["rate_usd_per_mtok"]
         rate_status = resolved["rate_status"]
+        profile_ceiling = resolved.get("max_usd_per_review")
     else:
         return {"status": "failed", "stage": "model",
                 "error": f"unsupported model {spec!r}: use scripted:<scenario.json> "
                          "or luna|haiku|gemma"}
+    if args.max_spend_usd is not None:
+        ceiling = args.max_spend_usd
+    elif profile_ceiling is not None:
+        ceiling = profile_ceiling
+    else:
+        ceiling = None
     kwargs: dict[str, Any] = {"model": model, "model_name": model_name,
                               "runs_root": args.runs_root,
                               "work_root": args.work_root,
                               "max_turns": args.max_turns,
                               "model_settings": model_settings,
                               "rate": rate, "rate_status": rate_status,
-                              "max_usd_per_review": args.max_spend_usd}
+                              "max_usd_per_review": ceiling}
     if args.repo_root and args.base and args.head:
         return service_mod.review_local(
             args.repo_root, args.base, args.head, **kwargs)

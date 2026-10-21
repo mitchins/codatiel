@@ -15,8 +15,14 @@ def run(cmd: list[str], cwd: Path | None = None, timeout: int = 60) -> subproces
 
     env = dict(_os.environ)
     # A scanner must never let caller environment reformat git output:
-    # GIT_EXTERNAL_DIFF can substitute arbitrary bytes into diffs.
-    env.pop("GIT_EXTERNAL_DIFF", None)
+    # GIT_EXTERNAL_DIFF can substitute arbitrary bytes into diffs. Repo-
+    # locating variables (GIT_DIR etc.) would let a caller redirect which
+    # object store `-C <repo>` actually reads. GIT_CEILING_DIRECTORIES is
+    # deliberately kept: it only restricts upward discovery (safer).
+    for var in ("GIT_EXTERNAL_DIFF", "GIT_DIR", "GIT_WORK_TREE",
+                "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR"):
+        env.pop(var, None)
     env["GIT_PAGER"] = "cat"
     return subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True,
                           text=True, timeout=timeout, env=env)

@@ -102,6 +102,7 @@ def diff_git_argv(base_sha: str, head_sha: str, path: str, context_lines: int) -
         raise ValueError(f"context_lines must be an int in 0..100, got {context_lines!r}")
     return ["-c", "core.quotePath=false", "-c", "diff.noprefix=false",
             "-c", "diff.mnemonicPrefix=false", "-c", "core.pager=cat",
+            "-c", "color.ui=false", "-c", "diff.algorithm=myers",
             "diff", "--no-ext-diff", "--no-textconv", f"-U{context_lines}",
             f"{base_sha}..{head_sha}", "--", path]
 
@@ -313,6 +314,10 @@ def replay_source_evidence(evidence: dict, *, base_checkout: Path | None = None,
         actual = "\n".join(lines[ls - 1:le])
         if sha256_text(actual) != evidence.get("content_digest"):
             return [f"excerpt does not match {revision} bytes at {path}:{ls}-{le} (base/head mismatch or stale excerpt)"]
+        # Belt-and-braces: the ID already binds the excerpt, but replay must
+        # independently tie the cited text to the revision bytes.
+        if actual != str(evidence.get("excerpt") or ""):
+            return [f"cited excerpt text differs from {revision} bytes at {path}:{ls}-{le}"]
         return []
     if kind == "file_state":
         fact = evidence.get("fact")

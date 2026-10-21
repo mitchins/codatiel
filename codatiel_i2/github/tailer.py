@@ -66,9 +66,17 @@ def scan_pr(repo: str, pr_number: int, runs_root: Path, scanner: str = "codatiel
         cmd += ["--head", head]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    except FileNotFoundError as exc:
+        # No scanner executable on PATH (e.g. no installed entry point):
+        # report the misconfiguration instead of crashing the tail run.
+        return {"returncode": 127, "stderr": f"scanner executable not found: {exc}",
+                "run_dir": "", "status": "scanner_missing"}
     except subprocess.TimeoutExpired as exc:
         return {"returncode": 124, "stderr": f"scanner timeout: {exc}",
                 "run_dir": "", "status": "timeout"}
+    except OSError as exc:
+        return {"returncode": 125, "stderr": f"scanner failed to launch: {type(exc).__name__}: {exc}",
+                "run_dir": "", "status": "scanner_error"}
     payload: Any = {}
     try:
         if proc.stdout.strip():

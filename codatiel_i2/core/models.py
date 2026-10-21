@@ -43,9 +43,15 @@ class ModelProfile:
     max_attempts: int = 3
 
     def api_key(self) -> str:
-        if self.api_key_env and os.environ.get(self.api_key_env):
-            return os.environ[self.api_key_env]
-        return os.environ.get("OPENAI_API_KEY", "")
+        # Only the profile's named credential env var is ever used. There is
+        # deliberately no fallback to OPENAI_API_KEY here: silently sending
+        # the operator's OpenAI secret as a Bearer token to a third-party
+        # local endpoint would be a credential leak. (This module is
+        # superseded by providers.py + runtime_sdk.py and has no live
+        # importers; the rule is enforced structurally, not by review.)
+        if self.api_key_env:
+            return os.environ.get(self.api_key_env, "")
+        return ""
 
 
 DEFAULT_PROFILES = [

@@ -78,18 +78,37 @@ class SpendLedger:
         return rows
 
     def restore_sink(self, path: Path) -> None:
-        """Merge sink entries without double-debiting already-known responses."""
+        """Merge sink entries without double-debiting already-known responses.
+
+        Correction rows (usage_known_correction) refer to an earlier row with
+        the same response_id; last row wins so a crash-restored ledger keeps
+        the unknown marking instead of resurrecting confirmed zero usage.
+        """
+        merged: dict[str, dict[str, Any]] = {}
         for row in self.load_sink_entries(path):
             key = str(row.get("response_id", ""))
-            if key and key not in self.entries:
-                self.entries[key] = {
+            if not key:
+                continue
+            if row.get("usage_known_correction"):
+                previous = merged.get(key, self.entries.get(key))
+                base_requests = int((previous or {}).get("requests", 1) or 1)
+                merged[key] = {"response_id": key, "requests": base_requests,
+                               "input_tokens": None, "output_tokens": None,
+                               "usage_known": False}
+            elif key not in merged and key not in self.entries:
+                merged[key] = {
                     "response_id": key,
                     "requests": int(row.get("requests", 1) or 1),
                     "input_tokens": row.get("input_tokens"),
                     "output_tokens": row.get("output_tokens"),
                     "usage_known": bool(row.get("usage_known", False)),
                 }
+        for key, entry in merged.items():
+            if key not in self.entries:
+                self.entries[key] = entry
                 self.order.append(key)
+            elif entry["usage_known"] is False:
+                self.entries[key] = entry
 
     def _append_sink(self, entry: dict[str, Any]) -> None:
         if not self.sink_path or self.sink_error:

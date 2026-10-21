@@ -91,6 +91,21 @@ Existing preserved checks:
   cannot manufacture proof;
 - `verified_proof` remains distinct and is never assigned to a model finding.
 
+## Revision-pair semantics (endpoint diffs, not merge-base)
+
+All changed-set computation, diff replay, and SHA binding use the exact
+recorded `base_sha..head_sha` endpoint pair. Merge-base-relative diffing is
+deliberately not used: it would change the review contract (and invalidate
+every frozen replay, which recomputes `base..head` byte-for-byte).
+
+Consequence: if live PR metadata re-resolves `base` after the base branch
+advanced, `diff base..head` can surface base-branch-only changes. The
+product handles this by pinning SHAs at workspace preparation, verifying
+checkout identity (`checkout_holds_sha`), and refusing to scan the wrong
+revision — the L-01 live-head drift precedent (drifted runs marked
+superseded, pinned reruns evaluated instead). A changed set is always the
+set between two pinned commits, never a moving tip.
+
 ## Aggregation, precedence, and result states
 
 - Every citation is validated and every failure is recorded.
