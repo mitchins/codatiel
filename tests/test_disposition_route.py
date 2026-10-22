@@ -144,8 +144,11 @@ def test_parse_failure_is_noted_not_lost(contradicting: dict,
         model=service_mod.scripted_model_from_scenario(scenario),
         model_name="scripted:m3", runs_root=tmp_path / "runs",
         work_root=tmp_path / "work")
-    assert out["status"] == "complete"
+    assert out["status"] == "unresolved_unparseable"
+    # Unparseable finals must be recorded as unresolved, not as correct silence
+    # (POST-02: model/provider output failure, not silence)
     shadow = json.loads(
         (Path(out["run_dir"]) / "shadow_result.json").read_text())
     assert shadow["investigation_notes"], "parse failure must be recorded"
     assert shadow["silence"] is None
+    assert shadow["status"] == "unresolved_unparseable"
