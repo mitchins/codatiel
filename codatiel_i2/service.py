@@ -48,6 +48,11 @@ INSTRUCTIONS_VERSION = (
     "v1.0-draft; REVIEWER_INVESTIGATION_GUIDEBOOK v1.0-draft)"
 )
 
+# Constants for trace artifacts — avoids Sonar literal duplication
+_TRANSCRIPT_SCHEMA = "codatiel_i2.transcript.v1"
+_SHADOW_SCHEMA = "codatiel_i2.shadow_result.v1"
+_RUN_SCHEMA = "codatiel_i2.run.v1"
+
 CANONICAL_INSTRUCTIONS = """You are Codatiel I2, a self-hosted semantic regression \
 scanner. Scope: contracts, authorization, docs_code, operating_constraints, \
 semantic_twins regressions only. No style, naming, or general advice.
@@ -114,6 +119,19 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                        max_usd_per_review=max_usd_per_review,
                        tool_budget=tool_budget,
                        pr_number=pr)
+
+
+def _collect_provider_termination(model: Any) -> dict[str, str]:
+    """Collect provider stop_reason map from model and wrapped model."""
+    out: dict[str, str] = {}
+    for mdl in (model, getattr(model, "_model", None) if model is not None else None):
+        if mdl is None:
+            continue
+        for attr in ("_termination_by_response", "termination_by_response"):
+            bucket = getattr(mdl, attr, None)
+            if isinstance(bucket, dict) and bucket:
+                out.update(bucket)
+    return out
 
 
 def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
@@ -293,18 +311,7 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     candidates["docs_code"] = det_candidates
     # Provider termination reasons (end_turn, tool_use, max_tokens, etc.)
     # are recorded as local metadata from the adapter, not inferred from usage.
-    termination_by_response = {}
-    for attr in ("_termination_by_response", "termination_by_response"):
-        bucket = getattr(model, attr, None)
-        if isinstance(bucket, dict) and bucket:
-            termination_by_response = dict(bucket)
-            break
-    # Also check the wrapped model if UsageRecordingModel
-    wrapped = getattr(model, "_model", None)
-    for attr in ("_termination_by_response", "termination_by_response"):
-        bucket = getattr(wrapped, attr, None) if wrapped is not None else None
-        if isinstance(bucket, dict) and bucket:
-            termination_by_response.update(bucket)
+    termination_by_response = _collect_provider_termination(model)
     runs_mod.write_run(
         run_dir=run_dir, scan_key=scan_key, run_id=run_id, repo=ws.repo,
         base_sha=base_sha, head_sha=head_sha, config=config,
@@ -907,20 +914,11 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
         metrics["tool_calls"] = len(tool_calls)
         metrics["evidence_count"] = len(tool_evidence)
     # Preserve provider termination reasons even on failed runs
-    termination_by_response = {}
-    # Try to get termination from the model object (including wrapped)
-    for mdl in (model_obj, getattr(model_obj, "_model", None) if model_obj is not None else None):
-        if mdl is not None:
-            bucket = getattr(mdl, "_termination_by_response", None)
-            if isinstance(bucket, dict) and bucket:
-                termination_by_response.update(bucket)
-            bucket2 = getattr(mdl, "termination_by_response", None)
-            if isinstance(bucket2, dict) and bucket2:
-                termination_by_response.update(bucket2)
+    termination_by_response = _collect_provider_termination(model_obj)
     _finalize_spend_ledger(active, run_dir)
 
     write_json(run_dir / "run.json",
-               {"schema_version": "codatiel_i2.run.v1",
+               {"schema_version": _RUN_SCHEMA,
                 "run_id": run_id, "scan_key": scan_key, "config": config,
                 "repo": ws.repo, "base_sha": ws.base_sha,
                 "head_sha": ws.head_sha,
@@ -949,11 +947,11 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
     write_jsonl(run_dir / "tool_calls.jsonl", tool_calls)
     if transcript_items:
         write_json(run_dir / "transcript.json",
-                   {"schema_version": "codatiel_i2.transcript.v1",
+                   {"schema_version": _TRANSCRIPT_SCHEMA,
                     "items": transcript_items})
     else:
         write_json(run_dir / "transcript.json",
-                   {"schema_version": "codatiel_i2.transcript.v1",
+                   {"schema_version": _TRANSCRIPT_SCHEMA,
                     "items": []})
     if tool_outputs:
         write_jsonl(run_dir / "tool_outputs.jsonl", tool_outputs)
@@ -963,7 +961,7 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
     write_jsonl(run_dir / "findings.jsonl", [])
     write_jsonl(run_dir / "observations.jsonl", [])
     write_json(run_dir / "shadow_result.json",
-                   {"schema_version": "codatiel_i2.shadow_result.v1",
+                   {"schema_version": _SHADOW_SCHEMA,
                     "mode": "shadow", "post_to_github": False,
                     "status": status, "stage": stage, "error": error,
                     "advisory": [], "unresolved": [], "observations": [],
