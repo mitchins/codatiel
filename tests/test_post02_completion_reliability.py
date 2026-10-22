@@ -21,6 +21,26 @@ agents = pytest.importorskip("agents")
 from codatiel_i2 import runtime_sdk, service as service_mod  # noqa: E402
 from codatiel_i2.core.spend import SpendLedger  # noqa: E402
 
+# Shared Haiku mock helpers — defined once to avoid Sonar duplication
+class _HaikuMockContent:
+    def __init__(self, type, **kw):
+        self.type = type
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+class _HaikuMockUsage:
+    input_tokens = 100
+    output_tokens = 100
+    cache_creation_input_tokens = 0
+    cache_read_input_tokens = 0
+
+class _HaikuMockResponse:
+    def __init__(self, content, id, stop_reason="end_turn"):
+        self.content = content
+        self.id = id
+        self.usage = _HaikuMockUsage()
+        self.stop_reason = stop_reason
+
 
 def _repo(tmp_path: Path) -> dict:
     root = tmp_path / "repo"
@@ -436,25 +456,7 @@ def test_haiku_full_path_with_adapter(tmp_path: Path, monkeypatch):
     """
     repo = _repo(tmp_path)
 
-    # Mock Anthropic client to return a controlled response sequence
-    class _MockContent:
-        def __init__(self, type, **kw):
-            self.type = type
-            for k, v in kw.items():
-                setattr(self, k, v)
-
-    class _MockUsage:
-        input_tokens = 100
-        output_tokens = 100
-        cache_creation_input_tokens = 0
-        cache_read_input_tokens = 0
-
-    class _MockResponse:
-        def __init__(self, content, id="resp_test"):
-            self.content = content
-            self.id = id
-            self.usage = _MockUsage()
-            self.stop_reason = "end_turn"
+    # Mock Anthropic client to return a controlled response sequence (uses shared helpers)
 
     mock_client = type("MockClient", (), {})()
     # First call: tool use, second call: prose+JSON final
@@ -464,21 +466,18 @@ def test_haiku_full_path_with_adapter(tmp_path: Path, monkeypatch):
         nonlocal call_count
         call_count += 1
         messages = kwargs.get("messages", [])
-        # Check if this is a tool-result continuation (has tool_result in last message)
         has_tool_result = any(
             any(c.get("type") == "tool_result" for c in (m.get("content") or [] if isinstance(m.get("content"), list) else []))
             for m in messages if m.get("role") == "user"
         )
         if not has_tool_result:
-            # First turn: return tool_use
-            return _MockResponse([
-                _MockContent("tool_use", id="toolu_123", name="read_file", input={"path": "a.py", "revision": "head"}),
-            ])
+            return _HaikuMockResponse([
+                _HaikuMockContent("tool_use", id="toolu_123", name="read_file", input={"path": "a.py", "revision": "head"}),
+            ], id="resp_1", stop_reason="tool_use")
         else:
-            # Second turn: return prose+JSON (the deterministic repair case)
-            return _MockResponse([
-                _MockContent("text", text='I checked a.py at HEAD. No regression.\n\n{"status": "silence", "summary": "Checked a.py, no regression", "findings": []}'),
-            ])
+            return _HaikuMockResponse([
+                _HaikuMockContent("text", text='I checked a.py at HEAD. No regression.\n\n{"status": "silence", "summary": "Checked a.py, no regression", "findings": []}'),
+            ], id="resp_3", stop_reason="end_turn")
 
     mock_client.messages = type("obj", (object,), {"create": mock_create})()
 
@@ -514,25 +513,6 @@ def test_haiku_termination_persisted_on_complete_and_on_exhaustion(tmp_path: Pat
     """
     repo = _repo(tmp_path)
 
-    class _MockContent:
-        def __init__(self, type, **kw):
-            self.type = type
-            for k, v in kw.items():
-                setattr(self, k, v)
-
-    class _MockUsage:
-        input_tokens = 100
-        output_tokens = 100
-        cache_creation_input_tokens = 0
-        cache_read_input_tokens = 0
-
-    class _MockResponse:
-        def __init__(self, content, id, stop_reason):
-            self.content = content
-            self.id = id
-            self.usage = _MockUsage()
-            self.stop_reason = stop_reason
-
     # Complete path: 2 tool_use turns then end_turn final
     call = 0
 
@@ -540,11 +520,11 @@ def test_haiku_termination_persisted_on_complete_and_on_exhaustion(tmp_path: Pat
         nonlocal call
         call += 1
         if call == 1:
-            return _MockResponse([_MockContent("tool_use", id="toolu_1", name="read_file", input={"path": "a.py", "revision": "head"})], id="resp_1", stop_reason="tool_use")
+            return _HaikuMockResponse([_HaikuMockContent("tool_use", id="toolu_1", name="read_file", input={"path": "a.py", "revision": "head"})], id="resp_1", stop_reason="tool_use")
         elif call == 2:
-            return _MockResponse([_MockContent("tool_use", id="toolu_2", name="diff_window", input={"path": "a.py"})], id="resp_2", stop_reason="tool_use")
+            return _HaikuMockResponse([_HaikuMockContent("tool_use", id="toolu_2", name="diff_window", input={"path": "a.py"})], id="resp_2", stop_reason="tool_use")
         else:
-            return _MockResponse([_MockContent("text", text='{"status": "silence", "summary": "Checked a.py at HEAD, no regression", "findings": []}')], id="resp_3", stop_reason="end_turn")
+            return _HaikuMockResponse([_HaikuMockContent("text", text='{"status": "silence", "summary": "Checked a.py at HEAD, no regression", "findings": []}')], id="resp_3", stop_reason="end_turn")
 
     mock_client = type("MockClient", (), {})()
     mock_client.messages = type("obj", (object,), {"create": mock_create_complete})()
@@ -571,23 +551,15 @@ def test_haiku_termination_persisted_on_complete_and_on_exhaustion(tmp_path: Pat
     async def mock_create_exhaust(*args, **kwargs):
         nonlocal call2
         call2 += 1
-        return _MockResponse([_MockContent("tool_use", id=f"toolu_{call2}", name="read_file", input={"path": "a.py", "revision": "head"})], id=f"resp_{call2}", stop_reason="tool_use")
+        return _HaikuMockResponse([_HaikuMockContent("tool_use", id=f"toolu_{call2}", name="read_file", input={"path": "a.py", "revision": "head"})], id=f"resp_{call2}", stop_reason="tool_use")
 
     mock_client2 = type("MockClient", (), {})()
     mock_client2.messages = type("obj", (object,), {"create": mock_create_exhaust})()
-    # Fresh repo for exhaustion path
-    import subprocess
-    root2 = tmp_path / "repo2"
-    root2.mkdir()
-    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
-        subprocess.run(["git", "-C", root2, *args], check=True)
-    (root2 / "a.py").write_text("x = 1\n")
-    subprocess.run(["git", "-C", root2, "add", "."], check=True)
-    subprocess.run(["git", "-C", root2, "commit", "-qm", "b"], check=True)
-    base2 = subprocess.run(["git", "-C", root2, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
-    (root2 / "a.py").write_text("x = 2\n")
-    subprocess.run(["git", "-C", root2, "commit", "-qam", "h"], check=True)
-    head2 = subprocess.run(["git", "-C", root2, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    # Fresh repo for exhaustion path — reuse helper with isolated parent
+    second_parent = tmp_path / "haiku_exhaust_parent"
+    second_parent.mkdir(parents=True, exist_ok=True)
+    repo2b = _repo(second_parent)
+    root2, base2, head2 = repo2b["root"], repo2b["base"], repo2b["head"]
 
     call2 = 0
     with mock.patch("anthropic.AsyncAnthropic", return_value=mock_client2):
