@@ -211,18 +211,25 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
             model_settings=model_settings, usage_ledger=ledger)
     except Exception as exc:
         # Turn-budget exhaustion is a controlled incomplete state, not a
-        # failure. Name-checked to avoid importing the SDK on this path.
-        if type(exc).__name__ == "MaxTurnsExceeded":
+        # failure. Preserve incremental trace (tool calls, evidence, etc.)
+        # instead of replacing it with an abbreviated record.
+        is_budget_exhausted = type(exc).__name__ == "MaxTurnsExceeded"
+        if is_budget_exhausted:
+            partial_result = getattr(exc, "run_data", None)
             return _write_failed_run(
                 runs_root, ws, changes, classification, model_name, max_turns,
                 rate or {}, rate_status, ceiling, ledger, stage="budget_exhausted",
                 error=f"turn budget exhausted after {max_turns} turns; "
                       "investigation incomplete, not a review",
-                status="incomplete_budget_exhausted")
+                status="incomplete_budget_exhausted",
+                ctx=ctx, partial_result=partial_result, model_obj=recorded_model)
+        # For other agent failures, try to preserve partial trace if available
+        partial_result = getattr(exc, "run_data", None)
         return _write_failed_run(
             runs_root, ws, changes, classification, model_name, max_turns,
             rate or {}, rate_status, ceiling, ledger, stage="agent",
-            error=f"{type(exc).__name__}: {exc}")
+            error=f"{type(exc).__name__}: {exc}",
+            ctx=ctx, partial_result=partial_result, model_obj=recorded_model)
 
     tool_evidence = _harvest_tool_evidence(result)
     tool_outputs = _harvest_tool_outputs(result)
@@ -241,7 +248,31 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     tool_calls = [{"tool": e["tool"], "args": e["args"],
                    "summary": e["summary"]} for e in ctx.tool_log]
     zero_tools = not tool_calls
-    status = "complete" if not zero_tools else "incomplete_no_tool_use"
+    # Terminal-state propagation: empty/unparseable/invalid finals must not
+    # silently become `complete` or `correct silence`. They are `unresolved`
+    # with explicit parse_errors preserved.
+    has_empty_final = any("empty final output" in e for e in parse_errors)
+    has_unparseable = any("unparseable" in e for e in parse_errors)
+    has_repaired = any("repaired_trailing_json" in e for e in parse_errors)
+    is_unresolved_final = parsed.get("status") not in ("finding", "silence")
+    if has_empty_final:
+        # Empty final is always unresolved, regardless of tool count
+        # (zero-tools case is already incomplete_no_tool_use, but empty with
+        # tools should not be complete)
+        if not zero_tools:
+            status = "unresolved_empty_final"
+        else:
+            status = "incomplete_no_tool_use"
+    elif is_unresolved_final:
+        # Invalid status, array, or missing findings: always unresolved,
+        # even if repaired (repaired invalid JSON is still invalid)
+        status = "unresolved_unparseable"
+    elif has_unparseable and not has_repaired:
+        status = "unresolved_unparseable"
+    elif zero_tools:
+        status = "incomplete_no_tool_use"
+    else:
+        status = "complete"
     metrics = {"service_version": SERVICE_VERSION,
                "instructions_version": INSTRUCTIONS_VERSION,
                "model": model_name, "max_turns": max_turns,
@@ -260,6 +291,20 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     coverage.update(det_coverage)
     candidates = {d: [] for d in runs_mod.CANDIDATE_FILES}
     candidates["docs_code"] = det_candidates
+    # Provider termination reasons (end_turn, tool_use, max_tokens, etc.)
+    # are recorded as local metadata from the adapter, not inferred from usage.
+    termination_by_response = {}
+    for attr in ("_termination_by_response", "termination_by_response"):
+        bucket = getattr(model, attr, None)
+        if isinstance(bucket, dict) and bucket:
+            termination_by_response = dict(bucket)
+            break
+    # Also check the wrapped model if UsageRecordingModel
+    wrapped = getattr(model, "_model", None)
+    for attr in ("_termination_by_response", "termination_by_response"):
+        bucket = getattr(wrapped, attr, None) if wrapped is not None else None
+        if isinstance(bucket, dict) and bucket:
+            termination_by_response.update(bucket)
     runs_mod.write_run(
         run_dir=run_dir, scan_key=scan_key, run_id=run_id, repo=ws.repo,
         base_sha=base_sha, head_sha=head_sha, config=config,
@@ -273,6 +318,7 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                       "usage": spend.get("usage", {}),
                       "thinking_blocks_seen": int(getattr(
                           model, "thinking_blocks_seen", 0) or 0),
+                      "provider_termination_by_response": termination_by_response,
                       "reasoning_summary": None,
                       "reasoning_summary_note": "no backend exposes provider "
                       "reasoning summaries; provider-private thinking is "
@@ -349,18 +395,89 @@ def _harvest_tool_evidence(result: Any) -> list[dict]:
     return ledger
 
 
+def _extract_trailing_json(text: str) -> tuple[dict | None, str | None]:
+    """Deterministic repair: extract a valid JSON object from trailing prose+JSON.
+
+    Only for demonstrably equivalent representations where the provider returned
+    a valid JSON object after prose (e.g., "I checked...\\n\\n{\"status\": ...}").
+    Returns (parsed_dict, raw_json_text) or (None, None) if no valid trailing
+    JSON object found. Never invents findings or evidence.
+
+    Uses JSONDecoder to respect string contents (braces inside strings are
+    not counted as structure), and only repairs the trailing JSON object,
+    not an earlier one when the final is malformed.
+    """
+    decoder = json.JSONDecoder()
+    # Find the last occurrence of a JSON object start that looks like a review
+    # final (must contain "status" to avoid matching incidental braces in prose)
+    last_start = text.rfind('{"status"')
+    if last_start == -1:
+        last_start = text.rfind('{"status" :')
+        if last_start == -1:
+            last_start = text.rfind("{")
+            if last_start == -1:
+                return None, None
+    candidate = text[last_start:].strip()
+    # Try to parse candidate directly (covers prose+JSON where JSON is at end)
+    try:
+        parsed, end = decoder.raw_decode(candidate)
+        if isinstance(parsed, dict) and "status" in parsed:
+            trailing = candidate[end:].strip()
+            if not trailing:
+                return parsed, candidate[:end].strip()
+            # If there is trailing content after JSON, this is not a clean
+            # trailing repair (e.g., earlier example + truncated final)
+            return None, None
+    except ValueError:
+        pass
+    # Fallback: scan for the last valid JSON object that is at the end (trailing)
+    last_valid = None
+    idx = 0
+    while idx < len(text):
+        try:
+            parsed, end = decoder.raw_decode(text, idx)
+            if isinstance(parsed, dict) and "status" in parsed:
+                remaining = text[idx + end :].strip()
+                if not remaining:
+                    last_valid = (parsed, text[idx : idx + end].strip())
+            idx += end
+        except ValueError:
+            idx += 1
+            continue
+        while idx < len(text) and text[idx].isspace():
+            idx += 1
+    if last_valid is not None:
+        return last_valid
+    return None, None
+
+
 def _parse_model_output(final: Any) -> tuple[dict, list[str]]:
     errors: list[str] = []
+    transformation: str | None = None
     if not isinstance(final, str) or not final.strip():
         return {"status": "incomplete", "findings": []}, ["empty final output"]
     text = final.strip()
+    raw_text = text  # Preserve raw for transformation record
     if text.startswith("```"):
         text = text.split("\n", 1)[1] if "\n" in text else ""
         text = text.rsplit("```", 1)[0]
+        text = text.strip()
+        transformation = "fence_strip"
     try:
         parsed = json.loads(text)
+        if transformation:
+            errors.append(f"fence_strip: removed ``` fences (raw length {len(raw_text)}, stripped length {len(text)})")
     except ValueError as exc:
-        return {"status": "unresolved", "findings": []}, [f"unparseable: {exc}"]
+        # Deterministic repair: try trailing JSON extraction (prose+JSON)
+        trailing_parsed, trailing_raw = _extract_trailing_json(text)
+        if trailing_parsed is not None:
+            parsed = trailing_parsed
+            errors.append(f"repaired_trailing_json: extracted valid JSON object from prose+JSON (raw length {len(raw_text)}, json length {len(trailing_raw or '')})")
+            if transformation:
+                errors.append(f"fence_strip: removed ``` fences (raw length {len(raw_text)}, stripped length {len(text)})")
+            # Do not treat as unparseable; the repair is explicit and preserved
+        else:
+            return {"status": "unresolved", "findings": []}, [f"unparseable: {exc}"]
     if not isinstance(parsed, dict):
         return {"status": "unresolved", "findings": []}, ["final output not an object"]
     if parsed.get("status") not in ("finding", "silence"):
@@ -737,8 +854,16 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                       rate: dict[str, Any], rate_status: str, ceiling: float,
                       ledger: SpendLedger | None, *, stage: str,
                       error: str,
-                      status: str = "failed") -> dict[str, Any]:
-    """Minimal immutable record for runs that die before disposition."""
+                      status: str = "failed",
+                      ctx: Any | None = None,
+                      partial_result: Any | None = None,
+                      model_obj: Any | None = None) -> dict[str, Any]:
+    """Minimal immutable record for runs that die before disposition.
+
+    When a partial trace is available (e.g., MaxTurnsExceeded with tool calls
+    and evidence), finalize it instead of replacing it with an abbreviated
+    record. Preserves tool calls, evidence, and investigation progress.
+    """
     from codatiel_i2.common import time as time_mod
 
     active = ledger if ledger is not None else SpendLedger(
@@ -749,11 +874,49 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
     scan_key = runs_mod.scan_key_for(ws.repo, ws.base_sha, ws.head_sha, config)
     run_id = runs_mod.new_run_id()
     run_dir = runs_mod.new_run_dir(Path(runs_root), scan_key, run_id)
+
+    # Try to harvest partial trace if available (incremental persistence)
+    tool_evidence: list[dict] = []
+    tool_outputs: list[dict] = []
+    tool_calls: list[dict] = []
+    transcript_items: list[dict] = []
+    if ctx is not None:
+        tool_calls = [{"tool": e["tool"], "args": e["args"],
+                       "summary": e["summary"]} for e in getattr(ctx, "tool_log", [])]
+        # Harvest from partial_result if available (contains new_items with tool outputs)
+        if partial_result is not None:
+            try:
+                tool_evidence = _harvest_tool_evidence(partial_result)
+                tool_outputs = _harvest_tool_outputs(partial_result)
+                transcript_items = _serialize_items(partial_result)
+            except Exception:
+                pass
+        # Fallback: try to harvest from ctx if partial_result not available
+        if not tool_evidence and hasattr(ctx, "tool_log"):
+            # Evidence is already in tool_log summaries, but we need full evidence
+            # The ledger's evidence is in tool_outputs, which we already tried
+            pass
+
     metrics = {"service_version": SERVICE_VERSION,
                "instructions_version": INSTRUCTIONS_VERSION,
                "model": model_name, "status": status, "stage": stage,
                "error": error,
-                "spend": _spend_record(active, model_name, completed=False)}
+                 "spend": _spend_record(active, model_name, completed=False)}
+    # Preserve investigation progress: tool calls and evidence count
+    if tool_calls:
+        metrics["tool_calls"] = len(tool_calls)
+        metrics["evidence_count"] = len(tool_evidence)
+    # Preserve provider termination reasons even on failed runs
+    termination_by_response = {}
+    # Try to get termination from the model object (including wrapped)
+    for mdl in (model_obj, getattr(model_obj, "_model", None) if model_obj is not None else None):
+        if mdl is not None:
+            bucket = getattr(mdl, "_termination_by_response", None)
+            if isinstance(bucket, dict) and bucket:
+                termination_by_response.update(bucket)
+            bucket2 = getattr(mdl, "termination_by_response", None)
+            if isinstance(bucket2, dict) and bucket2:
+                termination_by_response.update(bucket2)
     _finalize_spend_ledger(active, run_dir)
 
     write_json(run_dir / "run.json",
@@ -765,6 +928,51 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                 "workspace": ws.to_dict(), "status": status,
                 "stage": stage, "error": error})
     write_json(run_dir / "metrics.json", metrics)
+    # Write model_calls with provider termination even on failed runs
+    # (for Haiku, this distinguishes end_turn vs tool_use vs max_tokens)
+    model_calls = [{"model": model_name, "max_turns": max_turns,
+                    "scripted": model_name.startswith("scripted:"),
+                    "usage": _spend_record(active, model_name, completed=False).get("usage", {}),
+                    "thinking_blocks_seen": int(getattr(model_obj, "thinking_blocks_seen", 0) or 0) if model_obj is not None else 0,
+                    "provider_termination_by_response": termination_by_response,
+                    "reasoning_summary": None,
+                    "reasoning_summary_note": "no backend exposes provider reasoning summaries; provider-private thinking is counted, never claimed"}]
+    # Also check wrapped model for thinking_blocks_seen
+    if model_obj is not None and hasattr(model_obj, "_model"):
+        wrapped_thinking = getattr(model_obj._model, "thinking_blocks_seen", None)
+        if isinstance(wrapped_thinking, int) and wrapped_thinking:
+            model_calls[0]["thinking_blocks_seen"] = wrapped_thinking
+    write_jsonl(run_dir / "model_calls.jsonl", model_calls)
+    # Finalize partial trace instead of replacing with abbreviated record
+    if tool_calls or tool_evidence or transcript_items:
+        # Write partial evidence and tool traces
+        write_jsonl(run_dir / "evidence.jsonl", tool_evidence)
+        write_jsonl(run_dir / "tool_calls.jsonl", tool_calls)
+        if transcript_items:
+            write_json(run_dir / "transcript.json",
+                       {"schema_version": "codatiel_i2.transcript.v1",
+                        "items": transcript_items})
+        else:
+            write_json(run_dir / "transcript.json",
+                       {"schema_version": "codatiel_i2.transcript.v1",
+                        "items": []})
+        if tool_outputs:
+            write_jsonl(run_dir / "tool_outputs.jsonl", tool_outputs)
+        else:
+            write_jsonl(run_dir / "tool_outputs.jsonl", [])
+        # Write empty findings/observations to indicate incomplete, not silence
+        write_jsonl(run_dir / "findings.jsonl", [])
+        write_jsonl(run_dir / "observations.jsonl", [])
+        write_json(run_dir / "shadow_result.json",
+                   {"schema_version": "codatiel_i2.shadow_result.v1",
+                    "mode": "shadow", "post_to_github": False,
+                    "status": status, "stage": stage, "error": error,
+                    "advisory": [], "unresolved": [], "observations": [],
+                    "silence": None,
+                    "investigation_notes": [error],
+                    "counts": {"verified_proof": 0, "advisory_grounded": 0,
+                               "observed_not_material": 0, "unresolved": 0,
+                               "refuted_unsupported": 0, "rejected_invalid": 0}})
     return {"status": status, "stage": stage, "error": error,
             "run_dir": str(run_dir), "run_id": run_id,
             "service_version": SERVICE_VERSION}
