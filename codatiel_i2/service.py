@@ -241,15 +241,16 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     tool_calls = [{"tool": e["tool"], "args": e["args"],
                    "summary": e["summary"]} for e in ctx.tool_log]
     zero_tools = not tool_calls
-    # Terminal-state propagation: empty/unparseable finals must not silently
-    # become `complete` or `correct silence`. They are `unresolved` with
-    # explicit parse_errors preserved.
+    # Terminal-state propagation: empty/unparseable/invalid finals must not
+    # silently become `complete` or `correct silence`. They are `unresolved`
+    # with explicit parse_errors preserved.
     has_empty_final = any("empty final output" in e for e in parse_errors)
     has_unparseable = any("unparseable" in e for e in parse_errors)
     has_repaired = any("repaired_trailing_json" in e for e in parse_errors)
+    is_unresolved_final = parsed.get("status") not in ("finding", "silence")
     if has_empty_final and not zero_tools:
         status = "unresolved_empty_final"
-    elif has_unparseable and not has_repaired:
+    elif (has_unparseable or is_unresolved_final) and not has_repaired:
         status = "unresolved_unparseable"
     elif zero_tools:
         status = "incomplete_no_tool_use"
@@ -369,45 +370,50 @@ def _extract_trailing_json(text: str) -> tuple[dict | None, str | None]:
     a valid JSON object after prose (e.g., "I checked...\\n\\n{\"status\": ...}").
     Returns (parsed_dict, raw_json_text) or (None, None) if no valid trailing
     JSON object found. Never invents findings or evidence.
+
+    Uses JSONDecoder to respect string contents (braces inside strings are
+    not counted as structure), and only repairs the trailing JSON object,
+    not an earlier one when the final is malformed.
     """
+    decoder = json.JSONDecoder()
     # Find the last occurrence of a JSON object start that looks like a review
     # final (must contain "status" to avoid matching incidental braces in prose)
     last_start = text.rfind('{"status"')
     if last_start == -1:
-        # Fallback: try any JSON object start, but require "status" in parsed result
-        last_start = text.rfind("{")
+        last_start = text.rfind('{"status" :')
         if last_start == -1:
-            return None, None
+            last_start = text.rfind("{")
+            if last_start == -1:
+                return None, None
     candidate = text[last_start:].strip()
     # Try to parse candidate directly (covers prose+JSON where JSON is at end)
     try:
-        parsed = json.loads(candidate)
+        parsed, end = decoder.raw_decode(candidate)
         if isinstance(parsed, dict) and "status" in parsed:
-            return parsed, candidate
+            trailing = candidate[end:].strip()
+            if not trailing:
+                return parsed, candidate[:end].strip()
+            # If there is trailing content after JSON, this is not a clean
+            # trailing repair (e.g., earlier example + truncated final)
+            return None, None
     except ValueError:
         pass
-    # If direct parse fails (e.g., JSON followed by trailing prose), try to
-    # find a balanced JSON object by scanning for the last valid one
-    # This handles cases where JSON is in the middle, not at end
+    # Fallback: scan for the last valid JSON object that is at the end (trailing)
     last_valid = None
-    depth = 0
-    start = -1
-    for i, ch in enumerate(text):
-        if ch == "{":
-            if depth == 0:
-                start = i
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0 and start != -1:
-                cand = text[start : i + 1]
-                try:
-                    p = json.loads(cand)
-                    if isinstance(p, dict) and "status" in p:
-                        last_valid = (p, cand)
-                except ValueError:
-                    pass
-                start = -1
+    idx = 0
+    while idx < len(text):
+        try:
+            parsed, end = decoder.raw_decode(text, idx)
+            if isinstance(parsed, dict) and "status" in parsed:
+                remaining = text[idx + end :].strip()
+                if not remaining:
+                    last_valid = (parsed, text[idx : idx + end].strip())
+            idx += end
+        except ValueError:
+            idx += 1
+            continue
+        while idx < len(text) and text[idx].isspace():
+            idx += 1
     if last_valid is not None:
         return last_valid
     return None, None
@@ -427,12 +433,16 @@ def _parse_model_output(final: Any) -> tuple[dict, list[str]]:
         transformation = "fence_strip"
     try:
         parsed = json.loads(text)
+        if transformation:
+            errors.append(f"fence_strip: removed ``` fences (raw length {len(raw_text)}, stripped length {len(text)})")
     except ValueError as exc:
         # Deterministic repair: try trailing JSON extraction (prose+JSON)
         trailing_parsed, trailing_raw = _extract_trailing_json(text)
         if trailing_parsed is not None:
             parsed = trailing_parsed
             errors.append(f"repaired_trailing_json: extracted valid JSON object from prose+JSON (raw length {len(raw_text)}, json length {len(trailing_raw or '')})")
+            if transformation:
+                errors.append(f"fence_strip: removed ``` fences (raw length {len(raw_text)}, stripped length {len(text)})")
             # Do not treat as unparseable; the repair is explicit and preserved
         else:
             return {"status": "unresolved", "findings": []}, [f"unparseable: {exc}"]
