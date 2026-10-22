@@ -448,6 +448,11 @@ class HaikuModel(_SDKModel):
         # Provider responses that arrived with no usable usage payload. The
         # spend ledger must treat these as unknown, never as confirmed zero.
         self._unknown_usage_response_ids: set[str] = set()
+        # Provider termination reasons per response_id (end_turn, tool_use,
+        # max_tokens, etc.) — recorded as local provider metadata, not SDK
+        # state. Distinguishes: completed with final, issued tool calls,
+        # reached output-token limit, returned empty.
+        self._termination_by_response: dict[str, str] = {}
 
     def _sdk_tools_to_anthropic(self, tools: Any) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
@@ -489,6 +494,11 @@ class HaikuModel(_SDKModel):
                 raise
             kwargs.pop("output_config", None)
             resp = await self._client.messages.create(**kwargs)
+        # Preserve provider termination reason (end_turn, tool_use, max_tokens,
+        # etc.) as local metadata. Do not infer max_tokens from usage.
+        stop_reason = getattr(resp, "stop_reason", None)
+        if isinstance(stop_reason, str) and stop_reason:
+            self._termination_by_response[str(resp.id)] = stop_reason
         thinking_here: list[dict[str, Any]] = []
         texts: list[str] = []
         output: list[Any] = []
