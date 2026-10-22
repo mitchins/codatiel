@@ -72,6 +72,54 @@ Final message must be one JSON object, no other text:
 For silence: {"status": "silence", "summary": "what you checked", "findings": []}.
 A claim without tool evidence is not a finding."""
 
+# M9 challenger: impact-path investigation. Same scope and tools, different
+# investigative discipline. Organize around plausible behavioral regressions:
+# Changed behavior → affected consumer/contract → triggering condition →
+# observable failure → developer impact. Prioritize behavioral changes,
+# changed contracts, callers/callees, state transitions, boundary conditions,
+# and integration consequences over file-coverage. Form 2-3 concrete
+# hypotheses ranked by materiality/plausibility, direct tools to confirm or
+# falsify each, spend budget on promising paths, abandon weak hypotheses when
+# contradictory evidence appears. For obvious, directly evidenced bugs, do not
+# require an artificial minimum number of tool calls or cross-file investigation.
+CHALLENGER_INSTRUCTIONS = """You are Codatiel I2, impact-path reviewer. Scope: \
+contracts, authorization, docs_code, operating_constraints, semantic_twins \
+only. No style or naming.
+
+Investigate by forming and testing behavioral regression hypotheses. For each \
+plausible risk, articulate: Changed behavior → affected consumer or contract \
+→ triggering condition (input/state/path) → observable failure → \
+developer-relevant impact. Prioritize behavioral changes, changed contracts, \
+callers/callees, state transitions, boundary conditions, and integration \
+consequences. Rank 2-3 concrete hypotheses by materiality and plausibility and \
+direct read_file/diff_window/search_code/find_definition/find_callers at the \
+pinned BASE and HEAD to confirm or falsify each. Spend budget on promising \
+paths; abandon weak hypotheses when contradictory evidence appears. Do not \
+require an artificial minimum number of tool calls or cross-file investigation \
+for an obvious, directly evidenced defect. Do not assert file contents you have \
+not read.
+
+For each confirmed material regression, the finding must establish where \
+relevant: what changed, the triggering condition, what breaks and why it \
+matters, revision-bound evidence, and a useful location with correction \
+direction.
+
+Final message must be one JSON object, no other text:
+{"status": "finding"|"silence", "summary": "...", "findings": [{"detector": \
+"contracts|authorization|docs_code|operating_constraints|semantic_twins", \
+"title": "...", "path": "repo-relative path", "revision": "base|head", \
+"line_start": 1, "line_end": 1, "claim": "what changed, triggering condition, \
+what breaks and why it matters", "evidence_ids": ["ev_... tool evidence ids"]}]}
+
+For silence: {"status": "silence", "summary": "what you checked and why no \
+material regression is present", "findings": []}. A claim without tool evidence \
+is not a finding."""
+
+CHALLENGER_INSTRUCTIONS_VERSION = (
+    "challenger-impact-path-0.1 (AGENTS.md; REVIEWER_OUTPUT_CONTRACT "
+    "v1.0-draft; REVIEWER_INVESTIGATION_GUIDEBOOK v1.0-draft; M9)"
+)
+
 
 def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                  model_name: str, runs_root: Path | str,
@@ -80,7 +128,8 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                  rate: dict[str, Any] | None = None,
                  rate_status: str = "unconfirmed",
                  max_usd_per_review: float | None = None,
-                 tool_budget: int = 40) -> dict[str, Any]:
+                 tool_budget: int = 40,
+                 variant: str = "baseline") -> dict[str, Any]:
     """Run one canonical review over a local repository revision pair."""
     ws = prepare_local_workspace(Path(repo_root), base, head,
                                  Path(work_root))
@@ -92,7 +141,7 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                        max_turns=max_turns, model_settings=model_settings,
                        rate=rate, rate_status=rate_status,
                        max_usd_per_review=max_usd_per_review,
-                       tool_budget=tool_budget)
+                       tool_budget=tool_budget, variant=variant)
 
 
 def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
@@ -102,7 +151,8 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
               rate: dict[str, Any] | None = None,
               rate_status: str = "unconfirmed",
               max_usd_per_review: float | None = None,
-              tool_budget: int = 40) -> dict[str, Any]:
+              tool_budget: int = 40,
+              variant: str = "baseline") -> dict[str, Any]:
     """Run one canonical review over a GitHub PR (base/head from the PR)."""
     metadata, error = fetch_github_pr_metadata(repo, pr)
     if metadata is None:
@@ -118,7 +168,7 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                        rate=rate, rate_status=rate_status,
                        max_usd_per_review=max_usd_per_review,
                        tool_budget=tool_budget,
-                       pr_number=pr)
+                       pr_number=pr, variant=variant)
 
 
 def _collect_provider_termination(model: Any) -> dict[str, str]:
@@ -141,7 +191,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                rate_status: str = "unconfirmed",
                max_usd_per_review: float | None = None,
                tool_budget: int = 40,
-               pr_number: int | None = None) -> dict[str, Any]:
+               pr_number: int | None = None,
+               variant: str = "baseline") -> dict[str, Any]:
     import os
 
     from codatiel_i2 import providers as providers_mod
@@ -181,7 +232,18 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
         base_dir=base_dir, head_dir=head_dir, diff_repo=diff_repo,
         tool_budget=tool_budget)
     tools = runtime_sdk.build_i2_tools(ctx)
-    inventory = _render_inventory(changes, classification, det_candidates)
+    # Variant-aware instructions and inventory: challenger uses impact-path
+    # discipline while baseline keeps the original file-coverage prompt.
+    if variant == "challenger":
+        instructions = CHALLENGER_INSTRUCTIONS
+        instructions_version = CHALLENGER_INSTRUCTIONS_VERSION
+        inventory = _render_inventory(changes, classification, det_candidates,
+                                      variant="challenger")
+    else:
+        instructions = CANONICAL_INSTRUCTIONS
+        instructions_version = INSTRUCTIONS_VERSION
+        inventory = _render_inventory(changes, classification, det_candidates,
+                                      variant="baseline")
     ceiling = max_usd_per_review
     if ceiling is None:
         try:
@@ -189,7 +251,7 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
         except ValueError:
             ceiling = 5.0
     preflight = providers_mod.estimate_cost_usd(
-        len(CANONICAL_INSTRUCTIONS) + len(inventory), max_turns, rate or {})
+        len(instructions) + len(inventory), max_turns, rate or {})
     if preflight is not None and preflight > ceiling:
         return {"status": "budget_refused", "stage": "preflight",
                 "error": f"preflight estimate ${preflight:.4f} exceeds ceiling "
@@ -222,7 +284,7 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     recorded_model = runtime_sdk.UsageRecordingModel(model, ledger)
     try:
         result = runtime_sdk.run_review(
-            instructions=CANONICAL_INSTRUCTIONS,
+            instructions=instructions,
             user_input=("Review this change between BASE and HEAD. "
                         f"Repository: {ws.repo}. {inventory}"),
             tools=tools, model=recorded_model, max_turns=max_turns,
@@ -240,14 +302,16 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 error=f"turn budget exhausted after {max_turns} turns; "
                       "investigation incomplete, not a review",
                 status="incomplete_budget_exhausted",
-                ctx=ctx, partial_result=partial_result, model_obj=recorded_model)
+                ctx=ctx, partial_result=partial_result, model_obj=recorded_model,
+                variant=variant)
         # For other agent failures, try to preserve partial trace if available
         partial_result = getattr(exc, "run_data", None)
         return _write_failed_run(
             runs_root, ws, changes, classification, model_name, max_turns,
             rate or {}, rate_status, ceiling, ledger, stage="agent",
             error=f"{type(exc).__name__}: {exc}",
-            ctx=ctx, partial_result=partial_result, model_obj=recorded_model)
+            ctx=ctx, partial_result=partial_result, model_obj=recorded_model,
+            variant=variant)
 
     tool_evidence = _harvest_tool_evidence(result)
     tool_outputs = _harvest_tool_outputs(result)
@@ -292,16 +356,18 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     else:
         status = "complete"
     metrics = {"service_version": SERVICE_VERSION,
-               "instructions_version": INSTRUCTIONS_VERSION,
-               "model": model_name, "max_turns": max_turns,
-               "tool_calls": len(tool_calls),
-               "status": status,
-               "parse_errors": parse_errors,
-               "spend": spend,
-               "wall_seconds": round(time.time() - started, 2)}
+               "instructions_version": instructions_version,
+                "model": model_name, "max_turns": max_turns,
+                "tool_calls": len(tool_calls),
+                "status": status,
+                "parse_errors": parse_errors,
+                "spend": spend,
+                "wall_seconds": round(time.time() - started, 2),
+               "variant": variant}
     config = {"service": SERVICE_VERSION, "model": model_name,
               "max_turns": max_turns,
-              "instructions": INSTRUCTIONS_VERSION}
+              "instructions": instructions_version,
+              "variant": variant}
     scan_key = runs_mod.scan_key_for(ws.repo, base_sha, head_sha, config)
     run_id = runs_mod.new_run_id()
     run_dir = runs_mod.new_run_dir(Path(runs_root), scan_key, run_id)
@@ -368,7 +434,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
 
 
 def _render_inventory(changes: list[dict], classification: dict,
-                      det_candidates: list[dict]) -> str:
+                      det_candidates: list[dict],
+                      variant: str = "baseline") -> str:
     lines = [f"{len(changes)} changed files:"]
     for c in changes[:60]:
         lines.append(f"- {c.get('path','')} "
@@ -381,6 +448,19 @@ def _render_inventory(changes: list[dict], classification: dict,
         lines.append(f"- candidate {cand.get('candidate_id', '?')} "
                      f"at {anchor.get('path','?')}"
                      f":{anchor.get('line_start','?')}")
+    if variant == "challenger":
+        # Impact-path guidance: surface behavioral signals for hypothesis ranking
+        lines.append("Focus on behavioral impact: changed return values, contracts,")
+        lines.append("callers/callees, state transitions, boundary conditions, and")
+        lines.append("integration consequences. Rank hypotheses by materiality;")
+        lines.append("abandon weak when evidence contradicts. For obvious bugs,")
+        lines.append("do not require cross-file investigation.")
+        # Hint at large or high-churn files that often hide cross-file effects
+        large = [c for c in changes if (c.get("additions", 0) + c.get("deletions", 0)) > 100]
+        if large:
+            lines.append(f"High-churn files ({len(large)} with >100 lines changed):")
+            for c in large[:5]:
+                lines.append(f"  - {c.get('path','')} (+{c.get('additions',0)}/-{c.get('deletions',0)})")
     lines.append("Fetch every span you rely on with the source tools.")
     return "\n".join(lines)
 
@@ -864,7 +944,8 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                       status: str = "failed",
                       ctx: Any | None = None,
                       partial_result: Any | None = None,
-                      model_obj: Any | None = None) -> dict[str, Any]:
+                      model_obj: Any | None = None,
+                      variant: str = "baseline") -> dict[str, Any]:
     """Minimal immutable record for runs that die before disposition.
 
     When a partial trace is available (e.g., MaxTurnsExceeded with tool calls
@@ -875,9 +956,11 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
 
     active = ledger if ledger is not None else SpendLedger(
         rate=rate, rate_status=rate_status, ceiling_usd=ceiling)
+    instr_version = CHALLENGER_INSTRUCTIONS_VERSION if variant == "challenger" else INSTRUCTIONS_VERSION
     config = {"service": SERVICE_VERSION, "model": model_name,
               "max_turns": max_turns,
-              "instructions": INSTRUCTIONS_VERSION}
+              "instructions": instr_version,
+              "variant": variant}
     scan_key = runs_mod.scan_key_for(ws.repo, ws.base_sha, ws.head_sha, config)
     run_id = runs_mod.new_run_id()
     run_dir = runs_mod.new_run_dir(Path(runs_root), scan_key, run_id)
@@ -905,10 +988,11 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
             pass
 
     metrics = {"service_version": SERVICE_VERSION,
-               "instructions_version": INSTRUCTIONS_VERSION,
-               "model": model_name, "status": status, "stage": stage,
-               "error": error,
-                 "spend": _spend_record(active, model_name, completed=False)}
+               "instructions_version": instr_version,
+                "model": model_name, "status": status, "stage": stage,
+                "error": error,
+                  "spend": _spend_record(active, model_name, completed=False),
+               "variant": variant}
     # Preserve investigation progress: tool calls and evidence count
     if tool_calls:
         metrics["tool_calls"] = len(tool_calls)
