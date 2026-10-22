@@ -944,26 +944,25 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
             model_calls[0]["thinking_blocks_seen"] = wrapped_thinking
     write_jsonl(run_dir / "model_calls.jsonl", model_calls)
     # Finalize partial trace instead of replacing with abbreviated record
-    if tool_calls or tool_evidence or transcript_items:
-        # Write partial evidence and tool traces
-        write_jsonl(run_dir / "evidence.jsonl", tool_evidence)
-        write_jsonl(run_dir / "tool_calls.jsonl", tool_calls)
-        if transcript_items:
-            write_json(run_dir / "transcript.json",
-                       {"schema_version": "codatiel_i2.transcript.v1",
-                        "items": transcript_items})
-        else:
-            write_json(run_dir / "transcript.json",
-                       {"schema_version": "codatiel_i2.transcript.v1",
-                        "items": []})
-        if tool_outputs:
-            write_jsonl(run_dir / "tool_outputs.jsonl", tool_outputs)
-        else:
-            write_jsonl(run_dir / "tool_outputs.jsonl", [])
-        # Write empty findings/observations to indicate incomplete, not silence
-        write_jsonl(run_dir / "findings.jsonl", [])
-        write_jsonl(run_dir / "observations.jsonl", [])
-        write_json(run_dir / "shadow_result.json",
+    # Always write trace files, even if empty (legitimate for immediate failure)
+    write_jsonl(run_dir / "evidence.jsonl", tool_evidence)
+    write_jsonl(run_dir / "tool_calls.jsonl", tool_calls)
+    if transcript_items:
+        write_json(run_dir / "transcript.json",
+                   {"schema_version": "codatiel_i2.transcript.v1",
+                    "items": transcript_items})
+    else:
+        write_json(run_dir / "transcript.json",
+                   {"schema_version": "codatiel_i2.transcript.v1",
+                    "items": []})
+    if tool_outputs:
+        write_jsonl(run_dir / "tool_outputs.jsonl", tool_outputs)
+    else:
+        write_jsonl(run_dir / "tool_outputs.jsonl", [])
+    # Write empty findings/observations to indicate incomplete, not silence
+    write_jsonl(run_dir / "findings.jsonl", [])
+    write_jsonl(run_dir / "observations.jsonl", [])
+    write_json(run_dir / "shadow_result.json",
                    {"schema_version": "codatiel_i2.shadow_result.v1",
                     "mode": "shadow", "post_to_github": False,
                     "status": status, "stage": stage, "error": error,
