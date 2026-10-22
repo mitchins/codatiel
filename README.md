@@ -11,4 +11,4 @@ Status: review usefulness is still under qualification. Findings are
 advisory only — Codatiel never posts automatic public PR comments, and
 nothing here is production-ready. An 80% real-material-useful bar for
 public comments is a goal, not a claim.
-<!-- trigger CI -->
+
