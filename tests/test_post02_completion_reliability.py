@@ -21,6 +21,26 @@ agents = pytest.importorskip("agents")
 from codatiel_i2 import runtime_sdk, service as service_mod  # noqa: E402
 from codatiel_i2.core.spend import SpendLedger  # noqa: E402
 
+# Shared Haiku mock helpers — defined once to avoid Sonar duplication
+class _HaikuMockContent:
+    def __init__(self, type, **kw):
+        self.type = type
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+class _HaikuMockUsage:
+    input_tokens = 100
+    output_tokens = 100
+    cache_creation_input_tokens = 0
+    cache_read_input_tokens = 0
+
+class _HaikuMockResponse:
+    def __init__(self, content, id, stop_reason="end_turn"):
+        self.content = content
+        self.id = id
+        self.usage = _HaikuMockUsage()
+        self.stop_reason = stop_reason
+
 
 def _repo(tmp_path: Path) -> dict:
     root = tmp_path / "repo"
@@ -35,6 +55,15 @@ def _repo(tmp_path: Path) -> dict:
     subprocess.run(["git", "-C", root, "commit", "-qam", "h"], check=True, timeout=60)
     head = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
     return {"root": root, "base": base, "head": head}
+
+
+def _exhaustion_script():
+    """Shared 3-tool script that exhausts max_turns=2 via genuine SDK Runner."""
+    return [
+        runtime_sdk.scripted_tool_call(call_id="c1", name="read_file", arguments={"path": "a.py", "revision": "head"}, response_id="r1"),
+        runtime_sdk.scripted_tool_call(call_id="c2", name="diff_window", arguments={"path": "a.py"}, response_id="r2"),
+        runtime_sdk.scripted_tool_call(call_id="c3", name="read_file", arguments={"path": "a.py", "revision": "head"}, response_id="r3"),
+    ]
 
 
 def _haiku_scripted_responses(captured_blocks: list[dict]) -> list:
@@ -175,25 +204,144 @@ def test_correct_silence_with_completed_disposition(tmp_path: Path):
 
 
 def test_turn_budget_exhaustion_is_incomplete(tmp_path: Path):
-    """Turn-budget exhaustion → incomplete_budget_exhausted, partial spend retained."""
+    """Genuine SDK turn-budget exhaustion → incomplete_budget_exhausted, partial trace preserved.
+
+    Exercises the real SDK Runner with max_turns smaller than the scripted
+    tool-call sequence. The Runner itself raises MaxTurnsExceeded with
+    run_data containing the tool outputs; service must preserve tool_calls,
+    evidence, tool_outputs and not become complete/silence.
+    """
+    repo = _repo(tmp_path)
+    script = _exhaustion_script()
+    model = runtime_sdk.ScriptedModel(script)
+    out = service_mod.review_local(
+        repo["root"], repo["base"], repo["head"], model=model,
+        model_name="scripted:test", runs_root=tmp_path / "runs", work_root=tmp_path / "work", max_turns=2)
+    assert out["status"] == "incomplete_budget_exhausted"
+    assert out["stage"] == "budget_exhausted"
+    run_dir = Path(out["run_dir"])
+    for name in ["tool_calls.jsonl", "evidence.jsonl", "tool_outputs.jsonl", "transcript.json", "model_calls.jsonl"]:
+        assert (run_dir / name).exists()
+    shadow = json.loads((run_dir / "shadow_result.json").read_text())
+    assert shadow["silence"] is None
+    metrics = json.loads((run_dir / "metrics.json").read_text())
+    assert metrics["status"] == "incomplete_budget_exhausted"
+    model_calls = [json.loads(l) for l in (run_dir / "model_calls.jsonl").read_text().splitlines() if l.strip()]
+    assert "provider_termination_by_response" in model_calls[0]
+
+
+def test_turn_exhaustion_preserves_tool_evidence_and_stop_reasons(tmp_path: Path):
+    """Genuine MaxTurnsExceeded after real source reads must retain replayable evidence.
+
+    The SDK Runner raises MaxTurnsExceeded with run_data that contains the
+    actual executed tool outputs. Service must persist non-empty,
+    replayable evidence (source_excerpt + diff_hunk) and original
+    tool_outputs, not an empty fabricated ledger.
+    """
+    repo = _repo(tmp_path)
+    script = _exhaustion_script()
+    model = runtime_sdk.ScriptedModel(script)
+    out = service_mod.review_local(
+        repo["root"], repo["base"], repo["head"], model=model,
+        model_name="scripted:test", runs_root=tmp_path / "runs", work_root=tmp_path / "work", max_turns=2)
+    assert out["status"] == "incomplete_budget_exhausted"
+    run_dir = Path(out["run_dir"])
+    assert out["status"] not in ("complete", "thin", "silence")
+    # Tool ledger must be non-empty and derived from ctx.tool_log (real tool executions)
+    assert (run_dir / "tool_calls.jsonl").exists()
+    tool_calls = [json.loads(l) for l in (run_dir / "tool_calls.jsonl").read_text().splitlines() if l.strip()]
+    assert len(tool_calls) == 2, f"expected 2 tool calls before exhaustion, got {len(tool_calls)}"
+    # Evidence must be non-empty, replayable, revision-bound, with digests and excerpts
+    evidence = [json.loads(l) for l in (run_dir / "evidence.jsonl").read_text().splitlines() if l.strip()]
+    assert len(evidence) == 2, f"expected 2 evidence items, got {len(evidence)}"
+    for ev in evidence:
+        assert ev["evidence_id"].startswith("ev_")
+        assert ev["schema_version"] == "codatiel_i2.evidence.v2"
+        assert ev["path"] == "a.py"
+        assert ev["revision_sha"]
+        assert ev["content_digest"]
+        assert ev["excerpt"] is not None
+        assert ev["line_start"] >= 1 and ev["line_end"] >= ev["line_start"]
+    # Diff evidence must have diff kind, source must be source_excerpt
+    kinds = {e["kind"] for e in evidence}
+    assert "source_excerpt" in kinds
+    assert "diff_hunk" in kinds
+    # Tool outputs must be original payloads, not fabricated empty
+    tool_outputs = [json.loads(l) for l in (run_dir / "tool_outputs.jsonl").read_text().splitlines() if l.strip()]
+    assert len(tool_outputs) == 2
+    for to in tool_outputs:
+        assert "call_id" in to and "payload" in to
+        assert to["payload"], "tool output payload must not be empty"
+    # Transcript must contain the actual tool call/output items
+    transcript = json.loads((run_dir / "transcript.json").read_text())
+    assert any(i["type"] == "tool_call_item" for i in transcript["items"])
+    assert any(i["type"] == "tool_call_output_item" for i in transcript["items"])
+    # Must not be silence
+    shadow = json.loads((run_dir / "shadow_result.json").read_text())
+    assert shadow.get("silence") is None
+    assert shadow.get("status") == "incomplete_budget_exhausted"
+    # Model calls must exist and carry provider_termination_by_response key (empty for scripted is valid)
+    assert (run_dir / "model_calls.jsonl").exists()
+    model_calls = [json.loads(l) for l in (run_dir / "model_calls.jsonl").read_text().splitlines() if l.strip()]
+    assert "provider_termination_by_response" in model_calls[0]
+    assert isinstance(model_calls[0]["provider_termination_by_response"], dict)
+
+
+def test_exhaustion_before_any_tool_is_empty_but_honest(tmp_path: Path):
+    """Immediate exhaustion before any tool: empty ledger is legitimate but must be explicit.
+
+    The SDK raises MaxTurnsExceeded before the first tool call returns. The
+    service must still write all trace files (as empty arrays/objects), keep
+    the status as incomplete_budget_exhausted, never invent tool calls or
+    become silence/complete, and persist model_calls with the termination key.
+    """
+    # Use a model that exhausts after a single text turn without tool use.
+    # With max_turns=1 and a single tool-call script, the Runner will attempt
+    # a first turn, get a tool_use, try to dispatch, but max_turns is already
+    # exceeded before the second turn can return a final. To force immediate
+    # exhaustion without any successful tool, we use an empty script and
+    # max_turns=0 which the service validates, so instead we exhaust after
+    # exactly one tool call but assert the empty-after-exhaustion path via
+    # a minimal script that still triggers real SDK exhaustion with no second
+    # tool result yet persisted as evidence? For a true zero-tool case we
+    # fabricate a minimal immediate raise that the service handles as unknown
+    # tool work—but we still assert the empty-but-honest invariants.
     from codatiel_i2.runtime_sdk import ScriptedModel
 
-    class _TurnsExceeded(Exception):
-        pass
-    _TurnsExceeded.__name__ = "MaxTurnsExceeded"
-
-    class _Raising(ScriptedModel):
+    class _ImmediateExhaust(ScriptedModel):
         async def get_response(self, *args, **kwargs):
-            raise _TurnsExceeded("too many turns")
+            from agents.exceptions import MaxTurnsExceeded as _MTE
+            real = _MTE("Max turns (1) exceeded")
+            from agents.usage import Usage
+            # Real SDK run_data with empty new_items is legitimate for immediate exhaustion
+            real.run_data = type("obj", (object,), {
+                "new_items": [],
+                "raw_responses": [],
+                "context_wrapper": type("obj", (object,), {"usage": Usage(requests=1, input_tokens=0, output_tokens=0, total_tokens=0)})(),
+            })()
+            raise real
 
     repo = _repo(tmp_path)
     out = service_mod.review_local(
-        repo["root"], repo["base"], repo["head"], model=_Raising([]),
-        model_name="scripted:test", runs_root=tmp_path / "runs", work_root=tmp_path / "work", max_turns=5)
+        repo["root"], repo["base"], repo["head"], model=_ImmediateExhaust([]),
+        model_name="scripted:test", runs_root=tmp_path / "runs", work_root=tmp_path / "work", max_turns=1)
     assert out["status"] == "incomplete_budget_exhausted"
-    assert out["stage"] == "budget_exhausted"
-    metrics = json.loads((Path(out["run_dir"]) / "metrics.json").read_text())
-    assert metrics["status"] == "incomplete_budget_exhausted"
+    run_dir = Path(out["run_dir"])
+    # All trace files must exist, even when empty (legitimate for immediate failure)
+    for name in ["tool_calls.jsonl", "evidence.jsonl", "tool_outputs.jsonl", "transcript.json", "model_calls.jsonl", "shadow_result.json"]:
+        assert (run_dir / name).exists(), f"{name} must exist even on immediate exhaustion"
+    # Tool ledger is empty (no successful tool execution) but file is present as empty array/jsonl
+    content = (run_dir / "tool_calls.jsonl").read_text().strip()
+    assert content == "", f"expected empty tool_calls.jsonl for zero-tool exhaustion, got {repr(content[:200])}"
+    evidence_content = (run_dir / "evidence.jsonl").read_text().strip()
+    assert evidence_content == "", f"expected empty evidence.jsonl for zero-tool exhaustion, got {repr(evidence_content[:200])}"
+    # Must not be silence or complete
+    shadow = json.loads((run_dir / "shadow_result.json").read_text())
+    assert shadow.get("silence") is None
+    assert shadow["status"] == "incomplete_budget_exhausted"
+    # Model calls must still carry the termination key
+    model_calls = [json.loads(l) for l in (run_dir / "model_calls.jsonl").read_text().splitlines() if l.strip()]
+    assert "provider_termination_by_response" in model_calls[0]
 
 
 def test_provider_exception_after_billable_turns_retains_spend(tmp_path: Path):
@@ -299,25 +447,7 @@ def test_haiku_full_path_with_adapter(tmp_path: Path, monkeypatch):
     """
     repo = _repo(tmp_path)
 
-    # Mock Anthropic client to return a controlled response sequence
-    class _MockContent:
-        def __init__(self, type, **kw):
-            self.type = type
-            for k, v in kw.items():
-                setattr(self, k, v)
-
-    class _MockUsage:
-        input_tokens = 100
-        output_tokens = 100
-        cache_creation_input_tokens = 0
-        cache_read_input_tokens = 0
-
-    class _MockResponse:
-        def __init__(self, content, id="resp_test"):
-            self.content = content
-            self.id = id
-            self.usage = _MockUsage()
-            self.stop_reason = "end_turn"
+    # Mock Anthropic client to return a controlled response sequence (uses shared helpers)
 
     mock_client = type("MockClient", (), {})()
     # First call: tool use, second call: prose+JSON final
@@ -327,21 +457,18 @@ def test_haiku_full_path_with_adapter(tmp_path: Path, monkeypatch):
         nonlocal call_count
         call_count += 1
         messages = kwargs.get("messages", [])
-        # Check if this is a tool-result continuation (has tool_result in last message)
         has_tool_result = any(
             any(c.get("type") == "tool_result" for c in (m.get("content") or [] if isinstance(m.get("content"), list) else []))
             for m in messages if m.get("role") == "user"
         )
         if not has_tool_result:
-            # First turn: return tool_use
-            return _MockResponse([
-                _MockContent("tool_use", id="toolu_123", name="read_file", input={"path": "a.py", "revision": "head"}),
-            ])
+            return _HaikuMockResponse([
+                _HaikuMockContent("tool_use", id="toolu_123", name="read_file", input={"path": "a.py", "revision": "head"}),
+            ], id="resp_1", stop_reason="tool_use")
         else:
-            # Second turn: return prose+JSON (the deterministic repair case)
-            return _MockResponse([
-                _MockContent("text", text='I checked a.py at HEAD. No regression.\n\n{"status": "silence", "summary": "Checked a.py, no regression", "findings": []}'),
-            ])
+            return _HaikuMockResponse([
+                _HaikuMockContent("text", text='I checked a.py at HEAD. No regression.\n\n{"status": "silence", "summary": "Checked a.py, no regression", "findings": []}'),
+            ], id="resp_3", stop_reason="end_turn")
 
     mock_client.messages = type("obj", (object,), {"create": mock_create})()
 
@@ -360,6 +487,91 @@ def test_haiku_full_path_with_adapter(tmp_path: Path, monkeypatch):
         assert any("repaired_trailing_json" in e for e in metrics["parse_errors"])
         run = json.loads((Path(out["run_dir"]) / "run.json").read_text())
         assert run["config"]["service"] == "canonical-service-0.1"
+
+
+
+
+def test_haiku_termination_persisted_on_complete_and_on_exhaustion(tmp_path: Path, monkeypatch):
+    """Haiku provider termination (stop_reason) is persisted to model_calls.jsonl.
+
+    Verifies both the success and the budget-exhaustion paths:
+    - A complete Haiku run with tool_use → end_turn must record
+      provider_termination_by_response with tool_use and end_turn values.
+    - A Haiku run that exhausts max_turns after tool_use turns must also
+      record the tool_use terminations, not an empty dict.
+    This is the gap that was lost: runtime captured stop_reason in memory
+    but service did not write it to model_calls.jsonl on either path.
+    """
+    repo = _repo(tmp_path)
+
+    # Complete path: 2 tool_use turns then end_turn final
+    call = 0
+
+    async def mock_create_complete(*args, **kwargs):
+        nonlocal call
+        call += 1
+        if call == 1:
+            return _HaikuMockResponse([_HaikuMockContent("tool_use", id="toolu_1", name="read_file", input={"path": "a.py", "revision": "head"})], id="resp_1", stop_reason="tool_use")
+        elif call == 2:
+            return _HaikuMockResponse([_HaikuMockContent("tool_use", id="toolu_2", name="diff_window", input={"path": "a.py"})], id="resp_2", stop_reason="tool_use")
+        else:
+            return _HaikuMockResponse([_HaikuMockContent("text", text='{"status": "silence", "summary": "Checked a.py at HEAD, no regression", "findings": []}')], id="resp_3", stop_reason="end_turn")
+
+    mock_client = type("MockClient", (), {})()
+    mock_client.messages = type("obj", (object,), {"create": mock_create_complete})()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    import unittest.mock as mock
+    call = 0
+    with mock.patch("anthropic.AsyncAnthropic", return_value=mock_client):
+        model = runtime_sdk.HaikuModel(model="claude-haiku-5-5", max_tokens=8192)
+        out = service_mod.review_local(repo["root"], repo["base"], repo["head"], model=model, model_name="haiku:test", runs_root=tmp_path / "runs_complete", work_root=tmp_path / "work_complete", max_turns=5, rate={"input": 0.1, "output": 0.5}, rate_status="priced", max_usd_per_review=5.0)
+        assert out["status"] == "complete"
+        run_dir = Path(out["run_dir"])
+        mc = json.loads((run_dir / "model_calls.jsonl").read_text().splitlines()[0])
+        term = mc.get("provider_termination_by_response")
+        assert isinstance(term, dict) and len(term) >= 3, f"expected at least 3 terminations on complete, got {term}"
+        assert term.get("resp_1") == "tool_use"
+        assert term.get("resp_2") == "tool_use"
+        assert term.get("resp_3") == "end_turn"
+        # Direct model attribute must also have been populated
+        assert model._termination_by_response.get("resp_3") == "end_turn"
+
+    # Exhaustion path: always tool_use, max_turns=2 → incomplete_budget_exhausted
+    call2 = 0
+
+    async def mock_create_exhaust(*args, **kwargs):
+        nonlocal call2
+        call2 += 1
+        return _HaikuMockResponse([_HaikuMockContent("tool_use", id=f"toolu_{call2}", name="read_file", input={"path": "a.py", "revision": "head"})], id=f"resp_{call2}", stop_reason="tool_use")
+
+    mock_client2 = type("MockClient", (), {})()
+    mock_client2.messages = type("obj", (object,), {"create": mock_create_exhaust})()
+    # Fresh repo for exhaustion path — reuse helper with isolated parent
+    second_parent = tmp_path / "haiku_exhaust_parent"
+    second_parent.mkdir(parents=True, exist_ok=True)
+    repo2b = _repo(second_parent)
+    root2, base2, head2 = repo2b["root"], repo2b["base"], repo2b["head"]
+
+    call2 = 0
+    with mock.patch("anthropic.AsyncAnthropic", return_value=mock_client2):
+        model2 = runtime_sdk.HaikuModel(model="claude-haiku-5-5", max_tokens=8192)
+        out2 = service_mod.review_local(root2, base2, head2, model=model2, model_name="haiku:test", runs_root=tmp_path / "runs_exhaust", work_root=tmp_path / "work_exhaust", max_turns=2, rate={"input": 0.1, "output": 0.5}, rate_status="priced", max_usd_per_review=5.0)
+        assert out2["status"] == "incomplete_budget_exhausted"
+        assert out2["stage"] == "budget_exhausted"
+        run_dir2 = Path(out2["run_dir"])
+        mc2 = json.loads((run_dir2 / "model_calls.jsonl").read_text().splitlines()[0])
+        term2 = mc2.get("provider_termination_by_response")
+        assert isinstance(term2, dict) and len(term2) >= 2, f"expected at least 2 terminations on exhaustion, got {term2}"
+        assert term2.get("resp_1") == "tool_use"
+        assert term2.get("resp_2") == "tool_use"
+        # Evidence must also be persisted (genuine, not fabricated empty)
+        evidence = [json.loads(l) for l in (run_dir2 / "evidence.jsonl").read_text().splitlines() if l.strip()]
+        assert len(evidence) >= 1
+        tool_calls = [json.loads(l) for l in (run_dir2 / "tool_calls.jsonl").read_text().splitlines() if l.strip()]
+        assert len(tool_calls) >= 1
+        # Not silence
+        shadow2 = json.loads((run_dir2 / "shadow_result.json").read_text())
+        assert shadow2["silence"] is None
 
 
 def test_positive_control_valid_final_not_rejected(tmp_path: Path):
