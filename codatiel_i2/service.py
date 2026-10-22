@@ -222,14 +222,14 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 error=f"turn budget exhausted after {max_turns} turns; "
                       "investigation incomplete, not a review",
                 status="incomplete_budget_exhausted",
-                ctx=ctx, partial_result=partial_result)
+                ctx=ctx, partial_result=partial_result, model_obj=recorded_model)
         # For other agent failures, try to preserve partial trace if available
         partial_result = getattr(exc, "run_data", None)
         return _write_failed_run(
             runs_root, ws, changes, classification, model_name, max_turns,
             rate or {}, rate_status, ceiling, ledger, stage="agent",
             error=f"{type(exc).__name__}: {exc}",
-            ctx=ctx, partial_result=partial_result)
+            ctx=ctx, partial_result=partial_result, model_obj=recorded_model)
 
     tool_evidence = _harvest_tool_evidence(result)
     tool_outputs = _harvest_tool_outputs(result)
@@ -255,9 +255,19 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     has_unparseable = any("unparseable" in e for e in parse_errors)
     has_repaired = any("repaired_trailing_json" in e for e in parse_errors)
     is_unresolved_final = parsed.get("status") not in ("finding", "silence")
-    if has_empty_final and not zero_tools:
-        status = "unresolved_empty_final"
-    elif (has_unparseable or is_unresolved_final) and not has_repaired:
+    if has_empty_final:
+        # Empty final is always unresolved, regardless of tool count
+        # (zero-tools case is already incomplete_no_tool_use, but empty with
+        # tools should not be complete)
+        if not zero_tools:
+            status = "unresolved_empty_final"
+        else:
+            status = "incomplete_no_tool_use"
+    elif is_unresolved_final:
+        # Invalid status, array, or missing findings: always unresolved,
+        # even if repaired (repaired invalid JSON is still invalid)
+        status = "unresolved_unparseable"
+    elif has_unparseable and not has_repaired:
         status = "unresolved_unparseable"
     elif zero_tools:
         status = "incomplete_no_tool_use"
@@ -846,7 +856,8 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                       error: str,
                       status: str = "failed",
                       ctx: Any | None = None,
-                      partial_result: Any | None = None) -> dict[str, Any]:
+                      partial_result: Any | None = None,
+                      model_obj: Any | None = None) -> dict[str, Any]:
     """Minimal immutable record for runs that die before disposition.
 
     When a partial trace is available (e.g., MaxTurnsExceeded with tool calls
@@ -895,6 +906,17 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
     if tool_calls:
         metrics["tool_calls"] = len(tool_calls)
         metrics["evidence_count"] = len(tool_evidence)
+    # Preserve provider termination reasons even on failed runs
+    termination_by_response = {}
+    # Try to get termination from the model object (including wrapped)
+    for mdl in (model_obj, getattr(model_obj, "_model", None) if model_obj is not None else None):
+        if mdl is not None:
+            bucket = getattr(mdl, "_termination_by_response", None)
+            if isinstance(bucket, dict) and bucket:
+                termination_by_response.update(bucket)
+            bucket2 = getattr(mdl, "termination_by_response", None)
+            if isinstance(bucket2, dict) and bucket2:
+                termination_by_response.update(bucket2)
     _finalize_spend_ledger(active, run_dir)
 
     write_json(run_dir / "run.json",
@@ -906,6 +928,21 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                 "workspace": ws.to_dict(), "status": status,
                 "stage": stage, "error": error})
     write_json(run_dir / "metrics.json", metrics)
+    # Write model_calls with provider termination even on failed runs
+    # (for Haiku, this distinguishes end_turn vs tool_use vs max_tokens)
+    model_calls = [{"model": model_name, "max_turns": max_turns,
+                    "scripted": model_name.startswith("scripted:"),
+                    "usage": _spend_record(active, model_name, completed=False).get("usage", {}),
+                    "thinking_blocks_seen": int(getattr(model_obj, "thinking_blocks_seen", 0) or 0) if model_obj is not None else 0,
+                    "provider_termination_by_response": termination_by_response,
+                    "reasoning_summary": None,
+                    "reasoning_summary_note": "no backend exposes provider reasoning summaries; provider-private thinking is counted, never claimed"}]
+    # Also check wrapped model for thinking_blocks_seen
+    if model_obj is not None and hasattr(model_obj, "_model"):
+        wrapped_thinking = getattr(model_obj._model, "thinking_blocks_seen", None)
+        if isinstance(wrapped_thinking, int) and wrapped_thinking:
+            model_calls[0]["thinking_blocks_seen"] = wrapped_thinking
+    write_jsonl(run_dir / "model_calls.jsonl", model_calls)
     # Finalize partial trace instead of replacing with abbreviated record
     if tool_calls or tool_evidence or transcript_items:
         # Write partial evidence and tool traces
