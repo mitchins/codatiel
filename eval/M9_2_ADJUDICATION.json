@@ -204,6 +204,156 @@
    "novel": "STORE-probe",
    "ref_item": null,
    "verdict": "CONFIRMED-LOW"
+  },
+  "M92-048#0": {
+   "materiality": "low-moderate",
+   "novel": "compose-volume",
+   "ref_item": "FW3-compose",
+   "verdict": "CONFIRMED"
+  },
+  "M92-048#1": {
+   "materiality": "low",
+   "novel": "status-api-bind",
+   "ref_item": null,
+   "verdict": "PARTIAL"
+  },
+  "M92-049#0": {
+   "materiality": "low",
+   "novel": "boot-grace-latch",
+   "ref_item": null,
+   "verdict": "PARTIAL"
+  },
+  "M92-050#0": {
+   "materiality": "low-moderate",
+   "novel": "probe-readme-modes",
+   "ref_item": null,
+   "verdict": "CONFIRMED"
+  },
+  "M92-050#1": {
+   "materiality": "moderate",
+   "novel": null,
+   "ref_item": "KL1-readme",
+   "verdict": "CONFIRMED"
+  },
+  "M92-051#0": {
+   "materiality": "moderate",
+   "novel": null,
+   "ref_item": "KL1-readme",
+   "verdict": "CONFIRMED"
+  },
+  "M92-053#0": {
+   "materiality": "low-moderate",
+   "novel": null,
+   "ref_item": "L06-readme-sub",
+   "verdict": "CONFIRMED"
+  },
+  "M92-054#0": {
+   "materiality": "low-moderate",
+   "novel": null,
+   "ref_item": "L06-readme-sub",
+   "verdict": "CONFIRMED"
+  },
+  "M92-054#1": {
+   "materiality": "low-moderate",
+   "novel": "intro-sub-lookup",
+   "ref_item": null,
+   "verdict": "CONFIRMED"
+  },
+  "M92-055#0": {
+   "materiality": "mod-high",
+   "novel": null,
+   "ref_item": "L08-lms",
+   "verdict": "CONFIRMED"
+  },
+  "M92-056#0": {
+   "materiality": "mod-high",
+   "novel": null,
+   "ref_item": "L08-lms",
+   "verdict": "CONFIRMED"
+  },
+  "M92-056#1": {
+   "materiality": "low",
+   "novel": "shield-runbook",
+   "ref_item": null,
+   "verdict": "PARTIAL"
+  },
+  "M92-056#2": {
+   "materiality": "low-moderate",
+   "novel": "runbook-epcore",
+   "ref_item": null,
+   "verdict": "CONFIRMED"
+  },
+  "M92-056#3": {
+   "materiality": "low",
+   "novel": "acl-files",
+   "ref_item": null,
+   "verdict": "PARTIAL"
+  },
+  "M92-057#0": {
+   "materiality": "low",
+   "novel": "store06-gate",
+   "ref_item": null,
+   "verdict": "PARTIAL"
+  },
+  "M92-057#1": {
+   "materiality": "low",
+   "novel": null,
+   "ref_item": "L10-evidenceTier",
+   "verdict": "CONFIRMED"
+  },
+  "M92-061#0": {
+   "materiality": "low-moderate",
+   "novel": "constants-docs",
+   "ref_item": null,
+   "verdict": "CONFIRMED"
+  },
+  "M92-062#0": {
+   "materiality": "low",
+   "novel": "inhibition-desc",
+   "ref_item": null,
+   "verdict": "CONFIRMED-LOW"
+  },
+  "M92-062#1": {
+   "materiality": "low-moderate",
+   "novel": "constants-docs",
+   "ref_item": null,
+   "verdict": "CONFIRMED"
+  },
+  "M92-063#0": {
+   "materiality": "moderate",
+   "novel": "archive-tokens",
+   "ref_item": null,
+   "verdict": "CONFIRMED"
+  },
+  "M92-063#1": {
+   "materiality": "moderate",
+   "novel": null,
+   "ref_item": "KL1-readme",
+   "verdict": "CONFIRMED"
+  },
+  "M92-065#0": {
+   "materiality": "low-moderate",
+   "novel": null,
+   "ref_item": "L06-readme-sub",
+   "verdict": "CONFIRMED"
+  },
+  "M92-066#0": {
+   "materiality": "mod-high",
+   "novel": null,
+   "ref_item": "L08-lms",
+   "verdict": "CONFIRMED"
+  },
+  "M92-067#0": {
+   "materiality": "mod-high",
+   "novel": null,
+   "ref_item": "L08-lms",
+   "verdict": "CONFIRMED"
+  },
+  "M92-067#1": {
+   "materiality": "mod-high",
+   "novel": null,
+   "ref_item": "L08-epcore",
+   "verdict": "CONFIRMED"
   }
  }
 }

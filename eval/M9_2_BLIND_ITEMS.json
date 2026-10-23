@@ -1029,6 +1029,660 @@
    "tool_calls": 4,
    "silence_summary": "Reviewed the workflow change and both revisions. The only change is the pinned docker/build-push-action version; the visible build, publish, permissions, and tagging configuration is unchanged. No material regression is established by the available evidence.",
    "findings": []
+  },
+  {
+   "id": "M92-048",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 30,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The diff changes the data mount from `./data:/data` to `watchdog_data:/data`, and declares `watchdog_data` as `external: true` (ev_474fe9d6a27af222). The durable safety record (attempt accounting, cooldowns, budgets, outage latches, auth latches) lives in /data/state.db, and the docs say to keep this volume. An operator who upgrades an existing ./data deployment with this compose file therefore starts against a different, empty volume, so per-camera cooldowns, the daily budget, and latched incidents are silently reset. The README and operations diffs I read (ev_87819f315969d7d4, ev_e5df669cddac4922) add a `docker volume create` step but no migration or copy step for existing ./data. The README still advises that the data volume is the safety record (ev_069b69203dce151a). Uncertainty: I inferred the reset from the docs' description of the safety tables and did not exercise a fresh store.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_474fe9d6a27af222",
+      "ev_916b0da3eec04ef7",
+      "ev_87819f315969d7d4",
+      "ev_e5df669cddac4922",
+      "ev_069b69203dce151a"
+     ],
+     "line_end": 26,
+     "line_start": 26,
+     "path": "compose.yaml",
+     "revision": "head",
+     "title": "Compose now mounts an empty named volume instead of ./data, so existing safety state is orphaned on upgrade"
+    },
+    {
+     "claim": "The example changes `http.host` from `127.0.0.1` to `0.0.0.0` (ev_0b27818ec551cefe; the HEAD line is ev_27cacf6b7d7366bb). The code default remains `127.0.0.1` (ev_e8920ebfaeead4aa). The API serves /stats, /history, and the new /report, with no authentication. Users who copy the example and run `fwatch serve` outside a container, as the example's own comment anticipates, will expose these endpoints on every host interface. The comment says to prefer 127.0.0.1 outside a container, but the default now points the other way. Mitigating factors: the compose file publishes no port by default, and the change is documented. Uncertainty: exposure depends on the host network, which I did not inspect.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_0b27818ec551cefe",
+      "ev_27cacf6b7d7366bb",
+      "ev_e8920ebfaeead4aa",
+      "ev_95116e58a59eac99"
+     ],
+     "line_end": 60,
+     "line_start": 60,
+     "path": "examples/config.example.yaml",
+     "revision": "head",
+     "title": "Example config binds the unauthenticated status API to all interfaces"
+    }
+   ]
+  },
+  {
+   "id": "M92-049",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 32,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "In BASE, OUTCOME_UNKNOWN latched the incident durably via a 'latch_incident' store op, and the 'AUTH_FAILED' path added 'auth_latch'. In HEAD, on_outcome sends OUTCOME_UNKNOWN into BOOT_GRACE with no store op (policy.py ~1138-1140). When boot grace expires, on_tick calls _latch(), which sets only in-memory state to LATCHED and emits an event, with no StoreOp. service.py's _iterate passes the on_tick decision as _handle_events(decision.events, []), so store_ops are dropped. The durable incident therefore stays unlatched. On the next snapshot, _process_no_frames returns early only for BOOT_GRACE or RECOVERY_PENDING, or when rt.store_latched is set (refreshed from the store each snapshot, so False). With store_armed true, it sets rt.state = SUSPECT, which overwrites the in-memory LATCHED. Check 14 (incident.latched) then passes. Only the per-camera cooldown (1h runtime), daily budget (3/24h), and global spacing still apply, so a second reboot can be proposed and sent in the same outage once those clear. This violates the policy invariant 'A latched outage never receives a second attempt' and the operations doc's troubleshooting statement that after OUTCOME_UNKNOWN 'there will not be a second attempt this outage'. The durable latch is also lost on restart.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_be54fb0fe4c4e28a",
+      "ev_03cf3e813db6895d",
+      "ev_554dc3d4783fecd3",
+      "ev_33d515361ce745dd",
+      "ev_8e49ab08d99a1916",
+      "ev_4eba84a27c58ab47",
+      "ev_2a43e8a91c3baecf"
+     ],
+     "line_end": 411,
+     "line_start": 378,
+     "path": "src/frigate_watchdog/policy.py",
+     "revision": "head",
+     "title": "Boot-grace expiry and OUTCOME_UNKNOWN no longer durably latch; a second reboot can follow in the same outage"
+    }
+   ]
+  },
+  {
+   "id": "M92-050",
+   "case": "KL1",
+   "repo": "mitchins/kinglet-lms",
+   "base_sha": "dbf06e0004a44570dc253e88fffd7433d95997c8",
+   "head_sha": "694269d572bd77791f50dfd61d2ec52323da9c47",
+   "status": "complete",
+   "tool_calls": 26,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The architecture amendment fixes retail to deployment_profile=retail with delivery_mode=public_consumer, and the lifecycle CLI enforces that mapping (PROFILES in tools/installation_lifecycle.py, plus the expected-mode check). The probe README's example manifest sets deployment_profile \"retail\" with delivery_mode \"private\", and the prose says to set delivery_mode 'private', 'public_consumer', or 'hybrid' independently in each manifest. run_deployed_probe.py only checks that the value is in DELIVERY_MODES, so a retail/private pair passes manual preparation and then reaches deployment with a profile/mode combination the amendment prohibits. This is a contract drift between the operator procedure and the frozen architecture.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_38ee3c48ef7e6a37",
+      "ev_badb08d51b6f7879",
+      "ev_784b7df6ce4bbf07",
+      "ev_4abef615878d796f",
+      "ev_a6e5666cf2a9fc79",
+      "ev_211a7260ae49f3dd",
+      "ev_0e7a88313e0d97eb"
+     ],
+     "line_end": 38,
+     "line_start": 21,
+     "path": "probes/deployed/README.md",
+     "revision": "head",
+     "title": "Probe README tells operators a retail manifest may use delivery_mode=private"
+    },
+    {
+     "claim": "README.md states the current regression suite passes 48 tests and 32 subtests. The M0 ledger records later integrated runs of 66 tests/65 subtests and then 67 tests/73 subtests. Either the README is stale or the counts describe different suites. Operators relying on the README baseline would compare against a number the project has already exceeded. This is a status-claim drift only; I did not execute the suite to determine the correct value.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_3d7734c19d8df732",
+      "ev_beed4dc16ce4368f",
+      "ev_276c0e6584bcdfff"
+     ],
+     "line_end": 61,
+     "line_start": 61,
+     "path": "README.md",
+     "revision": "head",
+     "title": "README test count contradicts later ledger validation counts"
+    }
+   ]
+  },
+  {
+   "id": "M92-051",
+   "case": "KL1",
+   "repo": "mitchins/kinglet-lms",
+   "base_sha": "dbf06e0004a44570dc253e88fffd7433d95997c8",
+   "head_sha": "694269d572bd77791f50dfd61d2ec52323da9c47",
+   "status": "complete",
+   "tool_calls": 22,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "README.md states that 'the current regression suite passes 48 tests and 32 subtests'. The M0 ledger at the same HEAD records later integrated runs of 66 tests/65 subtests and then 67 tests/73 subtests (after the CodeRabbit correction packet), and the ledger's pair-acceptance text cites 48/32 only for that earlier point. The README therefore presents a superseded count as current, which will mislead reviewers who compare it against the ledger. I did not execute the suite to determine which count is correct at HEAD, so the correct figure is unverified; the finding is that the two documents disagree.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_3d7734c19d8df732",
+      "ev_24e049d30d9b484e",
+      "ev_b6ca46626a39f3af"
+     ],
+     "line_end": 61,
+     "line_start": 61,
+     "path": "README.md",
+     "revision": "head",
+     "title": "README reports a stale regression-suite count that the ledger contradicts"
+    }
+   ]
+  },
+  {
+   "id": "M92-052",
+   "case": "KL1",
+   "repo": "mitchins/kinglet-lms",
+   "base_sha": "dbf06e0004a44570dc253e88fffd7433d95997c8",
+   "head_sha": "694269d572bd77791f50dfd61d2ec52323da9c47",
+   "status": "complete",
+   "tool_calls": 31,
+   "silence_summary": "Checked the tenant-free contract and authorization boundary across AGENTS.md, the spec, the amendment, README, and development plan. Searches found no tenants, memberships, tenant_courses, tenant selector, or tenant_id/organization_id in active probe migrations or handlers. The only tenant-keyed material is historical, and the docs label it as such. The probe-table test asserts those columns are absent. Verified at HEAD: the deployed API and jobs Workers and their wrangler configs (jobs has workers_dev=false and preview_urls=false, and its service entrypoint requires a token); the D1 migrations; the fixed-key marker handlers in api/worker.py; the lifecycle CLI's profile and licensing metadata (minimum_paid_seats=5 metadata only); the qualification-target allowlist references; and the README/milestone commands, which point at scripts and tests that exist at HEAD. The Smart Compliance pair evidence JSON matches the milestone doc for target, artifact hash, D1 IDs, and check results. Limits: I read only the first 120 of 591 lines of the pair evidence JSON, so the post-deprovision inventory claims are not independently verified. I did not run the test suites, so the stated 48-test/32-subtest counts are unverified. I did not read tools/qualification_targets.py or tools/run_deployed_probe.py beyond search hits. Full M0 and M1 are documented as open, and I found no contradiction with that. No docs_code, contracts, authorization, operating-constraint, or semantic-twin regression is supported by the spans I read.",
+   "findings": []
+  },
+  {
+   "id": "M92-053",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 32,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "At HEAD, App.swift no longer calls requestProducts(with: Subscription.Product.allCases.map(\\.rawValue)); it now calls inAppPurchase.loadSubscriptionPlans(), which fetches the backend catalogue (iap/plans) and derives product IDs from it. The Subscription.Product enum and Subscription.swift were removed in this change (pbxproj drops their references). The readme's step 4 still tells integrators to call requestProducts with Subscription.Product.allCases, a symbol that no longer exists in the codebase. Following the doc would fail to compile, or would bypass the catalogue-driven discovery that the new code relies on. Step 6 ('change needed product ids in Subscription.swift') is also stale for the same reason. Uncertainty: I did not open the Subscription.swift deletion diff directly. The removal is inferred from the pbxproj diff and the App.swift call change, and the absence of Subscription.Product in code was confirmed only by search.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_70a3481959308003",
+      "ev_4953a248d053f6bf",
+      "ev_3d2fe1dd75fa8f6b",
+      "ev_2706d964e2d585ae"
+     ],
+     "line_end": 34,
+     "line_start": 30,
+     "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/docs/InAppPurchaseReadme.md",
+     "revision": "head",
+     "title": "IAP integration readme still documents the removed Subscription.Product request path"
+    }
+   ]
+  },
+  {
+   "id": "M92-054",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 40,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "At HEAD, the readme's step 4 tells integrators to add `inAppPurchase.requestProducts(with: Subscription.Product.allCases.map(\\.rawValue))` to `App.swift` setup. This change removes that call from App.swift (replaced by `inAppPurchase.loadSubscriptionPlans()`) and deletes `Subscription.swift`, which defined `Subscription.Product` at BASE. The readme's step 6 still says to edit product IDs in `Subscription.swift`, a file that no longer exists at HEAD. Following the readme would produce code that does not compile, and it describes the old client-owned product-ID model that this change replaces with backend catalogue IDs.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_70a3481959308003",
+      "ev_4953a248d053f6bf",
+      "ev_6631136a8403ba9b",
+      "ev_e0959ba877bab8cf",
+      "ev_3d2fe1dd75fa8f6b",
+      "ev_2feae2a13dd44ec2"
+     ],
+     "line_end": 41,
+     "line_start": 27,
+     "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/docs/InAppPurchaseReadme.md",
+     "revision": "head",
+     "title": "InAppPurchase integration readme documents removed Subscription.Product API and old product-request setup"
+    },
+    {
+     "claim": "At BASE, `SubscriptionIntroViewModel` registers `fetchActiveSubscriptionIfSubscribed`, which calls `iapService.fetchActiveSubscription(...)`, and that service method calls `api.getUserSubscription` against `iap/user-subscription`. This change deletes `getUserSubscription` from the API client and protocol, deletes `fetchActiveSubscription` from the service, and rewrites the intro view model to 42 lines with no subscription fetch (HEAD read). The replacement, `getPlanCatalogue` (`iap/plans`), returns the plan catalogue, not the user's active subscription. So the intro flow no longer checks whether the user is already subscribed. The exact user-visible effect (for example, whether already-subscribed users were routed differently) was not verified because the base method body was not read before the budget ran out.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_984e562b42d53e08",
+      "ev_ec89e201e602b716",
+      "ev_085f96834e76b3ea",
+      "ev_3a6a671eab6a9b2c",
+      "ev_cff0a008a72bb010"
+     ],
+     "line_end": 54,
+     "line_start": 39,
+     "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/UI/Scenes/Intro/SubscriptionIntroViewModel.swift",
+     "revision": "base",
+     "title": "Intro screen active-subscription lookup removed; iap/user-subscription consumer dropped with no replacement"
+    }
+   ]
+  },
+  {
+   "id": "M92-055",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 15,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "be_lms_dev_nonprod_https routes to `server lms_dev_nonprod 172.31.1.60:443`. The HAProxy file's own comments and the other nonprod backends (epcore, uat, portal-staging, valet-staging) use 172.31.1.60:9443, which is the isolated event-MPM Apache. The lms-dev vhost file is also declared on 172.31.1.60:9443. Port 443 on that host is the legacy effectivepolicy Apache, whose only *:443 vhost is ServerName effectivepolicy.com.au. Since HAProxy forwards Host lms-dev.smartcompliancesystems.com.au with ProxyPreserveHost on the legacy side, lms-dev requests are likely to fall through to the effectivepolicy WordPress vhost, or fail, rather than reaching the lms-dev PHP-FPM pool. This is an inferred routing consequence from the configs and was not confirmed by running the stack.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_6a850f466a080231",
+      "ev_ba76e628b20f8704",
+      "ev_6b101375193de219",
+      "ev_09478771ef95637e",
+      "ev_222a02e271aa85fc",
+      "ev_1cb1ddb3fa5f037b"
+     ],
+     "line_end": 260,
+     "line_start": 260,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "HAProxy lms-dev backend targets legacy Apache port 443 instead of the event-MPM 9443 listener"
+    }
+   ]
+  },
+  {
+   "id": "M92-056",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 35,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The new be_lms_dev_nonprod_https backend sends traffic to `server lms_dev_nonprod 172.31.1.60:443`. The lms-dev Apache vhost added in this change is `<VirtualHost 172.31.1.60:9443>` with ServerName lms-dev.smartcompliancesystems.com.au. No 443 vhost for lms-dev is added in this change, and the other event-MPM backends (epcore, UAT, valet, portal-staging) all use 9443. As written, lms-dev requests reach whatever answers on 443 (the effectivepolicy/epcore vhost), not the lms-dev PHP-FPM pool. The sibling backends use 9443, so this looks like a copy-paste port error.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_6a850f466a080231",
+      "ev_c6d399c886333621"
+     ],
+     "line_end": 260,
+     "line_start": 260,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "HAProxy lms-dev backend targets port 443, but the lms-dev Apache vhost listens on 9443"
+    },
+    {
+     "claim": "The HEAD runbook says the shield fields are observe-only (shield_action=allow, score=0) and says 'Do not enable blocking rules until config is repo-managed and deploy/rollback scripts exist.' This change adds a repo-managed scs-edge-01 HAProxy config with active deny paths: 421 for unknown hosts, 404 for never-serve paths, 403 for probe, xmlrpc, and forged-cart paths, and 429 for rate limits. Searches for HAProxy deploy or rollback tooling return only Drupal/PHP release scripts and the nfpm packaging entries, not an HAProxy-specific deploy or rollback path. The repo is therefore not yet in the state the runbook requires before blocking can be enabled. Uncertainty: the runbook may have been superseded, and the rollback tooling may live outside this repo under another name.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_92ca8f362de38415",
+      "ev_222a02e271aa85fc",
+      "ev_444dccea6b8a49e5"
+     ],
+     "line_end": 284,
+     "line_start": 1,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "Blocking shield rules enabled although the HEAD runbook forbids them until repo-managed config and deploy/rollback scripts exist"
+    },
+    {
+     "claim": "The runbook says `epcore.effectivepolicy.com.au -> nonprod Apache/WordPress at 172.31.1.60:443`. The new servers/nonprod/haproxy/scs-edge-01.haproxy.cfg sends epcore to `server epcore_nonprod 172.31.1.60:9443` (with a comment saying the event-MPM listener is accessible only from scs-edge), so operators following the runbook would check or change the wrong port during incidents. The runbook was not updated in this change.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_460ef473ee27e573",
+      "ev_ee34c2cf0cdd57ee"
+     ],
+     "line_end": 7,
+     "line_start": 7,
+     "path": "ops/runbooks/scs-edge-01-baseplate-2026-06-28.md",
+     "revision": "head",
+     "title": "Runbook still documents epcore routing to 172.31.1.60:443; the new config routes to 9443"
+    },
+    {
+     "claim": "The config loads `/etc/haproxy/acl/never-serve-exact.acl` and `/etc/haproxy/acl/never-serve-patterns.acl` with `-f`. A repo-wide search finds these paths only in this cfg, so the ACL contents are not version-controlled in this change. If those files are absent on scs-edge-01, HAProxy will fail to start, or the never-serve policy will be silently empty if the loader tolerates it. Confidence is limited because the files may be deployed out-of-band; I did not read a host copy.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_bc7eaca3ef41f046",
+      "ev_557b93e9caf8c713"
+     ],
+     "line_end": 81,
+     "line_start": 80,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "HAProxy references never-serve ACL files that are not in the repo"
+    }
+   ]
+  },
+  {
+   "id": "M92-057",
+   "case": "L10",
+   "repo": "mitchins/needletail-harness",
+   "base_sha": "08847b4cd2691c127597218dfd31457bf246145f",
+   "head_sha": "80bf493d1cae6d9d40fe70894ee294be80292af2",
+   "status": "complete",
+   "tool_calls": 21,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "plans/m2-0-receipt.md (lines 42-47) says `deferredToM2A` registers `STORE-06 \u2192 STORE_06_twoWritersCompeteForOneSession` as required certifying evidence, and that a RED probe showed the gate failing with `satisfied=[\u2026 STORE-06 \u2026]`. In the code, `requiredVariants` is computed only from `requiredEvidence`, and `deferredToM2A` is used only in a post-hoc loop asserting `!report.satisfied.contains(caseID)`. STORE-06 has no results row in the ingested runner output, so it is always 'missing' and the assertion is trivially true. The gate cannot fail on the mechanism the receipt describes, so the claimed RED probe cannot have exercised this code, and the STORE-06 'hard gate' is not an executable control. Any future false STORE-06 certification would only be caught if a result row for that case appeared under a matching function name. The receipt and the test need to agree on what the gate actually checks.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_fcb8ccca7ef1eeb0",
+      "ev_b9d8de71d8aaedd6",
+      "ev_d73dbac898842b3d",
+      "ev_86a74d04754e223a",
+      "ev_d3a8093acb552ab8",
+      "ev_9f13fc4eae2f1c5b",
+      "ev_9e49e242126226a1"
+     ],
+     "line_end": 154,
+     "line_start": 153,
+     "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+     "revision": "head",
+     "title": "Receipt says STORE-06 is a required certifying gate, but the code never registers it"
+    },
+    {
+     "claim": "CaseResult is a public Codable type. The diff adds `public var evidenceTier: EvidenceLayer` with CodingKey `evidence_tier`. The synthesized decoder requires that key, so any previously serialized result record without it will fail to decode. The default of `.pure` applies only to the memberwise init, not to decoding. Consumers receive `.pure` only when they construct the value in code. In-repo search found no JSON decoder for CaseResult, so the breakage is latent for external CI or `./dev coverage` consumers. The receipt does not mention this wire-format change. Fail-closed behaviour is preserved for missing tiers, but the incompatibility itself is undocumented.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_68cf853880b92baa"
+     ],
+     "line_end": 245,
+     "line_start": 220,
+     "path": "Sources/NeedletailTestSupport/CaseLedger.swift",
+     "revision": "head",
+     "title": "CaseResult gains a required `evidence_tier` JSON key with no decode default"
+    }
+   ]
+  },
+  {
+   "id": "M92-058",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 3,
+   "silence_summary": "The only change is in .github/workflows/ci.yml, line 58 in the docker job: the docker/build-push-action pin moves from 53b7df96c91f9c12dcc8a07bcb9ccacbed38856a (# v7.3.0) to c3c9e263c25d99ce0380d002d59b67737d91b0dc (# v7.4.0). I read the HEAD file and the BASE..HEAD diff. The job's permissions (contents: read, packages: write), the login step, the checkout settings (persist-credentials: false), and the build inputs (push condition, tags, labels, cache, provenance, sbom) are unchanged. Nothing in the in-scope detectors (contracts, authorization, docs_code, operating_constraints, semantic_twins) regressed. A search for other build-push-action references in HEAD returned no other occurrences, so there is no twin pin to drift out of sync. Uncertainty: I could not verify from the local tools that the new SHA actually corresponds to the v7.4.0 tag, or that the upstream v7.4.0 release has no behavior change. That is a supply-chain check outside these detectors, so I did not report it.",
+   "findings": []
+  },
+  {
+   "id": "M92-059",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 5,
+   "silence_summary": "The single changed file, .github/workflows/ci.yml, has one substantive change: the docker/build-push-action pin in the 'Build and publish container' step moves from 53b7df96c91f9c12dcc8a07bcb9ccacbed38856a (# v7.3.0) to c3c9e263c25d99ce0380d002d59b67737d91b0dc (# v7.4.0). I read the full HEAD file and the BASE span covering the docker job (ev_ec0dbf0ae21c2e68, ev_afb557ad95a6ce20) and confirmed the rest of the workflow is unchanged. The job's permissions (contents: read, packages: write), the push gating (`push: ${{ github.event_name == 'push' }}`), the tags/labels wiring, the cache and provenance/sbom settings, and the trigger configuration are all identical between BASE and HEAD. The version bump is consistent with the existing SHA-pinning convention, and the comment matches the new SHA. I could not verify from the local source that c3c9e263... is the genuine v7.4.0 commit; no vendor docs were available and the repository has no other references to the action, so that remains an unverified supply-chain assumption, not a contract or authorization regression. No docs_code candidates were reported. No in-scope regression found.",
+   "findings": []
+  },
+  {
+   "id": "M92-060",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 6,
+   "silence_summary": "The only change is in .github/workflows/ci.yml, where the docker/build-push-action pin in the 'Build and publish container' step moves from 53b7df96... (# v7.3.0) to c3c9e263... (# v7.4.0). I read the full HEAD workflow and the BASE excerpt for that step. The step's `with:` inputs (context, push, tags, labels, cache-from/to, provenance, sbom) and the job's permissions (contents: read, packages: write) are unchanged, and the pin keeps the SHA-plus-version-comment convention used by the other actions. No contract, authorization, operating-constraint, or semantic-twin regression is apparent. The deterministic docs_code candidate count is 0. Uncertainty: vendor docs for build-push-action v7.4.0 are not in the local cache (lookup_docs returned not_found), and code search found no other references to either SHA, so I could not independently verify that c3c9e263... is the v7.4.0 commit or review that release's changelog.",
+   "findings": []
+  },
+  {
+   "id": "M92-061",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 24,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "On HEAD, GROUP_INHIBITION_THRESHOLD = 2 is documented as the 'Number of failing enabled cameras that inhibit all automatic recovery', and the module docstring calls the 'two-camera inhibition threshold' a core loop-prevention guarantee that configuration must not weaken. That no longer matches the code: policy.py's _maybe_propose no longer returns when len(failing) >= threshold, and the BASE invariant 'No action is proposed while two or more enabled cameras are failing' was removed. The threshold now only starts a multiple_failing event and selects the MULTIPLE_CAMERAS_UNHEALTHY global state, and the phased-recovery guards are what limit recovery. Maintainers or auditors reading the constants module would get a wrong picture of the safety model. This is documentation drift with no direct runtime effect; the recovery-limiting behaviour itself is the documented change in README and operations.md.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_5dabbf6cf23fa06d",
+      "ev_215fd2faf016e5b2",
+      "ev_82dc857bc19b3d7b",
+      "ev_1cce400de73729e0",
+      "ev_6c130140db51bdca",
+      "ev_aee0c3191165e814"
+     ],
+     "line_end": 29,
+     "line_start": 28,
+     "path": "src/frigate_watchdog/constants.py",
+     "revision": "head",
+     "title": "constants.py still documents the two-camera threshold as inhibiting all recovery"
+    }
+   ]
+  },
+  {
+   "id": "M92-062",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 15,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The module docstring says the 'two-camera inhibition threshold' is one of the 'core loop prevention guarantees' that configuration must not weaken. The GROUP_INHIBITION_THRESHOLD docstring says failing cameras 'inhibit all automatic recovery' at that count. In HEAD, _maybe_propose no longer returns when len(failing) >= GROUP_INHIBITION_THRESHOLD. The threshold now only drives the multiple_failing event, the MULTIPLE_CAMERAS_UNHEALTHY global state, and the phase-halt check. Those comments now describe behaviour the code no longer has, and they are the in-code statement of the safety rationale a maintainer would rely on.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_82dc857bc19b3d7b",
+      "ev_215fd2faf016e5b2",
+      "ev_aee0c3191165e814",
+      "ev_6c130140db51bdca",
+      "ev_b7e885541817d4f2"
+     ],
+     "line_end": 5,
+     "line_start": 1,
+     "path": "src/frigate_watchdog/constants.py",
+     "revision": "head",
+     "title": "constants.py still documents the removed two-camera hard block as a non-configurable loop-prevention guarantee"
+    },
+    {
+     "claim": "BASE blocked all proposals when len(failing) >= 2, and its module invariant said 'No action is proposed while two or more enabled cameras are failing.' HEAD removes that block. Counterfactual: three cameras, porch and driveway dark, garage stably healthy, all other guards passing. BASE: _maybe_propose returns at the failing-count check, so no reboot. HEAD: candidates are sorted by bad_since, the porch check passes because the only other failing peer is accounted for and the one stable peer satisfies peers_stable, so porch is proposed for reboot while driveway is still dark. The change is documented (policy docstring, operations.md 'Several cameras failing', README) and covered by tests (test_phasing_halts_when_a_reboot_did_not_restore_frames, test_no_recovery_when_no_camera_is_healthy). Mitigating factors I verified: observe mode still fails in evaluate_action (policy.py ~897, ev_44f32f9b62dd9c3b and ev_c483736e17fc9b11); a per-camera ONVIF preflight gates each send; one attempt per outage, 1h per-camera cooldown, 3/day budget, and 5-minute global spacing still apply; and a latched camera halts further phased reboots. Uncertainty: the authorising policy is the operations doc in this same PR, not an independent policy, and I could not check whether a switch or network-wide failure with a single stable peer is handled. Treat this as a qualified advisory on a deliberate boundary change, not a confirmed defect.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_aee0c3191165e814",
+      "ev_770e705cd42ce533",
+      "ev_8104ef5c29a0061c",
+      "ev_7e2ee630bb02501e",
+      "ev_44f32f9b62dd9c3b",
+      "ev_c483736e17fc9b11",
+      "ev_4eba84a27c58ab47",
+      "ev_cd16412d56e60c17",
+      "ev_f8592d464828daf7"
+     ],
+     "line_end": 511,
+     "line_start": 481,
+     "path": "src/frigate_watchdog/policy.py",
+     "revision": "head",
+     "title": "Recovery is now permitted while two or more cameras are failing, relaxing a documented safety invariant"
+    }
+   ]
+  },
+  {
+   "id": "M92-063",
+   "case": "KL1",
+   "repo": "mitchins/kinglet-lms",
+   "base_sha": "dbf06e0004a44570dc253e88fffd7433d95997c8",
+   "head_sha": "694269d572bd77791f50dfd61d2ec52323da9c47",
+   "status": "complete",
+   "tool_calls": 32,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The gateway authenticates its caller with env.ARCHIVE_ACCESS_TOKEN and forwards that value as the x-archive-internal-token header. The archive Worker, however, validates the header against env.ARCHIVE_INTERNAL_TOKEN, and any mismatch returns 404 (not 401). Within the repository, ARCHIVE_INTERNAL_TOKEN appears only in worker.js, and the archive Wrangler template declares no such var or secret. The gateway template declares no ARCHIVE_ACCESS_TOKEN either. So the hop works only if an out-of-band provisioning step sets the archive Worker's ARCHIVE_INTERNAL_TOKEN to the gateway's ARCHIVE_ACCESS_TOKEN value. The gateway's own unit test checks only its own forwarding, not the archive side. The M0.5-D ledger entry records a first host invocation that returned HTTP 404 with unknown origin. A name or value mismatch on this hop would produce exactly that status, so it is a plausible contributor. Uncertainty: I did not find the operator procedure that provisions these secrets, and I did not verify the deployed values. The defect is in the code contract as written, not an observed regression against BASE, which has no such files.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_aef904e8d90a1701",
+      "ev_4c20ce0d0cc881f5",
+      "ev_64c0ae7ac517a63e",
+      "ev_312e8e91950ffd9b",
+      "ev_71fb214ce9d057b3",
+      "ev_c4dc8bea89d73fdd",
+      "ev_3f3333e47d435366",
+      "ev_b6ca46626a39f3af"
+     ],
+     "line_end": 382,
+     "line_start": 382,
+     "path": "probes/archive/worker.js",
+     "revision": "head",
+     "title": "Archive gateway and Worker use different secret names for the same internal token; the Worker fails closed with 404"
+    },
+    {
+     "claim": "README.md says the current regression suite 'passes 48 tests and 32 subtests'. The M0 ledger at HEAD records later integrated runs of 66 tests/65 subtests and then 67 tests/73 subtests after the archive source-preparation corrections. The README count therefore understates the current suite, and it is the figure a reader will use to judge whether the local checks ran. This is a documentation accuracy issue with low impact; it does not change any qualification claim, and the README's 'local tests do not qualify real SCORM playback' caveat is accurate.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_3d7734c19d8df732",
+      "ev_b6ca46626a39f3af"
+     ],
+     "line_end": 61,
+     "line_start": 61,
+     "path": "README.md",
+     "revision": "head",
+     "title": "README states a stale regression-suite count that the ledger in the same PR supersedes"
+    }
+   ]
+  },
+  {
+   "id": "M92-064",
+   "case": "KL1",
+   "repo": "mitchins/kinglet-lms",
+   "base_sha": "dbf06e0004a44570dc253e88fffd7433d95997c8",
+   "head_sha": "694269d572bd77791f50dfd61d2ec52323da9c47",
+   "status": "complete",
+   "tool_calls": 35,
+   "silence_summary": "Reviewed the BASE..HEAD change (greenfield additions on a near-empty BASE; the only BASE content is a 5-line README). Read the highest-blast-radius files: the deployed API Worker (probes/deployed/api/worker.py, ev_85b1256a9e62c50c, ev_eded4500a997a838), the deployed jobs Worker (ev_49a95a8fcbc3b4ae), the archive Worker and gateway (ev_4c20ce0d0cc881f5, ev_5b757562ae47045c), the D1 migration (ev_179ffb5cbe92820f), and the wrangler templates. Checked the authority documents (AGENTS.md ev_ab9667af37814b45, README ev_56226e637da6792b, amendment and spec via search evidence). Verified that the CLI tools and commands the docs cite exist at HEAD (installation_lifecycle.py provision-pair/qualify-pair/deprovision-pair, run_deployed_probe.py pair-check, build_scorm_corpus.py, test_runtime_probe.py). Checked that the 'tenant' term is absent from probes/ at HEAD, matching the amendment's tenant-free rule.\n\nNo material regression found. Specifically:\n- Probe routes are marked public=True in Kinglet, but each handler enforces a bearer check (hmac.compare_digest) before any effect. The routes are disposable probe endpoints, and the archive gateway/worker are guarded by a 64-hex internal token and not routed publicly. This is new-code design, not a weakened guard relative to BASE.\n- The jobs Worker acknowledges only after the effect and attempt rows are durable (ev_49a95a8fcbc3b4ae).\n- The docs' claims that the Smart Compliance paired run passed and that full M0/M1 is not accepted are consistent with each other and with the ledger; the docs repeatedly scope the evidence as thin and not a full M0 pass.\n\nLimits of this review: I did not read the retail half of the Smart Compliance evidence JSON (only lines 1-80, B2B side), did not verify the README's '48 tests / 32 subtests' count (not a source behaviour), did not read the probes/runtime migration or tests/unit, and did not individually triage the 1,869 deterministic docs_code candidates beyond the README and milestone documents I read. The silence is limited to the scope I checked.",
+   "findings": []
+  },
+  {
+   "id": "M92-065",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 30,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "At BASE, App.swift setup called inAppPurchase.requestProducts(with: Subscription.Product.allCases.map(\\.rawValue)). At HEAD that call is replaced by inAppPurchase.loadSubscriptionPlans(), and Subscription.swift (which defined Subscription.Product) is deleted. The readme still gives integrators this exact snippet as step 4 (line 32), and step 6 tells them to change product IDs in Subscription.swift. Copying the documented step fails to compile because Subscription.Product no longer exists. If someone patches around that, they bypass the backend catalogue that is now the source of product IDs (the readme does not mention /iap/plans or loadSubscriptionPlans). Impact is limited to developers following this guide, not runtime behaviour. Confidence is moderate because the docs are not part of the runtime path.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_4953a248d053f6bf",
+      "ev_21dcab2e491a16c1",
+      "ev_6d4d6c11adeaa080",
+      "ev_3d2fe1dd75fa8f6b",
+      "ev_14f97a004c72d774",
+      "ev_232e311a860e726b"
+     ],
+     "line_end": 32,
+     "line_start": 32,
+     "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/docs/InAppPurchaseReadme.md",
+     "revision": "head",
+     "title": "IAP integration guide references the deleted Subscription.Product enum and the removed Subscription.swift"
+    }
+   ]
+  },
+  {
+   "id": "M92-066",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 18,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "HEAD routes host lms-dev.smartcompliancesystems.com.au via be_lms_dev_nonprod_https to `server lms_dev_nonprod 172.31.1.60:443 ... sni str(lms-dev...)`. The new lms-dev vhost in the same change is `<VirtualHost 172.31.1.60:9443>` with ServerName lms-dev.smartcompliancesystems.com.au and DocumentRoot /var/www/smart-lms/public. The sibling backends for portal-staging, valet-staging and UAT all target 172.31.1.60:9443 and the epcore-event instance, and the HAProxy comment says the isolated event-MPM service is the one that runs on 9443. So lms-dev requests appear to go to the :443 listener, which the runbook describes as the nonprod WordPress/epcore Apache, not to the event-MPM vhost that serves smart-lms. If :443 has no lms-dev vhost, lms-dev traffic would hit a different application or fall through to the default vhost. Uncertainty: the :443 vhost configuration is not in this change set, so the routing may be intentional. I could not confirm which vhost serves that SNI on :443.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_099b01079fc4c941",
+      "ev_6a850f466a080231",
+      "ev_c6d399c886333621",
+      "ev_1cb1ddb3fa5f037b",
+      "ev_0441ee7dfb7a31a6",
+      "ev_460ef473ee27e573",
+      "ev_6161befe4d9ccfd8",
+      "ev_a830e4167dbb06be"
+     ],
+     "line_end": 260,
+     "line_start": 254,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "lms-dev HAProxy backend targets :443 while the lms-dev Apache vhost listens on :9443"
+    }
+   ]
+  },
+  {
+   "id": "M92-067",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 22,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "HEAD adds be_lms_dev_nonprod_https with `server lms_dev_nonprod 172.31.1.60:443 ssl ... sni str(lms-dev.smartcompliancesystems.com.au)`. The in-repo lms-dev event-MPM vhost is `<VirtualHost 172.31.1.60:9443>` with ServerName lms-dev.smartcompliancesystems.com.au. The legacy :443 vhost on the same backend host is `<VirtualHost *:443>` with ServerName effectivepolicy.com.au only. Nothing in the repo listens for lms-dev on 443. Requests for lms-dev.smartcompliancesystems.com.au are therefore either refused or served by a non-lms vhost on 443, depending on configuration that is not in evidence. The mismatch is inside the change itself. Uncertainty: a 443 listener for lms-dev may exist outside the repo, and I could not confirm that.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_6a850f466a080231",
+      "ev_c6d399c886333621",
+      "ev_c142ec917b0e66f7",
+      "ev_8f08160d8be8994a",
+      "ev_bc7e8f46597a53c9"
+     ],
+     "line_end": 260,
+     "line_start": 260,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "HAProxy sends lms-dev to 172.31.1.60:443, but the only lms-dev vhost listens on 9443"
+    },
+    {
+     "claim": "HEAD sets `server epcore_nonprod 172.31.1.60:9443 ssl verify none check sni str(epcore.effectivepolicy.com.au)`. The runbook at ops/runbooks/scs-edge-01-baseplate-2026-06-28.md:7 documents `epcore.effectivepolicy.com.au -> nonprod Apache/WordPress at 172.31.1.60:443`, and the live ops haproxy.cfg:91 also uses 443. The repo's 9443 vhosts are for portal-staging, valet-staging, lms-dev, and uat only. No vhost for epcore appears on 9443. The HAProxy comment says epcore runs on the event-MPM Apache, which suggests an intentional migration, but the epcore vhost that would serve it is not in evidence. If no such vhost exists, Apache's default-vhost behaviour could serve another site's content for epcore requests. Severity depends on out-of-tree config I could not read.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_ee34c2cf0cdd57ee",
+      "ev_460ef473ee27e573",
+      "ev_dd3f3340f4efe970",
+      "ev_6161befe4d9ccfd8",
+      "ev_a830e4167dbb06be",
+      "ev_c6d399c886333621"
+     ],
+     "line_end": 187,
+     "line_start": 187,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "epcore backend moved to 172.31.1.60:9443 with no epcore vhost on 9443 in the repo; the runbook still documents 443"
+    }
+   ]
+  },
+  {
+   "id": "M92-068",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 6,
+   "silence_summary": "The only change is in .github/workflows/ci.yml, where the docker/build-push-action pin moves from 53b7df96c91f9c12dcc8a07bcb9ccacbed38856a (# v7.3.0) to c3c9e263c25d99ce0380d002d59b67737d91b0dc (# v7.4.0). I read the diff (ev_60b6407a257bc942) and the same step on HEAD (ev_dda733a9e82957eb) and BASE (ev_76c4a74225ab3075). The step's inputs (context, push, tags, labels), the job permissions, and the surrounding steps are unchanged. The step is a version bump of a pinned third-party action, not a change to a contract, authorization check, documented constraint, or semantic twin. No docs_code candidates were reported. I could not verify the upstream v7.4.0 release notes or that the new SHA matches that tag, since no vendor docs are available and the source tools only read this repository. That is a supply-chain check outside this review's scope, not a regression in the visible code. No finding.",
+   "findings": []
+  },
+  {
+   "id": "M92-069",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 3,
+   "silence_summary": "Reviewed the single changed file, .github/workflows/ci.yml. The only modification is the docker/build-push-action pin from v7.3.0 to v7.4.0 (ev_60b6407a257bc942). The step's inputs, the job permissions, and the surrounding steps are unchanged in HEAD (ev_8c6237607b2a11af). No repository-side contract, authorization, or docs_code change is visible. Upstream v7.4.0 input semantics could not be checked (vendor docs lookup returned not_found), so this is a residual uncertainty, not a finding.",
+   "findings": []
   }
  ]
 }

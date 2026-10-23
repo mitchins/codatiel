@@ -20,7 +20,11 @@ def main():
     out_map = Path("eval/M9_2_BLIND_MAP.json")
     items, mapping = [], {}
     n = 0
-    for model_d in sorted((root / "runs").iterdir()):
+    # Fixed model order (luna first): opaque IDs must be stable across
+    # regenerations as new models complete. Never reorder.
+    model_dirs = sorted((root / "runs").iterdir())
+    model_dirs.sort(key=lambda d: {"luna": 0, "haiku": 1}.get(d.name, 2))
+    for model_d in model_dirs:
         for arm_d in sorted(model_d.iterdir()):
             for case_d in sorted(arm_d.iterdir()):
                 for rep_d in sorted(case_d.iterdir()):

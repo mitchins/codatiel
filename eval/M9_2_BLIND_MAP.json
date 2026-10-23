@@ -282,6 +282,138 @@
    "model": "luna",
    "rep": "rep3",
    "run_dir": "/tmp/m9_2/runs/luna/C/WT4/rep3/9395da4b4b2bd3ad/8f62383e3bfb36a7"
+  },
+  "M92-048": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/FW3/rep1/a81351566761097d/3ae008fc8748a1fc"
+  },
+  "M92-049": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/FW3/rep2/a81351566761097d/7f76a1129ac4ade7"
+  },
+  "M92-050": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/KL1/rep1/16cf57614d4efb56/504462578ffbe5c3"
+  },
+  "M92-051": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/KL1/rep2/16cf57614d4efb56/e2132cf85cd745c5"
+  },
+  "M92-052": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/KL1/rep3/16cf57614d4efb56/a22b8af9d3e2a6a6"
+  },
+  "M92-053": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/L06/rep1/409d48416f8e2908/c20f17ca3b7a97d0"
+  },
+  "M92-054": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/L06/rep3/409d48416f8e2908/c0aa5806f486053d"
+  },
+  "M92-055": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/L08/rep1/69cb753612739559/2972244237412dbb"
+  },
+  "M92-056": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/L08/rep3/69cb753612739559/d92968fad093a14d"
+  },
+  "M92-057": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/L10/rep3/eb5e8b1771d86634/036983449e131100"
+  },
+  "M92-058": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/WT4/rep1/fba374a29857bdd9/b5a7d3aea05aad06"
+  },
+  "M92-059": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/WT4/rep2/fba374a29857bdd9/ea95cc20d0e8f7e1"
+  },
+  "M92-060": {
+   "arm": "A",
+   "model": "haiku",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/haiku/A/WT4/rep3/fba374a29857bdd9/bf67091f00374faa"
+  },
+  "M92-061": {
+   "arm": "B",
+   "model": "haiku",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/haiku/B/FW3/rep1/30514b990ad9f532/8f8050326bd296c8"
+  },
+  "M92-062": {
+   "arm": "B",
+   "model": "haiku",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/haiku/B/FW3/rep3/30514b990ad9f532/e2c50e56687cb1ce"
+  },
+  "M92-063": {
+   "arm": "B",
+   "model": "haiku",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/haiku/B/KL1/rep1/3162d6076fa7fda2/7782c194f32ba781"
+  },
+  "M92-064": {
+   "arm": "B",
+   "model": "haiku",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/haiku/B/KL1/rep2/3162d6076fa7fda2/210ef83d349f26db"
+  },
+  "M92-065": {
+   "arm": "B",
+   "model": "haiku",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/haiku/B/L06/rep3/8bff9966c8350913/3e35cb5dcd390498"
+  },
+  "M92-066": {
+   "arm": "B",
+   "model": "haiku",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/haiku/B/L08/rep1/e22eae14472748d7/e1e15801a1b8f65c"
+  },
+  "M92-067": {
+   "arm": "B",
+   "model": "haiku",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/haiku/B/L08/rep2/e22eae14472748d7/fe26c2ddcea3efe7"
+  },
+  "M92-068": {
+   "arm": "B",
+   "model": "haiku",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/haiku/B/WT4/rep1/76f076f861d71a49/be5736ac39607c21"
+  },
+  "M92-069": {
+   "arm": "B",
+   "model": "haiku",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/haiku/B/WT4/rep2/76f076f861d71a49/ff75553ceea4aa21"
   }
  }
 }
