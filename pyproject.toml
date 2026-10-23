@@ -9,6 +9,9 @@ description = "Codatiel Iteration 2 — self-hosted semantic regression scanner 
 requires-python = ">=3.10"
 dependencies = []
 
+[project.scripts]
+codatiel-i2 = "codatiel_i2.cli:main"
+
 [project.optional-dependencies]
 test = [
     "pytest>=8",
@@ -34,7 +37,7 @@ where = ["."]
 include = ["codatiel_i2*"]
 
 [tool.setuptools.package-data]
-codatiel_i2 = ["config/*.json"]
+codatiel_i2 = ["config/*.json", "guidebook_port.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

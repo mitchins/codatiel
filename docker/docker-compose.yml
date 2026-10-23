@@ -1,0 +1,50 @@
+# Codatiel v0.1.0 — Portainer/Docker Compose stack.
+#
+# Deploy: in Portainer, Stacks > Add stack, paste this file (or point at
+# the repo path), attach an env file based on docker/.env.example,
+# deploy. No inbound ports: the watcher polls GitHub outbound only.
+#
+# Persistent volumes hold state, checkouts, run/evidence artifacts,
+# delivery records and feedback. Never store /tmp paths here: the
+# container filesystem is ephemeral.
+
+name: codatiel-v010
+
+services:
+  watcher:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: codatiel-i2:0.1.0
+    container_name: codatiel-watcher
+    restart: unless-stopped
+    env_file:
+      - path: ./codatiel-v010.env
+        required: true
+    volumes:
+      - codatiel-state:/data/state
+      - codatiel-runs:/data/runs
+      - codatiel-work:/data/work
+      - codatiel-feedback:/data/feedback
+    environment:
+      CODATIEL_WATCH_STATE: /data/state/watcher_state.json
+      CODATIEL_WATCH_RUNS: /data/runs
+      CODATIEL_WATCH_WORK: /data/work
+    command: ["watcher", "daemon"]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "codatiel-i2", "watcher", "status"]
+      interval: 5m
+      timeout: 60s
+      start_period: 2m
+      retries: 2
+
+volumes:
+  codatiel-state:
+  codatiel-runs:
+  codatiel-work:
+  codatiel-feedback:

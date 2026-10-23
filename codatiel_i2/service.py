@@ -248,9 +248,23 @@ def _collect_provider_termination(model: Any) -> dict[str, str]:
     return out
 
 
-_GUIDEBOOK_PORT_PATH = (Path(__file__).resolve().parent.parent / "docs"
-                         / "reviewer_methodology" / "guidebook_port.md")
-GUIDEBOOK_PORT_INSTRUCTIONS = _GUIDEBOOK_PORT_PATH.read_text(encoding="utf-8")
+def _guidebook_port_text() -> str:
+    """Guidebook prompt text: repo checkout first, packaged copy fallback.
+
+    The v0.1.0 image installs only the package, so the repo-relative file
+    is absent there; the packaged copy (same bytes, content-addressed by
+    GUIDEBOOK_PORT_ID at import) keeps imports working everywhere.
+    """
+    repo_path = (Path(__file__).resolve().parent.parent / "docs"
+                 / "reviewer_methodology" / "guidebook_port.md")
+    if repo_path.exists():
+        return repo_path.read_text(encoding="utf-8")
+    import importlib.resources as _resources
+    return (_resources.files("codatiel_i2") / "guidebook_port.md"
+            ).read_text(encoding="utf-8")
+
+
+GUIDEBOOK_PORT_INSTRUCTIONS = _guidebook_port_text()
 GUIDEBOOK_PORT_ID = instructions_id_for(
     "guidebook-port-0.1", GUIDEBOOK_PORT_INSTRUCTIONS)
 
@@ -1254,10 +1268,15 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
 
 def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
                    transport: Any = None,
-                   subject: str | None = None) -> dict[str, Any]:
+                   subject: str | None = None,
+                   text_body: str | None = None) -> dict[str, Any]:
     """Deliver the shadow digest for a completed run. No PR comments ever:
     the only outbound channel is the digest transport (SMTP2GO in ops,
-    fixture transport in tests/gates)."""
+    fixture transport in tests/gates).
+
+    `text_body`, when given, replaces the built-in terse digest with an
+    exact pre-rendered body (v0.1.0 watcher emails). The given bytes are
+    hashed and persisted pre-send exactly as with the default body."""
     run_dir = Path(run_dir)
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     shadow = json.loads((run_dir / "shadow_result.json").read_text(
@@ -1287,6 +1306,8 @@ def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
     text = "\n".join(lines)
     subj = subject or (f"[codatiel-shadow] {run.get('repo')} "
                        f"{run.get('head_sha', '')[:8]} {shadow.get('status')}")
+    if text_body is not None:
+        text = text_body
     import hashlib as _hashlib
 
     body_sha256 = _hashlib.sha256(text.encode("utf-8")).hexdigest()
