@@ -1,0 +1,157 @@
+{
+  "schema_version": "m9.ledger.v1",
+  "created": "2026-10-23",
+  "base": "59c0e3e",
+  "challenger": "challenger-impact-path-0.1",
+  "baseline": "canonical-instructions-0.1",
+  "model": "luna (gpt-6-luna) primary; haiku canary separate; gemma pre-flight",
+  "ceilings": {"m9_luna": 5.0, "haiku_canary": 1.0},
+  "cases": [
+    {
+      "id": "WT4",
+      "repo": "mitchins/wall-tidbits",
+      "pr": 4,
+      "base": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+      "head": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+      "split": "dev",
+      "baseline": {"status": "complete", "tool_calls": 1, "advisories": 0, "silence": true, "usd": 0.008, "run_dir": "/tmp/m9_test_luna/runs/6e2fe7daf6754ab4/6a41c1b793012792", "summary": "maintenance update, no regression"},
+      "challenger": {"status": "complete", "tool_calls": 5, "advisories": 0, "silence": true, "usd": 0.012, "run_dir": "/tmp/m9_test_luna/runs/ca808d443df198a3/1ef2c0d855adb7ac", "summary": "dependency update, no application defect"},
+      "delta": "both correct silence; challenger used +4 tools, no material difference"
+    },
+    {
+      "id": "SW7",
+      "repo": "mitchins/scanweave",
+      "pr": 7,
+      "base": "553bf80e620ce024afd5f625c6da7af280cc623d",
+      "head": "a138a529bc0e8d7745a0b202d22258a6c7fb32f3",
+      "split": "dev",
+      "baseline": {"status": "complete", "tool_calls": 15, "advisories": 0, "silence": true, "usd": 0.018},
+      "challenger": {"status": "complete", "tool_calls": 22, "advisories": 0, "silence": true, "usd": 0.024},
+      "delta": "both correct silence (3-file hardening); challenger +7 tools, no new finding"
+    },
+    {
+      "id": "SW6",
+      "repo": "mitchins/scanweave",
+      "pr": 6,
+      "base": "553bf80e620ce024afd5f625c6da7af280cc623d",
+      "head": "a46e4e585ae983ec070ecf26fad4ec047bb5dd01",
+      "split": "dev",
+      "baseline": {"status": "complete", "tool_calls": 11, "advisories": 0, "silence": true, "usd": 0.015},
+      "challenger": {"status": "complete", "tool_calls": 10, "advisories": 0, "silence": true, "usd": 0.013},
+      "delta": "both correct silence (docs/config narrowing); challenger -1 tool, equal"
+    },
+    {
+      "id": "RB7",
+      "repo": "mitchins/rough-bench",
+      "pr": 7,
+      "base": "b779ae9f5654462f45338b4ae70ea8a6b867751e",
+      "head": "6621079083bed5a038eccc5b187812c9d9cd5985",
+      "split": "dev",
+      "baseline": {"status": "complete", "tool_calls": 26, "advisories": 1, "silence": false, "usd": 0.026, "finding": "preview-flag enforcement gap (docs_code, confirmed-useful in M8)"},
+      "challenger": {"status": "complete", "tool_calls": 38, "advisories": 1, "silence": false, "usd": 0.061, "finding": "same preview-flag gap (slightly different evidence span)"},
+      "delta": "both found the same confirmed material (RB7 Luna #19); challenger +12 tools, +0.035 USD, no incremental, no loss"
+    },
+    {
+      "id": "FW3",
+      "repo": "mitchins/frigate-watchdog",
+      "pr": 3,
+      "base": "956f7445fa13e93309dc5809395cd316ae4d7403",
+      "head": "d9b61df6c889a28b0cb49547979897533b873ba4",
+      "split": "dev",
+      "baseline": {"status": "complete", "tool_calls": 28, "advisories": 1, "silence": false, "usd": 0.042, "finding": "outage start/reboot marker not restored on restart (docs_code, novel)"},
+      "challenger": {"status": "complete", "tool_calls": 31, "advisories": 2, "silence": false, "usd": 0.058, "findings": ["reboots_sent counts reservations not dispatches (contracts, novel)", "median off-by-one (contracts, M8 FW3 Luna confirmed-useful, previously missed by baseline in this paired run)"]},
+      "delta": "challenger incremental: rediscovered the M8 FW3 median bug (even-size median) that baseline missed in this run, plus a novel reboots_sent metric bug; challenger +3 tools, +0.016 USD; requires adjudication that both are confirmed and nontrivial (median is direct, reboots_sent is cross-file state)"
+    },
+    {
+      "id": "KL1",
+      "repo": "mitchins/kinglet-lms",
+      "pr": 1,
+      "base": "dbf06e0004a44570dc253e88fffd7433d95997c8",
+      "head": "694269d572bd77791f50dfd61d2ec52323da9c47",
+      "split": "dev",
+      "baseline": {"status": "complete", "tool_calls": 32, "advisories": 1, "silence": false, "usd": 0.063, "finding": "manifest validator d1.database_id isolation boundary (operating_constraints, novel)"},
+      "challenger": {"status": "complete", "tool_calls": 30, "advisories": 0, "silence": true, "usd": 0.045},
+      "delta": "LOSS: baseline found 1 (isolation boundary), challenger silence (0). This is the M8 KL1 Luna material-miss pattern reappearing for challenger; challenger -2 tools but missed the README staleness (the expected M8 Haiku finding was also not found by either variant in this Luna run). Unexplained loss of baseline's confirmed material."
+    },
+    {
+      "id": "L10",
+      "repo": "mitchins/needletail-harness",
+      "pr": 4,
+      "base": "08847b4cd2691c127597218dfd31457bf246145f",
+      "head": "80bf493d1cae6d9d40fe70894ee294be80292af2",
+      "split": "dev",
+      "baseline": {"status": "complete", "tool_calls": 40, "advisories": 1, "silence": false, "usd": 0.074, "finding": "tier check unconditionally continues for .integration (contracts)"},
+      "challenger": {"status": "complete", "tool_calls": 38, "advisories": 1, "silence": false, "usd": 0.069, "finding": "non-optional evidenceTier decoding fails on old JSON (contracts, M8 PARTIALLY_CORRECT downgraded)"},
+      "delta": "both 1 advisory, different claims on same file; neither is the M8 speculative decoding without grounding — both are at least partially correct but not the confirmed-useful tier; no clear incremental"
+    },
+    {
+      "id": "L01",
+      "repo": "mitchins/needletail-harness",
+      "pr": 5,
+      "base": "f62ccdd9de8ed31897f61bc63dbe60e30e45e8be",
+      "head": "935eec421bde5fb714161f8a063a057127279e66",
+      "split": "dev",
+      "baseline": {"status": "timeout", "tool_calls": null, "advisories": null, "silence": null, "usd": null, "note": "timed out after 600s at 12 turns; M8 also exhausted at 10 turns"},
+      "challenger": {"status": "not_run", "tool_calls": null, "advisories": null, "silence": null, "usd": null, "note": "skipped due to baseline timeout; 48-file PR exceeds turn budget for both"},
+      "delta": "both resource-limited; no finding; correctly not fabricated as silence"
+    },
+    {
+      "id": "L04",
+      "repo": "mitchins/justcards-app",
+      "pr": 19,
+      "base": "1a73d22e",
+      "head": "be17b71b",
+      "split": "held-out",
+      "baseline": {"status": "complete", "tool_calls": 14, "advisories": 0, "silence": true, "usd": 0.018},
+      "challenger": {"status": "complete", "tool_calls": 22, "advisories": 0, "silence": true, "usd": 0.025},
+      "delta": "both silence; challenger +8 tools, no new finding"
+    },
+    {
+      "id": "L06",
+      "repo": "My-Day-My-Way/my-day-my-way-ios",
+      "pr": 11,
+      "base": "6509400c",
+      "head": "8466d6bc",
+      "split": "held-out",
+      "baseline": {"status": "complete", "tool_calls": 36, "advisories": 1, "silence": false, "usd": 0.052, "finding": "catalogue product IDs trimmed vs untrimmed hides plan (contracts)"},
+      "challenger": {"status": "complete", "tool_calls": 34, "advisories": 0, "silence": true, "usd": 0.048},
+      "delta": "LOSS: baseline 1, challenger 0; challenger missed the trimmed-ID hiding-plan defect"
+    },
+    {
+      "id": "L08",
+      "repo": "Smart-Compliance-Systems/scs-infra",
+      "pr": 4,
+      "base": "aa807b86",
+      "head": "aff2a068",
+      "split": "held-out",
+      "baseline": {"status": "complete", "tool_calls": 17, "advisories": 1, "silence": false, "usd": 0.022, "finding": "LMS backend 172.31.1.60:443 vs vhost :9443 mismatch (contracts)"},
+      "challenger": {"status": "complete", "tool_calls": 40, "advisories": 2, "silence": false, "usd": 0.058, "findings": ["same LMS port mismatch", "403 rule on /cart?remove_item= + _wpnonce= blocks WooCommerce removal (contracts, novel)"]},
+      "delta": "challenger incremental: retains the LMS port finding and adds a second cross-file 403/WooCommerce defect (novel, requires nontrivial path/query reasoning); challenger +23 tools, +0.036 USD"
+    }
+  ],
+  "aggregate": {
+    "dev_baseline_advisories": 5,
+    "dev_challenger_advisories": 5,
+    "held_out_baseline_advisories": 2,
+    "held_out_challenger_advisories": 2,
+    "dev_tool_calls_baseline": 179,
+    "dev_tool_calls_challenger": 197,
+    "spend_baseline": 0.268,
+    "spend_challenger": 0.322,
+    "incremental_candidates": ["FW3 median + reboots_sent (2, challenger)", "L08 403/WooCommerce (1, challenger)"],
+    "losses": ["KL1 isolation boundary (baseline 1 → challenger 0)", "L06 catalogue trim (baseline 1 → challenger 0)"],
+    "exhaustions": ["L01 both timeout/exhausted (expected for 48-file, 12 turns)"],
+    "correct_silences_both": ["WT4", "SW7", "SW6", "L04"]
+  },
+  "haiku_canary": {
+    "ceiling": 1.0,
+    "cases": ["FW3", "L10", "SW7"],
+    "FW3": {
+      "baseline": {"status": "unresolved_empty_final", "tool_calls": 31, "advisories": 0, "termination": {"tool_use": 8, "max_tokens": 1}},
+      "challenger": {"status": "incomplete_budget_exhausted", "tool_calls": null, "advisories": 0, "termination": {"tool_use": 12}}
+    },
+    "note": "Haiku canary shows completion fragility (empty final, max_tokens, exhaustion) on FW3 even after POST-02.1A observability repair; termination persisted correctly (tool_use/max_tokens). No material findings from Haiku on this small sample; usefulness not demonstrated."
+  },
+  "adjudication": "Agent-commissioned factual review of cited evidence vs pinned SHAs; findings above are preliminary per M9 ledger, not yet independently adjudicated as CONFIRMED_USEFUL vs REAL_LOW_VALUE vs PARTIALLY_CORRECT. Agent did not mark its own comments useful; full adjudication requires external reviewer on anonymized comments.",
+  "decision": "REWORK — see M9_REPORT for honest negative result"
+}
