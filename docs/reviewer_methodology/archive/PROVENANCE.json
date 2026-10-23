@@ -1,0 +1,134 @@
+{
+ "schema_version": "m9.2.provenance.v1",
+ "source_repo": "/data/coding/codatiel/codatiel-i2",
+ "source_head": "d1c105d",
+ "verify": "git hash-object on each archived copy; all five brief-specified blobs MATCH",
+ "files": [
+  {
+   "file": "REVIEWER_INVESTIGATION_GUIDEBOOK.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "e730665",
+   "source_path": "eval/REVIEWER_INVESTIGATION_GUIDEBOOK.md",
+   "git_blob": "9d1c1db2f2da7e695db8a32d557d26cb29e56c2f",
+   "sha256": "ead2e358b36a9a1b769ba78aecd33eda8476db603a1d7c78a6dfe3d8464959d7",
+   "bytes": 9281
+  },
+  {
+   "file": "REVIEWER_OUTPUT_CONTRACT.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "d1c105d",
+   "source_path": "eval/REVIEWER_OUTPUT_CONTRACT.md",
+   "git_blob": "9290525f07ef8d6f1bc3a874410fbb2885db1678",
+   "sha256": "c3ea41e938922da84298a12abdaa356c8b5a9930e3f7f2c4109fc644fa8add49",
+   "bytes": 3672
+  },
+  {
+   "file": "P-GUIDEBOOK.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "552fc47",
+   "source_path": "eval/LIVE_01C_PROMPTS/P-GUIDEBOOK.md",
+   "git_blob": "fcfa8fbabfb3115a140e5802e3c778cc45a960fb",
+   "sha256": "09e0ab75fc27bea7dd1fb73f3d428de12971bdf48c2d271f00711ffb91839ba8",
+   "bytes": 29227
+  },
+  {
+   "file": "P-SHORT.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "552fc47",
+   "source_path": "eval/LIVE_01C_PROMPTS/P-SHORT.md",
+   "git_blob": "3b1b4c64ebd381b4a277ca73748dcba8f4f6dd93",
+   "sha256": "bfd5f77fd085bb5cb9b84be65805c0015f0e63826735d8fb2bf54024b9acf083",
+   "bytes": 15148
+  },
+  {
+   "file": "REVIEWER_01C_DECISION.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "552fc47",
+   "source_path": "eval/REVIEWER_01C_DECISION.md",
+   "git_blob": "94a2537ed6cf3dc947ac8375db836ef102990283",
+   "sha256": "f775581ba093b03ac0126bd74cb378758a80103022b5476e865271058734e5f3",
+   "bytes": 5060
+  },
+  {
+   "file": "REVIEWER_01B_DECISION.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "d1c105d",
+   "source_path": "eval/REVIEWER_01B_DECISION.md",
+   "git_blob": "f6bfa93124482990d31314786032b22cab2f788f",
+   "sha256": "4d4ae8daa0d10509337314258173ad7c565126c00346dabe6ef49658e14caebe",
+   "bytes": 3854
+  },
+  {
+   "file": "REVIEWER_01D_DECISION.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "d1c105d",
+   "source_path": "eval/REVIEWER_01D_DECISION.md",
+   "git_blob": "6b1f9550000aad264e4be9502f760f18893f2a69",
+   "sha256": "16fa9eb3ab473d8bbe81bd0f2eccfb10971cb9b7de070b587f1754593c0a298e",
+   "bytes": 6027
+  },
+  {
+   "file": "REVIEWER_01E_DECISION.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "d1c105d",
+   "source_path": "eval/REVIEWER_01E_DECISION.md",
+   "git_blob": "fa8f175aeada2faa5fb7a3c657025638c0679803",
+   "sha256": "1fb35507aeff02725fdb8c4d63866ae48f5ede5c3508fe415de796342654d0b2",
+   "bytes": 4248
+  },
+  {
+   "file": "ORGANIC_01E_JUDGMENT_R1.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "d1c105d",
+   "source_path": "eval/ORGANIC_01E_JUDGMENT_R1.md",
+   "git_blob": "e51e903c31bbcb6dc007ce974477975740415b74",
+   "sha256": "566b1c8e227f1cc02c7fb3e720ef762108130d923e9ec18502c6070b2bda47b8",
+   "bytes": 1706
+  },
+  {
+   "file": "ORGANIC_01E_JUDGMENT_R2.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "d1c105d",
+   "source_path": "eval/ORGANIC_01E_JUDGMENT_R2.md",
+   "git_blob": "2c2d9a483d724f05e2c954708267c58020af89cd",
+   "sha256": "eb3b23534f5d52c69483abeddd671a8d27841b4d59ed9b711e04a89b986050ed",
+   "bytes": 1926
+  },
+  {
+   "file": "REVIEWER_RULES_OF_ENGAGEMENT.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "d1c105d",
+   "source_path": "eval/REVIEWER_RULES_OF_ENGAGEMENT.md",
+   "git_blob": "ce79a563f3d18b0ce720b27c6a0790ca72da97f4",
+   "sha256": "a93da63a62123645e35386f3700d6b41c24cc3b233dfdf4d41f683b374a340c0",
+   "bytes": 10442
+  },
+  {
+   "file": "REVIEWER_PUBLICATION_POLICY.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "d1c105d",
+   "source_path": "eval/REVIEWER_PUBLICATION_POLICY.md",
+   "git_blob": "172604f1a5158c958cba80c2716205a9c5bd2b8f",
+   "sha256": "4579d1bfe518fcbba46fda4572fffe4aa592eeda929d1bf346acfcb2a3188421",
+   "bytes": 3672
+  },
+  {
+   "file": "REVIEWER_ADVERSARIAL_REVIEW.md",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "d1c105d",
+   "source_path": "eval/REVIEWER_ADVERSARIAL_REVIEW.md",
+   "git_blob": "83b4350411b5e5c335de54a8fef970e3da6efd99",
+   "sha256": "7761a758dfa5c7681b160ffa2cef85607ee344f417d5b2727e7a851f65010c29",
+   "bytes": 4712
+  },
+  {
+   "file": "live_01c.py.552fc47.reference-only.py",
+   "source_repo": "/data/coding/codatiel/codatiel-i2",
+   "source_commit": "552fc47",
+   "source_path": "eval/live_01c.py",
+   "git_blob": "3c0dba1ca9c2022e93e651ad124e043adb162c59",
+   "sha256": "8a0d56525bdb626c6cdb8e9b413bd4e901ff7769fe30d22940fd05a67796fb2f",
+   "bytes": 5174
+  }
+ ]
+}
