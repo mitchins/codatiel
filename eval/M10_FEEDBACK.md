@@ -4,10 +4,11 @@ One structured file, one command. No UI, no automation.
 
 ## Rating a finding
 
-From a digest, take the run ID and the `finding_xxx` ID:
+From a digest, take the run ID and the finding number (`#k`, 1-based as
+shown) or a verified `finding_xxx` ID:
 
 ```
-M10_ROOT=/tmp/m10 python eval/m10_feedback.py rate <run_id> <finding_id> useful|low_value|wrong [note]
+M10_ROOT=/tmp/m10 python eval/m10_feedback.py rate <run_id> <#k|finding_id> useful|low_value|wrong [note]
 ```
 
 - **useful**: correct, material, worth telling the author.
