@@ -152,12 +152,32 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
               rate_status: str = "unconfirmed",
               max_usd_per_review: float | None = None,
               tool_budget: int = 40,
-              variant: str = "baseline") -> dict[str, Any]:
-    """Run one canonical review over a GitHub PR (base/head from the PR)."""
+              variant: str = "baseline",
+              expected_base: str | None = None,
+              expected_head: str | None = None) -> dict[str, Any]:
+    """Run one canonical review over a GitHub PR (base/head from the PR).
+
+    When ``expected_base``/``expected_head`` are given (frozen roster SHAs),
+    the live PR metadata must match them exactly (full SHA, or unambiguous
+    prefix); otherwise the run aborts as ``failed`` at stage
+    ``sha_mismatch`` instead of silently reviewing drifted revisions.
+    """
     metadata, error = fetch_github_pr_metadata(repo, pr)
     if metadata is None:
         return {"status": "failed", "stage": "pr_metadata", "error": error,
                 "service_version": SERVICE_VERSION}
+    live_base = str(metadata.get("baseRefOid") or "")
+    live_head = str(metadata.get("headRefOid") or "")
+    for label, expected, live in (("base", expected_base, live_base),
+                                  ("head", expected_head, live_head)):
+        if expected and live and not live.startswith(expected) and not expected.startswith(live):
+            return {"status": "failed", "stage": "sha_mismatch",
+                    "error": (f"frozen {label} {expected[:12]} != live PR {label} "
+                              f"{live[:12]}; refusing to review drifted revision"),
+                    "service_version": SERVICE_VERSION,
+                    "repo": repo, "pr": pr,
+                    "expected_base": expected_base, "expected_head": expected_head,
+                    "live_base": live_base, "live_head": live_head}
     ws = prepare_github_workspace(repo, pr, Path(work_root))
     if ws.status != "ready":
         return {"status": "failed", "stage": "workspace", "error": ws.error,

@@ -50,7 +50,15 @@ def main(case_id: str, model_name: str, variant: str = "baseline"):
               max_usd_per_review=CEILING - lg["spent_usd"],
               variant=variant)
     if case["mode"] == "pr":
-        out = S.review_pr(case["repo"], case["pr"], **kw)
+        # Frozen roster SHAs are authoritative: abort on live-PR drift instead
+        # of silently reviewing the wrong revision (M9.1 Phase A3).
+        out = S.review_pr(case["repo"], case["pr"], expected_base=case.get("base"),
+                           expected_head=case.get("head"), **kw)
+        if out.get("stage") == "sha_mismatch":
+            print(json.dumps({"case": case_id, "error": "sha_mismatch",
+                              "detail": out.get("error")}, indent=1))
+            save(lg)
+            return 2
     else:
         out = S.review_local(case["local_path"], case["base"], case["head"], **kw)
     spend = {}
