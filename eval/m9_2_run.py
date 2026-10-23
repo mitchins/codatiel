@@ -34,7 +34,7 @@ CASES = {
             "head": "80bf493d1cae6d9d40fe70894ee294be80292af2"},
     "WT4": {"repo": "mitchins/wall-tidbits", "pr": 4,
             "base": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
-            "head": "f053c2f89fd1acd509b0962e83ab211cbb4f71"},
+            "head": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71"},
 }
 
 ARMS = {

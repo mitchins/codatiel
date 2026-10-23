@@ -20,7 +20,7 @@
 | L08 | scs-infra#4 | `aa807b86fda364ef0723b536672e07cca4646c6e` → `aff2a0680940964ce0d7304a2699f0415893a4b4` | material (lms, epcore, 403) |
 | L06 | my-day-my-way-ios#11 | `6509400ca318ba90d868e3cfa7fe7a5f2571bb86` → `4051ff05090a76165f1a533675086e5760b97cbd` | material (trim; roster head corrected) |
 | L10 | needletail-harness#4 | `08847b4cd2691c127597218dfd31457bf246145f` → `80bf493d1cae6d9d40fe70894ee294be80292af2` | intended-behaviour trap + low-material control |
-| WT4 | wall-tidbits#4 | `9333622385f7139ae2eddeb4a1efaec42c59f1aa` → `f053c2f89fd1acd509b0962e83ab211cbb4f71` | clean negative control |
+| WT4 | wall-tidbits#4 | `9333622385f7139ae2eddeb4a1efaec42c59f1aa` → `f053c2f89fd1f1acd509b0962e83ab211cbb4f71` | clean negative control |
 
 Any case that cannot be SHA-verified at run time is dropped and the drop recorded. SHA gate enforced (M9.1).
 
