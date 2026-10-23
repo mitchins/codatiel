@@ -774,8 +774,18 @@ def run_review(*, instructions: str, user_input: str, tools: list[Any],
         active_model = UsageRecordingModel(model, usage_ledger)
     agent = agents.Agent(name="codatiel-i2", instructions=instructions,
                          tools=tools, model=active_model, model_settings=model_settings)
-    return asyncio.run(
+    result = asyncio.run(
         agents.Runner.run(agent, user_input, max_turns=max_turns))
+    # M9.2 P1: capture the exact instructions object the SDK received, at
+    # the SDK boundary, so the run record can prove its stored hash matches
+    # what was actually passed to Agent — not just what the service claims.
+    try:
+        import hashlib as _hashlib
+        result.sdk_boundary_instructions_sha256 = _hashlib.sha256(
+            str(agent.instructions).encode("utf-8")).hexdigest()
+    except Exception:
+        pass
+    return result
 
 
 def luna_model_id() -> str:

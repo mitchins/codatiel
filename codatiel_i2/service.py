@@ -9,6 +9,7 @@ model-directed tool calls is recorded as incomplete, never as a review.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import tempfile
@@ -43,10 +44,30 @@ from codatiel_i2.verify import evidence_validation as evidence_validation_mod
 from codatiel_i2.verify import trust as trust_mod
 
 SERVICE_VERSION = "canonical-service-0.1"
-INSTRUCTIONS_VERSION = (
-    "canonical-instructions-0.1 (AGENTS.md; REVIEWER_OUTPUT_CONTRACT "
-    "v1.0-draft; REVIEWER_INVESTIGATION_GUIDEBOOK v1.0-draft)"
-)
+
+
+def _sha256_text(text: str) -> str:
+    """Content hash for prompt provenance (M9.2 P1)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def instructions_id_for(name: str, text: str) -> str:
+    """Content-derived instructions ID: <name>@<sha256[:12]>."""
+    return f"{name}@{_sha256_text(text)[:12]}"
+
+
+def verify_playbook_containment(instructions: str, playbook_text: str,
+                                playbook_sha256: str) -> bool:
+    """True iff the submitted instructions contain the declared playbook
+    content whose hash matches. Used by the P1 regression test and P3 arms."""
+    if _sha256_text(playbook_text) != playbook_sha256:
+        return False
+    return playbook_text in instructions
+
+
+# Current inventory strategy: deterministic changed-file list rendered by
+# _render_inventory. Generic triage inventories get their own strategy name.
+INVENTORY_STRATEGY = "file-list-0.1"
 
 # Constants for trace artifacts — avoids Sonar literal duplication
 _TRANSCRIPT_SCHEMA = "codatiel_i2.transcript.v1"
@@ -120,6 +141,17 @@ CHALLENGER_INSTRUCTIONS_VERSION = (
     "v1.0-draft; REVIEWER_INVESTIGATION_GUIDEBOOK v1.0-draft; M9)"
 )
 
+# M9.2 P1: truthful, content-derived provenance. The historical
+# INSTRUCTIONS_VERSION claimed (AGENTS.md; OUTPUT_CONTRACT; GUIDEBOOK) but
+# none of those documents was ever sent — see PROVENANCE_CORRECTION.md.
+# Labels below are derived from the exact bytes passed to the model.
+CANONICAL_INSTRUCTIONS_ID = instructions_id_for(
+    "canonical-minimal-0.1", CANONICAL_INSTRUCTIONS)
+CHALLENGER_INSTRUCTIONS_ID = instructions_id_for(
+    "challenger-impact-path-0.1", CHALLENGER_INSTRUCTIONS)
+# Truthful replacement for the false historical label.
+INSTRUCTIONS_VERSION = CANONICAL_INSTRUCTIONS_ID
+
 
 def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                  model_name: str, runs_root: Path | str,
@@ -129,7 +161,9 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                  rate_status: str = "unconfirmed",
                  max_usd_per_review: float | None = None,
                  tool_budget: int = 40,
-                 variant: str = "baseline") -> dict[str, Any]:
+                 variant: str = "baseline",
+                 playbook_name: str | None = None,
+                 playbook_text: str | None = None) -> dict[str, Any]:
     """Run one canonical review over a local repository revision pair."""
     ws = prepare_local_workspace(Path(repo_root), base, head,
                                  Path(work_root))
@@ -141,7 +175,9 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                        max_turns=max_turns, model_settings=model_settings,
                        rate=rate, rate_status=rate_status,
                        max_usd_per_review=max_usd_per_review,
-                       tool_budget=tool_budget, variant=variant)
+                       tool_budget=tool_budget, variant=variant,
+                       playbook_name=playbook_name,
+                       playbook_text=playbook_text)
 
 
 def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
@@ -152,9 +188,11 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
               rate_status: str = "unconfirmed",
               max_usd_per_review: float | None = None,
               tool_budget: int = 40,
-              variant: str = "baseline",
-              expected_base: str | None = None,
-              expected_head: str | None = None) -> dict[str, Any]:
+               variant: str = "baseline",
+               expected_base: str | None = None,
+               expected_head: str | None = None,
+               playbook_name: str | None = None,
+               playbook_text: str | None = None) -> dict[str, Any]:
     """Run one canonical review over a GitHub PR (base/head from the PR).
 
     When ``expected_base``/``expected_head`` are given (frozen roster SHAs),
@@ -188,7 +226,9 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                        rate=rate, rate_status=rate_status,
                        max_usd_per_review=max_usd_per_review,
                        tool_budget=tool_budget,
-                       pr_number=pr, variant=variant)
+                       pr_number=pr, variant=variant,
+                       playbook_name=playbook_name,
+                       playbook_text=playbook_text)
 
 
 def _collect_provider_termination(model: Any) -> dict[str, str]:
@@ -204,6 +244,40 @@ def _collect_provider_termination(model: Any) -> dict[str, str]:
     return out
 
 
+def _prompt_provenance(*, instructions: str, instructions_id: str,
+                       user_input: str, inventory: str,
+                       playbook_name: str | None,
+                       playbook_text: str | None,
+                       boundary_sha256: str | None) -> dict[str, Any]:
+    """M9.2 P1 prompt-provenance record: exact rendered bytes + hashes.
+
+    Labels are content-derived. When a playbook is declared, the record
+    carries its hash and whether the submitted instructions contain it.
+    """
+    instructions_sha = _sha256_text(instructions)
+    playbook_sha = _sha256_text(playbook_text) if playbook_text else None
+    return {
+        "schema_version": "codatiel_i2.prompt_provenance.v1",
+        "instructions_id": instructions_id,
+        "instructions_sha256": instructions_sha,
+        "instructions": instructions,
+        "user_input_first_message": user_input,
+        "user_input_sha256": _sha256_text(user_input),
+        "inventory_strategy": INVENTORY_STRATEGY,
+        "inventory": inventory,
+        "inventory_sha256": _sha256_text(inventory),
+        "declared_playbook": playbook_name,
+        "declared_playbook_sha256": playbook_sha,
+        "playbook_content_match": (
+            verify_playbook_containment(instructions, playbook_text,
+                                        playbook_sha)
+            if playbook_text and playbook_sha else None),
+        "sdk_boundary_instructions_sha256": boundary_sha256,
+        "boundary_match": (boundary_sha256 == instructions_sha
+                           if boundary_sha256 else None),
+    }
+
+
 def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                model_name: str, runs_root: Path, max_turns: int,
                model_settings: Any,
@@ -212,7 +286,9 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                max_usd_per_review: float | None = None,
                tool_budget: int = 40,
                pr_number: int | None = None,
-               variant: str = "baseline") -> dict[str, Any]:
+               variant: str = "baseline",
+               playbook_name: str | None = None,
+               playbook_text: str | None = None) -> dict[str, Any]:
     import os
 
     from codatiel_i2 import providers as providers_mod
@@ -254,16 +330,26 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     tools = runtime_sdk.build_i2_tools(ctx)
     # Variant-aware instructions and inventory: challenger uses impact-path
     # discipline while baseline keeps the original file-coverage prompt.
+    # M9.2 P1: the recorded ID is derived from the exact submitted bytes;
+    # an optional playbook is prepended verbatim and declared with its hash.
     if variant == "challenger":
-        instructions = CHALLENGER_INSTRUCTIONS
-        instructions_version = CHALLENGER_INSTRUCTIONS_VERSION
-        inventory = _render_inventory(changes, classification, det_candidates,
-                                      variant="challenger")
+        base_instructions = CHALLENGER_INSTRUCTIONS
+        base_name = "challenger-impact-path-0.1"
     else:
-        instructions = CANONICAL_INSTRUCTIONS
-        instructions_version = INSTRUCTIONS_VERSION
-        inventory = _render_inventory(changes, classification, det_candidates,
-                                      variant="baseline")
+        base_instructions = CANONICAL_INSTRUCTIONS
+        base_name = "canonical-minimal-0.1"
+    if playbook_text:
+        instructions = playbook_text + "\n\n" + base_instructions
+        instructions_id = instructions_id_for(
+            playbook_name or "playbook", instructions)
+    else:
+        instructions = base_instructions
+        instructions_id = instructions_id_for(base_name, instructions)
+    instructions_version = instructions_id
+    inventory = _render_inventory(changes, classification, det_candidates,
+                                  variant=variant)
+    user_input = ("Review this change between BASE and HEAD. "
+                  f"Repository: {ws.repo}. {inventory}")
     ceiling = max_usd_per_review
     if ceiling is None:
         try:
@@ -305,10 +391,11 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     try:
         result = runtime_sdk.run_review(
             instructions=instructions,
-            user_input=("Review this change between BASE and HEAD. "
-                        f"Repository: {ws.repo}. {inventory}"),
+            user_input=user_input,
             tools=tools, model=recorded_model, max_turns=max_turns,
             model_settings=model_settings, usage_ledger=ledger)
+        boundary_sha256 = getattr(
+            result, "sdk_boundary_instructions_sha256", None)
     except Exception as exc:
         # Turn-budget exhaustion is a controlled incomplete state, not a
         # failure. Preserve incremental trace (tool calls, evidence, etc.)
@@ -323,7 +410,10 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                       "investigation incomplete, not a review",
                 status="incomplete_budget_exhausted",
                 ctx=ctx, partial_result=partial_result, model_obj=recorded_model,
-                variant=variant)
+                variant=variant, instructions=instructions,
+                instructions_id=instructions_id, inventory=inventory,
+                user_input=user_input, playbook_name=playbook_name,
+                playbook_text=playbook_text)
         # For other agent failures, try to preserve partial trace if available
         partial_result = getattr(exc, "run_data", None)
         return _write_failed_run(
@@ -331,7 +421,10 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
             rate or {}, rate_status, ceiling, ledger, stage="agent",
             error=f"{type(exc).__name__}: {exc}",
             ctx=ctx, partial_result=partial_result, model_obj=recorded_model,
-            variant=variant)
+            variant=variant, instructions=instructions,
+            instructions_id=instructions_id, inventory=inventory,
+            user_input=user_input, playbook_name=playbook_name,
+            playbook_text=playbook_text)
 
     tool_evidence = _harvest_tool_evidence(result)
     tool_outputs = _harvest_tool_outputs(result)
@@ -375,18 +468,26 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
         status = "incomplete_no_tool_use"
     else:
         status = "complete"
+    provenance = _prompt_provenance(
+        instructions=instructions, instructions_id=instructions_id,
+        user_input=user_input, inventory=inventory,
+        playbook_name=playbook_name, playbook_text=playbook_text,
+        boundary_sha256=boundary_sha256)
     metrics = {"service_version": SERVICE_VERSION,
                "instructions_version": instructions_version,
-                "model": model_name, "max_turns": max_turns,
-                "tool_calls": len(tool_calls),
-                "status": status,
-                "parse_errors": parse_errors,
-                "spend": spend,
-                "wall_seconds": round(time.time() - started, 2),
-               "variant": variant}
+               "instructions_id": instructions_id,
+                 "model": model_name, "max_turns": max_turns,
+                 "tool_calls": len(tool_calls),
+                 "status": status,
+                 "parse_errors": parse_errors,
+                 "spend": spend,
+                 "wall_seconds": round(time.time() - started, 2),
+                "variant": variant}
     config = {"service": SERVICE_VERSION, "model": model_name,
               "max_turns": max_turns,
               "instructions": instructions_version,
+              "instructions_id": instructions_id,
+              "inventory_strategy": INVENTORY_STRATEGY,
               "variant": variant}
     scan_key = runs_mod.scan_key_for(ws.repo, base_sha, head_sha, config)
     run_id = runs_mod.new_run_id()
@@ -417,6 +518,7 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                       "reasoning summaries; provider-private thinking is "
                       "counted, never claimed"}])
     _finalize_spend_ledger(ledger, run_dir)
+    write_json(run_dir / "prompt_provenance.json", provenance)
     write_json(run_dir / "transcript.json",
                {"schema_version": "codatiel_i2.transcript.v1",
                 "items": _serialize_items(result)})
@@ -965,7 +1067,13 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                       ctx: Any | None = None,
                       partial_result: Any | None = None,
                       model_obj: Any | None = None,
-                      variant: str = "baseline") -> dict[str, Any]:
+                      variant: str = "baseline",
+                      instructions: str | None = None,
+                      instructions_id: str | None = None,
+                      inventory: str | None = None,
+                      user_input: str | None = None,
+                      playbook_name: str | None = None,
+                      playbook_text: str | None = None) -> dict[str, Any]:
     """Minimal immutable record for runs that die before disposition.
 
     When a partial trace is available (e.g., MaxTurnsExceeded with tool calls
@@ -976,10 +1084,28 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
 
     active = ledger if ledger is not None else SpendLedger(
         rate=rate, rate_status=rate_status, ceiling_usd=ceiling)
-    instr_version = CHALLENGER_INSTRUCTIONS_VERSION if variant == "challenger" else INSTRUCTIONS_VERSION
+    if instructions is None:
+        instructions = (CHALLENGER_INSTRUCTIONS if variant == "challenger"
+                        else CANONICAL_INSTRUCTIONS)
+    if instructions_id is None:
+        instructions_id = instructions_id_for(
+            "challenger-impact-path-0.1" if variant == "challenger"
+            else "canonical-minimal-0.1", instructions)
+    instr_version = instructions_id
+    if inventory is None:
+        inventory = ""
+    if user_input is None:
+        user_input = ""
+    provenance = _prompt_provenance(
+        instructions=instructions, instructions_id=instructions_id,
+        user_input=user_input, inventory=inventory,
+        playbook_name=playbook_name, playbook_text=playbook_text,
+        boundary_sha256=None)
     config = {"service": SERVICE_VERSION, "model": model_name,
               "max_turns": max_turns,
               "instructions": instr_version,
+              "instructions_id": instructions_id,
+              "inventory_strategy": INVENTORY_STRATEGY,
               "variant": variant}
     scan_key = runs_mod.scan_key_for(ws.repo, ws.base_sha, ws.head_sha, config)
     run_id = runs_mod.new_run_id()
@@ -1029,6 +1155,7 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                 "created_at": time_mod.utc_now_iso(),
                 "workspace": ws.to_dict(), "status": status,
                 "stage": stage, "error": error})
+    write_json(run_dir / "prompt_provenance.json", provenance)
     write_json(run_dir / "metrics.json", metrics)
     # Write model_calls with provider termination even on failed runs
     # (for Haiku, this distinguishes end_turn vs tool_use vs max_tokens)

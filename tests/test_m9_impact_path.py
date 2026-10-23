@@ -39,8 +39,12 @@ def test_baseline_and_challenger_instructions_are_distinct():
     assert svc.CANONICAL_INSTRUCTIONS != svc.CHALLENGER_INSTRUCTIONS
     assert "impact-path" in svc.CHALLENGER_INSTRUCTIONS.lower() or "Changed behavior" in svc.CHALLENGER_INSTRUCTIONS
     assert "hypotheses" in svc.CHALLENGER_INSTRUCTIONS.lower()
-    assert svc.INSTRUCTIONS_VERSION != svc.CHALLENGER_INSTRUCTIONS_VERSION
-    assert "challenger" in svc.CHALLENGER_INSTRUCTIONS_VERSION
+    # M9.2 P1: recorded IDs are content-derived, not hand-maintained labels.
+    assert svc.CANONICAL_INSTRUCTIONS_ID == svc.instructions_id_for(
+        "canonical-minimal-0.1", svc.CANONICAL_INSTRUCTIONS)
+    assert svc.CHALLENGER_INSTRUCTIONS_ID == svc.instructions_id_for(
+        "challenger-impact-path-0.1", svc.CHALLENGER_INSTRUCTIONS)
+    assert svc.INSTRUCTIONS_VERSION == svc.CANONICAL_INSTRUCTIONS_ID
 
 
 def test_variant_recorded_in_metrics_and_config(tmp_path: Path):
@@ -58,7 +62,10 @@ def test_variant_recorded_in_metrics_and_config(tmp_path: Path):
         run_dir = Path(out["run_dir"])
         metrics = json.loads((run_dir / "metrics.json").read_text())
         assert metrics["variant"] == variant
-        assert metrics["instructions_version"] == (svc.CHALLENGER_INSTRUCTIONS_VERSION if variant == "challenger" else svc.INSTRUCTIONS_VERSION)
+        expected_id = (svc.CHALLENGER_INSTRUCTIONS_ID if variant == "challenger"
+                       else svc.CANONICAL_INSTRUCTIONS_ID)
+        assert metrics["instructions_version"] == expected_id
+        assert metrics["instructions_id"] == expected_id
         run = json.loads((run_dir / "run.json").read_text())
         assert run["config"]["variant"] == variant
 
@@ -96,7 +103,7 @@ def test_challenger_exhaustion_preserves_variant_and_trace(tmp_path: Path):
     run_dir = Path(out["run_dir"])
     metrics = json.loads((run_dir / "metrics.json").read_text())
     assert metrics["variant"] == "challenger"
-    assert metrics["instructions_version"] == svc.CHALLENGER_INSTRUCTIONS_VERSION
+    assert metrics["instructions_version"] == svc.CHALLENGER_INSTRUCTIONS_ID
     # Trace files still present
     for name in ["tool_calls.jsonl", "evidence.jsonl", "model_calls.jsonl", "transcript.json"]:
         assert (run_dir / name).exists()
