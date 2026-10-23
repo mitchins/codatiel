@@ -4,10 +4,10 @@
 # (GIT_CONFIG_COUNT/KEY/VALUE), which git reads without writing any file.
 # gh CLI reads GH_TOKEN natively. Nothing here lands in the image.
 set -eu
-if [ -n "${GH_TOKEN:-}" ]; then
-    export GIT_CONFIG_COUNT=1
-    # shellcheck disable=SC2034
-    export GIT_CONFIG_KEY_0="url.https://x-access-token:${GH_TOKEN}@github.com/.insteadOf"
-    export GIT_CONFIG_VALUE_0="https://github.com/"
-fi
+# Credential helper reads the LIVE $GH_TOKEN on every git invocation, so
+# hourly GitHub App installation-token rotation never breaks checkouts.
+# Works for PATs and installation tokens alike; nothing is persisted.
+git config --global credential.https://github.com.helper \
+    '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f' \
+    2>/dev/null || true
 exec codatiel-i2 "$@"

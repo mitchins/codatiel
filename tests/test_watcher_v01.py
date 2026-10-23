@@ -320,3 +320,82 @@ def test_packaged_guidebook_matches_repo_copy():
     assert packaged.exists()
     assert (hashlib.sha256(packaged.read_bytes()).hexdigest()
             == hashlib.sha256(repo.read_bytes()).hexdigest())
+
+
+def test_app_auth_jwt_and_token_exchange(monkeypatch):
+    from codatiel_i2.github import app_auth as A
+
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "PEM")
+    app = A.AppAuth.from_env()
+    assert app.app_id == "123" and app.account == "mitchins"
+
+    seen: list = []
+
+    def fake_jwt(app_id, key, now=None):
+        assert app_id == "123" and key == "PEM"
+        return "JWT"
+
+    def fake_api(method, path, *, bearer, data=None):
+        seen.append((method, path, bearer))
+        if path == "/app/installations":
+            return [{"id": 9, "account": {"login": "mitchins"}}]
+        if path == "/app/installations/9/access_tokens":
+            return {"token": "inst-1",
+                    "expires_at": "2026-10-24T12:00:00Z"}
+        if path.startswith("/installation/repositories"):
+            return {"repositories": [
+                {"full_name": "mitchins/a", "archived": False,
+                 "disabled": False},
+                {"full_name": "mitchins/old", "archived": True,
+                 "disabled": False},
+                {"full_name": "mitchins/off", "archived": False,
+                 "disabled": True}]}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(A, "build_jwt", fake_jwt)
+    monkeypatch.setattr(A, "_api", fake_api)
+    assert app.token() == "inst-1"
+    assert app.token() == "inst-1"  # cached
+    assert len([s for s in seen if "access_tokens" in s[1]]) == 1
+    names = A.active_repo_names(A.list_installation_repos("inst-1"))
+    assert names == ["mitchins/a"]
+
+
+def test_auto_discovery_honours_exclude_and_pause(tmp_path):
+    cfg = make_cfg(tmp_path, repos=None, exclude=["mitchins/x"])
+    h, state = Harness(tmp_path), W.default_state()
+    h.prs = [pr()]
+    repos = lambda: (["o/r", "mitchins/x", "mitchins/p"], None)  # noqa: E731
+    W.poll_once(cfg, state, now=1000.0, day="2026-10-23",
+                discover=h.discover, fetch_shas=h.fetch,
+                review_luna=h.review_luna,
+                review_haiku=h.review_haiku, deliver=h.deliver,
+                list_repos=repos)
+    out = W.poll_once(cfg, state, now=2000.0, day="2026-10-23",
+                      discover=h.discover, fetch_shas=h.fetch,
+                      review_luna=h.review_luna,
+                      review_haiku=h.review_haiku, deliver=h.deliver,
+                      list_repos=repos)
+    assert h.reviews == 2  # o/r + mitchins/p; x excluded
+    assert all(s.get("pr", s.get("repo")) != "mitchins/x#1"
+               for s in out["skipped"])
+    assert any(s.get("repo") == "mitchins/x" and s.get("why") == "excluded"
+               for s in out["skipped"])
+    # per-repo pause switch: p goes quiet without list changes
+    state["repos"]["mitchins/p"] = {"paused": True}
+    before = h.reviews
+    W.poll_once(cfg, state, now=3000.0, day="2026-10-23",
+                discover=h.discover, fetch_shas=h.fetch,
+                review_luna=h.review_luna,
+                review_haiku=h.review_haiku, deliver=h.deliver,
+                list_repos=repos)
+    assert h.reviews == before
+
+
+def test_resolve_repo_list_needs_app_for_auto(tmp_path):
+    cfg = make_cfg(tmp_path, repos=None)
+    repos, err = W.resolve_repo_list(cfg, W.default_state(), app=None)
+    assert repos is None and "App" in err
+    cfg2 = make_cfg(tmp_path, repos=["o/r"], exclude=["o/r"])
+    assert W.resolve_repo_list(cfg2, W.default_state()) == ([], None)

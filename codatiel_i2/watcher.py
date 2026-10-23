@@ -31,9 +31,48 @@ HAIKU_TRIGGER_STATUSES = ("incomplete_budget_exhausted",
                           "unresolved_unparseable")
 
 
+def resolve_github_auth() -> tuple[str, Any]:
+    """App installation token preferred; read-only PAT fallback.
+
+    Returns ("app", AppAuth) when GITHUB_APP_ID is configured, else
+    ("token", None) after verifying GH_TOKEN exists for gh/git.
+    """
+    import os
+    if (os.environ.get("GITHUB_APP_ID") or "").strip():
+        from codatiel_i2.github import app_auth as app_mod
+        return "app", app_mod.AppAuth.from_env()
+    if (os.environ.get("GH_TOKEN") or "").strip():
+        return "token", None
+    raise RuntimeError("no GitHub auth: set GITHUB_APP_ID (+ private key) "
+                       "or GH_TOKEN")
+
+
+def resolve_repo_list(cfg: WatcherConfig, state: dict,
+                      app: Any = None) -> tuple[list[str] | None, str | None]:
+    """Auto-discover installation repos, minus excluded and paused.
+
+    Explicit cfg.repos (token mode) is used verbatim. Returns (repos, error).
+    """
+    excluded = set(cfg.exclude)
+    if cfg.repos is not None:
+        return [r for r in cfg.repos if r not in excluded], None
+    if app is None:
+        return None, "auto-discovery needs GitHub App auth (GITHUB_APP_ID)"
+    try:
+        from codatiel_i2.github import app_auth as app_mod
+        names = app_mod.active_repo_names(
+            app_mod.list_installation_repos(app.token()))
+    except Exception as exc:
+        return None, f"discovery failed: {type(exc).__name__}: {exc}"
+    paused = {name for name, e in (state.get("repos") or {}).items()
+              if isinstance(e, dict) and e.get("paused")}
+    return [n for n in names if n not in excluded and n not in paused], None
+
+
 @dataclass
 class WatcherConfig:
-    repos: list[str] = field(default_factory=list)
+    repos: list[str] | None = None
+    exclude: list[str] = field(default_factory=list)
     poll_interval_s: int = 300
     debounce_s: int = 120
     pr_limit: int = 20
@@ -51,6 +90,7 @@ def default_state() -> dict:
     return {"schema_version": STATE_SCHEMA,
             "config_version": CONFIG_VERSION,
             "prs": {},
+            "repos": {},
             "spend": {"seed_usd": 0.0, "reviews_usd": 0.0,
                       "days": {}, "paused": False,
                       "paused_notified": False}}
@@ -246,7 +286,8 @@ def poll_once(cfg: WatcherConfig, state: dict, *,
              fetch_shas: Callable = fetch_pr_shas,
              review_luna: Callable | None = None,
              review_haiku: Callable | None = None,
-             deliver: Callable | None = None) -> dict:
+             deliver: Callable | None = None,
+             list_repos: Callable | None = None) -> dict:
     """One poll cycle. Returns a summary; mutates `state` (caller saves).
 
     Injected callables keep this deterministic in tests:
@@ -274,7 +315,21 @@ def poll_once(cfg: WatcherConfig, state: dict, *,
             if classify_receipt(receipt) == "delivered":
                 sp["paused_notified"] = True
         return summary
-    for repo in cfg.repos:
+    if list_repos is not None:
+        repos, list_error = list_repos()
+    else:
+        repos, list_error = resolve_repo_list(cfg, state)
+    if repos is None:
+        summary["errors"].append({"repos": list_error or "no repo list"})
+        return summary
+    for repo in repos:
+        if repo in set(cfg.exclude):
+            summary["skipped"].append({"repo": repo, "why": "excluded"})
+            continue
+        if isinstance((state.get("repos") or {}).get(repo), dict) and (
+                state["repos"][repo].get("paused")):
+            summary["skipped"].append({"repo": repo, "why": "paused"})
+            continue
         try:
             prs, error = discover(repo, cfg.pr_limit)
         except Exception as exc:

@@ -70,7 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     watcher = sub.add_parser("watcher", help="v0.1.0 continuous shadow-review watcher.")
     watcher.add_argument("op", choices=["run-once", "daemon", "status",
-                                        "backfill", "replay-delivery"],
+                                        "backfill", "replay-delivery",
+                                        "pause-repo", "resume-repo"],
                          help="run-once: single poll; daemon: loop until "
                               "SIGTERM; status: state summary; backfill: "
                               "run-once with debounce=0; replay-delivery: "
@@ -130,7 +131,8 @@ def main(argv: list[str] | None = None) -> int:
         payload = cmd_watcher(args)
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return 0 if payload.get("status") in ("ok", "delivered",
-                                              "duplicate-suppressed") else 1
+                                              "duplicate-suppressed",
+                                              "paused", "resumed") else 1
     return 1
 
 
@@ -141,8 +143,11 @@ def watcher_config_from_env(args: Any) -> Any:
     def pick(flag: str, env: str, default: str = "") -> str:
         return (flag or os.environ.get(env, "") or default).strip()
 
-    repos = [r.strip() for r in
-             pick(args.repos, "CODATIEL_WATCH_REPOS").split(",") if r.strip()]
+    repos_raw = pick(args.repos, "CODATIEL_WATCH_REPOS")
+    repos = ([r.strip() for r in repos_raw.split(",") if r.strip()]
+             if repos_raw else None)
+    exclude = [r.strip() for r in
+               pick("", "CODATIEL_WATCH_EXCLUDE").split(",") if r.strip()]
     to = [a.strip() for a in
           pick(args.to, "CODATIEL_WATCH_TO").split(",") if a.strip()]
     sender = pick(args.sender, "CODATIEL_WATCH_SENDER")
@@ -159,11 +164,11 @@ def watcher_config_from_env(args: Any) -> Any:
     daily = float(os.environ.get("CODATIEL_WATCH_DAILY_CAP", "2.0"))
     seed = float(os.environ.get("CODATIEL_WATCH_SEED_SPENT", "0.389"))
     cfg = watcher_mod.WatcherConfig(
-        repos=repos, poll_interval_s=interval, debounce_s=debounce,
-        state_path=Path(state), runs_root=Path(runs_root),
-        work_root=Path(work_root), recipients=to, sender=sender,
-        spend_total_cap_usd=cap, spend_seed_usd=seed,
-        spend_daily_cap_usd=daily)
+        repos=repos, exclude=exclude, poll_interval_s=interval,
+        debounce_s=debounce, state_path=Path(state),
+        runs_root=Path(runs_root), work_root=Path(work_root),
+        recipients=to, sender=sender, spend_total_cap_usd=cap,
+        spend_seed_usd=seed, spend_daily_cap_usd=daily)
     return cfg
 
 
@@ -178,19 +183,42 @@ def cmd_watcher(args: Any) -> dict:
     if op == "status":
         cfg = watcher_config_from_env(args)
         state = watcher_mod.load_state(cfg.state_path)
+        try:
+            auth_mode, _ = watcher_mod.resolve_github_auth()
+        except RuntimeError as exc:
+            auth_mode = f"missing: {exc}"
         return {"status": "ok", "config_version":
                 watcher_mod.CONFIG_VERSION,
-                "repos": cfg.repos, "recipients": cfg.recipients,
+                "auth": auth_mode,
+                "repos": cfg.repos, "exclude": cfg.exclude,
+                "recipients": cfg.recipients,
                 "spend_total_usd": watcher_mod.spend_total(state),
                 "spend_cap_usd": cfg.spend_total_cap_usd,
                 "prs_tracked": len(state.get("prs", {})),
                 "paused": state.get("spend", {}).get("paused", False)}
+    if op in ("pause-repo", "resume-repo"):
+        cfg = watcher_config_from_env(args)
+        if not args.repos:
+            return {"status": "failed", "stage": "config",
+                    "error": "pass --repos owner/name,..."}
+        state = watcher_mod.load_state(cfg.state_path)
+        for repo in [r.strip() for r in args.repos.split(",") if r.strip()]:
+            entry = state.setdefault("repos", {}).setdefault(repo, {})
+            entry["paused"] = (op == "pause-repo")
+        watcher_mod.save_state(cfg.state_path, state)
+        return {"status": "paused" if op == "pause-repo" else "resumed",
+                "repos": args.repos}
     if op == "replay-delivery":
         return cmd_watcher_replay(args)
     cfg = watcher_config_from_env(args)
-    if not cfg.repos:
+    try:
+        auth_mode, app = watcher_mod.resolve_github_auth()
+    except RuntimeError as exc:
+        return {"status": "failed", "stage": "auth", "error": str(exc)}
+    if auth_mode == "token" and not cfg.repos:
         return {"status": "failed", "stage": "config",
-                "error": "no repos: pass --repos or CODATIEL_WATCH_REPOS"}
+                "error": "token mode needs an explicit allowlist: pass "
+                         "--repos or CODATIEL_WATCH_REPOS"}
     if not cfg.recipients or not cfg.sender:
         return {"status": "failed", "stage": "config",
                 "error": "recipients and sender required (--to/--sender or env)"}
@@ -256,6 +284,18 @@ def cmd_watcher(args: Any) -> dict:
         _signal.signal(_signal.SIGINT, _handle)
     while True:
         today = _datetime.date.today().isoformat()
+        if auth_mode == "app":
+            try:
+                os.environ["GH_TOKEN"] = app.token()
+            except Exception as exc:
+                summary = {"status": "ok", "auth_error": str(exc),
+                           "heartbeat": time.time()}
+                state = watcher_mod.load_state(cfg.state_path)
+                watcher_mod.save_state(cfg.state_path, state)
+                if op != "daemon":
+                    return summary
+                time.sleep(min(cfg.poll_interval_s, 300))
+                continue
         state = watcher_mod.load_state(cfg.state_path)
         if not state.get("spend", {}).get("seed_usd"):
             state["spend"]["seed_usd"] = cfg.spend_seed_usd

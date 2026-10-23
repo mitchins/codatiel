@@ -7,7 +7,7 @@ name = "codatiel-i2"
 version = "0.1.0"
 description = "Codatiel Iteration 2 — self-hosted semantic regression scanner for pull requests"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["pyjwt>=2", "cryptography"]
 
 [project.scripts]
 codatiel-i2 = "codatiel_i2.cli:main"
