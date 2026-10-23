@@ -42,7 +42,8 @@ def save(lg):  # NOSONAR
     LEDGER.write_text(json.dumps(lg, indent=1))  # NOSONAR
 
 
-def main(case_id: str, rep: int, tool_budget: int = 40):
+def main(case_id: str, rep: int, tool_budget: int = 40,
+         backend: str = "deepseek"):
     case = CASES[case_id]
     lg = ledger()
     if lg["spent_usd"] + RESERVE >= CEILING:
@@ -50,11 +51,12 @@ def main(case_id: str, rep: int, tool_budget: int = 40):
                            "spent": lg["spent_usd"],
                            "ceiling": CEILING}))
         return 2
-    resolved = P.resolve_backend("deepseek")
-    model, settings = P.build_model("deepseek")
-    kw = dict(model=model, model_name=f"deepseek:{resolved['model']}",
-              runs_root=RUNS / "deepseek" / "A" / case_id / f"rep{rep}",
-              work_root=WORK / "deepseek" / "A" / case_id / f"rep{rep}",
+    resolved = P.resolve_backend(backend)
+    model, settings = P.build_model(backend)
+    quota = str(resolved["rate_status"] or "").startswith("quota_")
+    kw = dict(model=model, model_name=f"{backend}:{resolved['model']}",
+              runs_root=RUNS / backend / "A" / case_id / f"rep{rep}",
+              work_root=WORK / backend / "A" / case_id / f"rep{rep}",
               max_turns=12, model_settings=settings, tool_budget=tool_budget,
               rate=resolved["rate_usd_per_mtok"],
               rate_status=resolved["rate_status"],
@@ -81,8 +83,9 @@ def main(case_id: str, rep: int, tool_budget: int = 40):
         if spend.get(extra) is not None:
             usage[extra] = spend[extra]
     lg["spent_usd"] = round(lg["spent_usd"] + usd, 4)
-    lg["runs"].append({"case": case_id, "model": "deepseek", "arm": "A",
+    lg["runs"].append({"case": case_id, "model": backend, "arm": "A",
                        "rep": rep, "tool_budget": tool_budget,
+                       "quota_billing": quota,
                        "status": out.get("status"),
                        "stage": out.get("stage"),
                        "run_dir": out.get("run_dir"),
@@ -92,8 +95,9 @@ def main(case_id: str, rep: int, tool_budget: int = 40):
                        "accounting_status": spend.get("accounting_status",
                                                      "unknown")})
     save(lg)
-    print(json.dumps({"case": case_id, "model": "deepseek", "arm": "A",
-                       "rep": rep, "status": out.get("status"),
+    print(json.dumps({"case": case_id, "model": backend, "arm": "A",
+                       "rep": rep, "quota": quota,
+                       "status": out.get("status"),
                        "tools": out.get("tool_calls"), "usd": usd,
                        "spent_total": lg["spent_usd"]}, indent=1))
     return 0
@@ -101,4 +105,5 @@ def main(case_id: str, rep: int, tool_budget: int = 40):
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1], int(sys.argv[2]),
-                  int(sys.argv[3]) if len(sys.argv) > 3 else 40))
+                  int(sys.argv[3]) if len(sys.argv) > 3 else 40,
+                  sys.argv[4] if len(sys.argv) > 4 else "deepseek"))

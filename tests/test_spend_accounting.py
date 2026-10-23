@@ -405,3 +405,38 @@ def test_deepseek_is_paid_backend():
     from codatiel_i2 import service as service_mod
 
     assert service_mod._model_is_paid_backend("deepseek:deepseek-flash") is True
+
+
+def test_glm_backend_resolves_with_quota_billing(monkeypatch):
+    from codatiel_i2 import providers as P
+
+    monkeypatch.setenv("ZAI_API_KEY", "test-id.test-secret")
+    resolved = P.resolve_backend("glm")
+    assert resolved["model"] == "glm-5.3-flash"
+    assert resolved["rate_status"].startswith("quota_")
+    assert resolved["rate_usd_per_mtok"] == {}
+    model, settings = P.build_model("glm")
+    assert getattr(model, "provider_usage_details", False) is True
+    assert settings.extra_body == {"thinking": {"type": "enabled",
+                                                "clear_thinking": False}}
+    assert settings.max_tokens == 8192
+    # Reasoning replay is enabled for glm models (provider requires
+    # reasoning_content back with tool results under preserved thinking).
+    hook = getattr(model, "should_replay_reasoning_content", None)
+    assert callable(hook)
+    from agents.models.reasoning_content_replay import (
+        ReasoningContentReplayContext, ReasoningContentSource)
+    ctx = ReasoningContentReplayContext(
+        model="glm-5.3-flash", base_url=None,
+        reasoning=ReasoningContentSource(item={}, origin_model="glm-5.3-flash",
+                                         provider_data={}))
+    assert hook(ctx) is True
+
+
+def test_glm_is_paid_backend_with_quota_carve_out():
+    from codatiel_i2 import service as service_mod
+
+    assert service_mod._model_is_paid_backend("glm:glm-5.3-flash") is True
+    assert service_mod._rate_is_quota(
+        "quota_zai_coding_plan_tokens_recorded_usd_unconfirmed") is True
+    assert service_mod._rate_is_quota("standard_verified") is False

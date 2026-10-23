@@ -481,6 +481,69 @@ def deepseek_model_settings() -> Any:
                          extra_body={"thinking": {"type": "enabled"}})
 
 
+def glm_model(*, model: str = "glm-5.3-flash",
+              base_url: str | None = None,
+              api_key: str | None = None) -> Any:
+    """Build the GLM flash backend (M10 primary: forced thinking, preserved).
+
+    M10-GLM primary configuration (recorded 2026-10-23, before any GLM
+    evaluation run): thinking ENABLED + ``clear_thinking: false``
+    (Preserved Thinking, the provider's recommendation for coding/agent
+    scenarios), reasoning_effort unset (provider default). Rationale:
+    thinking is forced-on for glm-5.3-flash (cannot be disabled per
+    provider docs); preserved thinking requires the complete unmodified
+    reasoning_content back with tool results, so the adapter enables the
+    SDK's reasoning replay for glm models (same mechanism the SDK uses
+    for deepseek). ``reasoning_content`` text is counted via reasoning
+    tokens, never stored.
+    """
+    import os
+    ensure_local_tracing()
+    require_sdk()
+    from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+    try:
+        from openai import AsyncOpenAI
+    except Exception as exc:
+        raise RuntimeError("openai package required for the GLM backend") from exc
+    # Default: Z.AI Coding Plan subscription endpoint (OpenAI Chat
+    # Completions format). The general pay-as-you-go endpoint
+    # (https://api.z.ai/api/paas/v4) does NOT consume plan quota.
+    base = (base_url or os.environ.get("ZAI_BASE_URL")
+            or "https://api.z.ai/api/coding/paas/v4").rstrip("/")
+    key = api_key or os.environ.get("ZAI_API_KEY")
+    if not key:
+        raise RuntimeError("ZAI_API_KEY is not set")
+    client = AsyncOpenAI(base_url=base, api_key=key)
+
+    def _replay_glm(context: Any) -> bool:
+        return "glm" in str(getattr(context, "model", "") or "").lower()
+
+    class GLMModel(OpenAIChatCompletionsModel):
+        # Raw probe 2026-10-23 (coding endpoint, fresh key): usage
+        # carries prompt_tokens_details.cached_tokens and
+        # completion_tokens_details.reasoning_tokens — recorded as
+        # provider-reported, never inferred.
+        provider_usage_details = True
+
+    return GLMModel(model=model, openai_client=client,
+                    should_replay_reasoning_content=_replay_glm)
+
+
+def glm_model_settings() -> Any:
+    """ModelSettings for GLM: preserved thinking + output bound.
+
+    ``max_tokens=8192`` bounds output tokens per request (parity with the
+    Haiku/DeepSeek adapters). No temperature/top_p; reasoning_effort
+    unset (provider default).
+    """
+    agents = require_sdk()
+    from agents.model_settings import ModelSettings
+    return ModelSettings(
+        max_tokens=8192,
+        extra_body={"thinking": {"type": "enabled",
+                                 "clear_thinking": False}})
+
+
 class HaikuModel(_SDKModel):
     """Claude Haiku 5.5 backend: native Anthropic Messages API as an SDK Model.
 

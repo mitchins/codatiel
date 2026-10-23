@@ -88,6 +88,24 @@
       "output_bound_per_request": 8192
     },
     {
+      "profile": "glm_53_flash_review",
+      "backend": "glm",
+      "provider": "zai_coding_plan_openai_compatible",
+      "model": "glm-5.3-flash",
+      "served_model_claim": "glm-5.3-flash (verified by raw probe 2026-10-23)",
+      "base_url": "https://api.z.ai/api/coding/paas/v4",
+      "role": "review_backend",
+      "privacy": "UNVERIFIED_NO_TRAINING_CLAIM_M10_SCOPE_FROZEN_CASES_ONLY",
+      "thinking": "forced_enabled_preserved_clear_thinking_false",
+      "billing": "coding_plan_subscription_quota_no_per_token_charge",
+      "rate_usd_per_mtok": {},
+      "rate_status": "quota_zai_coding_plan_tokens_recorded_usd_unconfirmed",
+      "max_usd_per_review": 1.0,
+      "credential_env": "ZAI_API_KEY",
+      "expected_context": 1000000,
+      "output_bound_per_request": 8192
+    },
+    {
       "profile": "gemma_review",
       "backend": "gemma",
       "provider": "openai_compatible",

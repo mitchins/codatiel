@@ -391,9 +391,12 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 "error": f"preflight estimate ${preflight:.4f} exceeds ceiling "
                          f"${ceiling:.2f}; refusing paid inference",
                 "service_version": SERVICE_VERSION}
-    if preflight is None and _model_is_paid_backend(model_name):
+    if (preflight is None and _model_is_paid_backend(model_name)
+            and not _rate_is_quota(rate_status)):
         # No confirmed rates means no accountable ceiling: refuse paid
-        # inference rather than spending blind.
+        # inference rather than spending blind. Quota-billed backends
+        # (subscription, no per-token charge) are accountable through
+        # recorded tokens, not USD: allowed with usd unconfirmed.
         return {"status": "budget_refused", "stage": "preflight",
                 "error": "rates unconfirmed for a paid backend; refusing paid "
                          "inference without an accountable ceiling",
@@ -730,7 +733,17 @@ def _parse_model_output(final: Any) -> tuple[dict, list[str]]:
 
 
 def _model_is_paid_backend(model_name: str) -> bool:
-    return model_name.split(":")[0] in ("luna", "haiku", "deepseek")
+    return model_name.split(":")[0] in ("luna", "haiku", "deepseek", "glm")
+
+
+def _rate_is_quota(rate_status: str | None) -> bool:
+    """True for subscription-quota billing (no per-token charge).
+
+    Quota backends record confirmed tokens with USD unconfirmed; the
+    subscription is sunk, the marginal review cost is quota draw, and
+    per-request output bounds cap that draw.
+    """
+    return str(rate_status or "").startswith("quota_")
 
 
 def _model_is_zero_cost(model_name: str, rate_status: str) -> bool:
