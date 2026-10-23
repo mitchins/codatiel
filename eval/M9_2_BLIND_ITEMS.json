@@ -1,0 +1,1034 @@
+{
+ "schema_version": "m9.2.blind.v1",
+ "items": [
+  {
+   "id": "M92-001",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 26,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "`reboots_sent` is incremented for every row in `attempts`, including reservations with no recorded outcome. The service durably inserts that reservation before calling `client.reboot()`, so a crash in between can leave an attempt counted as a reboot sent when no command was issued. This makes the report's documented \u201creboots sent\u201d metric overstate known sends.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_da8bf76163df8236",
+      "ev_ab060080b906da5f",
+      "ev_01fd024c0b736d44"
+     ],
+     "line_end": 833,
+     "line_start": 833,
+     "path": "src/frigate_watchdog/store.py",
+     "revision": "head",
+     "title": "The report counts reserved attempts as reboots sent"
+    },
+    {
+     "claim": "The report selects `durations[len(durations) // 2]` as `outage_median_s`. For an even number of measured outages this returns only the upper middle duration rather than the median (the average of the two middle values), so the documented median is inaccurate for those samples.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_da8bf76163df8236",
+      "ev_01fd024c0b736d44"
+     ],
+     "line_end": 845,
+     "line_start": 845,
+     "path": "src/frigate_watchdog/store.py",
+     "revision": "head",
+     "title": "Even-sized outage samples report the upper middle value, not the median"
+    }
+   ]
+  },
+  {
+   "id": "M92-002",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 40,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The new preflight-failure handling durably auth-latches on `UNSUPPORTED`. But the preflight calls `GetDeviceInformation`, while the unsupported-reboot claim concerns `SystemReboot`; a camera rejecting the read operation can therefore be blocked from recovery until operator acknowledgement even though reboot support was never tested. The fault classifier maps generic unsupported-operation faults to `UNSUPPORTED`.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_71c038468d23eb78",
+      "ev_776c082a1bd1fd31",
+      "ev_1dbba4f78358e719",
+      "ev_2fde7958173af487"
+     ],
+     "line_end": 1175,
+     "line_start": 1162,
+     "path": "src/frigate_watchdog/policy.py",
+     "revision": "head",
+     "title": "Unsupported preflight operation can latch recovery as if reboot were unsupported"
+    },
+    {
+     "claim": "The report increments `reboots_sent` for every row in `attempts`, but dispatch records that row during reservation before calling `client.reboot()`. A process interruption after reservation and before the send therefore appears in the report as a reboot sent, contrary to the report's documented meaning.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_3c08e8c099fd5315",
+      "ev_a1399d582a19c10c",
+      "ev_114dfa872b7413d1",
+      "ev_2933b106c4d40778",
+      "ev_7aadb8dda83918a3"
+     ],
+     "line_end": 850,
+     "line_start": 810,
+     "path": "src/frigate_watchdog/store.py",
+     "revision": "head",
+     "title": "Report can overstate reserved attempts as reboots sent"
+    }
+   ]
+  },
+  {
+   "id": "M92-003",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 35,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "`reboots_sent` is incremented for every row in `attempts`, but attempts are durably inserted before `client.reboot()` is called. If the process stops in between, the report still counts a reboot as sent even though no ONVIF request was issued, making the effectiveness report inaccurate.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_9c3b0476932adf38",
+      "ev_70cf34ad42706a4b",
+      "ev_9451dc8a3b13cb7b",
+      "ev_c50053f36b8028e6"
+     ],
+     "line_end": 832,
+     "line_start": 832,
+     "path": "src/frigate_watchdog/store.py",
+     "revision": "head",
+     "title": "Report counts reserved attempts as reboots sent"
+    }
+   ]
+  },
+  {
+   "id": "M92-004",
+   "case": "KL1",
+   "repo": "mitchins/kinglet-lms",
+   "base_sha": "dbf06e0004a44570dc253e88fffd7433d95997c8",
+   "head_sha": "694269d572bd77791f50dfd61d2ec52323da9c47",
+   "status": "complete",
+   "tool_calls": 21,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The new README calls development-plan.md a \u201cReviewed development plan,\u201d but that plan explicitly marks both its amendment self-audit and independent re-review as pending. This misstates the approval status of the active plan to readers relying on the project contract links.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_eb045f8ff26ee849",
+      "ev_7936c69caae69f9b"
+     ],
+     "line_end": 13,
+     "line_start": 13,
+     "path": "README.md",
+     "revision": "head",
+     "title": "README labels the development plan reviewed while its amendment review is pending"
+    },
+    {
+     "claim": "The README says the current tests/unit regression suite passes 48 tests and 32 subtests, while the milestone ledger reports the same `tests/unit -q` command passing 66 tests and 65 subtests. These conflicting current-result claims make the documented qualification evidence unreliable.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_c93a0e374c2c713f",
+      "ev_a6c87892276d7282"
+     ],
+     "line_end": 61,
+     "line_start": 61,
+     "path": "README.md",
+     "revision": "head",
+     "title": "README and milestone ledger report conflicting test-suite totals"
+    }
+   ]
+  },
+  {
+   "id": "M92-005",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 32,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The catalogue\u2019s `productIDs` trims surrounding whitespace before those IDs are requested from StoreKit, but the joiner looks up products using the original, untrimmed catalogue values. For an ID with surrounding whitespace, StoreKit can return the requested product while the join fails to associate it with its plan, so that cadence is absent from the subscription list.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_b78a9290508518cf",
+      "ev_f9a274374d90933f",
+      "ev_89d28526b4f2131a"
+     ],
+     "line_end": 64,
+     "line_start": 58,
+     "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Models/Subscription/SubscriptionPlanOption.swift",
+     "revision": "head",
+     "title": "Normalized product IDs are joined using their unnormalized values"
+    }
+   ]
+  },
+  {
+   "id": "M92-006",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 40,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "Catalogue `productIDs` trims surrounding whitespace before requesting StoreKit products, but the joiner looks up StoreKit results using the untrimmed monthly/yearly catalogue values. If a configured ID has surrounding whitespace, StoreKit can return the trimmed ID while the joiner drops that cadence, leaving the plan unavailable despite a successful product request.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_e6ce8ec376cabe59",
+      "ev_a178a7393b9a02ae"
+     ],
+     "line_end": 63,
+     "line_start": 58,
+     "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Models/Subscription/SubscriptionPlanOption.swift",
+     "revision": "head",
+     "title": "Trimmed catalogue product IDs fail to join StoreKit results"
+    }
+   ]
+  },
+  {
+   "id": "M92-007",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 40,
+   "silence_summary": "Reviewed the subscription catalogue/API and StoreKit integration, plan selection and purchase flow, app scene lifecycle changes, staging/production configuration, and the added UAT and test-runner documentation. No supported contract, authorization, docs/code, operating-constraint, or semantic-twin regression was established.",
+   "findings": []
+  },
+  {
+   "id": "M92-008",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 22,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The LMS backend is configured for 172.31.1.60:443, but the new lms-dev vhost binds to 172.31.1.60:9443. LMS requests therefore will not reach this event-Apache vhost and its dedicated FPM handler; they may fail or be handled by a different listener.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_962867ea22c1cbe1",
+      "ev_c142ec917b0e66f7"
+     ],
+     "line_end": 260,
+     "line_start": 260,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "LMS backend targets a different port than its event-Apache vhost"
+    }
+   ]
+  },
+  {
+   "id": "M92-009",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 26,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The HAProxy LMS backend connects to 172.31.1.60:443, but the added LMS vhost is declared on 172.31.1.60:9443. Requests routed through this backend therefore do not reach the new LMS vhost and may fail or land on another service.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_536c3e81adbb4285",
+      "ev_c142ec917b0e66f7"
+     ],
+     "line_end": 260,
+     "line_start": 260,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "LMS dev backend targets a different port than its new Apache vhost"
+    },
+    {
+     "claim": "HAProxy forwards epcore requests with Host and SNI epcore.effectivepolicy.com.au to 172.31.1.60:9443. The added Effective Policy event-Apache vhost instead binds only to loopback 127.0.0.1:8083 and names effectivepolicy.com.au/www.effectivepolicy.com.au; the added 9443 vhosts are for other hosts. Thus this route has no matching epcore vhost in the change and may serve a default vhost or fail instead of the intended application.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_5fa1efce6e44bfb1",
+      "ev_4a5821df51239670",
+      "ev_21f04cfcc35533cf",
+      "ev_18ac004d09b930ff"
+     ],
+     "line_end": 187,
+     "line_start": 179,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "Epcore backend has no matching vhost among the added event-Apache configs"
+    }
+   ]
+  },
+  {
+   "id": "M92-010",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 24,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The epcore backend sends traffic to 172.31.1.60:9443, but the added Effective Policy FPM vhost binds only to 127.0.0.1:8083 and names effectivepolicy.com.au/www.effectivepolicy.com.au. That vhost cannot receive the edge-routed epcore request, leaving it to fail or reach another listener/vhost.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_1fb448ba290e4e85",
+      "ev_4a5821df51239670"
+     ],
+     "line_end": 187,
+     "line_start": 187,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "Epcore edge route does not match the added FPM vhost"
+    },
+    {
+     "claim": "The LMS backend connects to 172.31.1.60:443, while the added lms-dev Apache vhost listens on 172.31.1.60:9443. Consequently, requests routed by this backend will not reach the new vhost or its dedicated PHP-FPM handler.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_a79cd1101a1a500b",
+      "ev_c142ec917b0e66f7"
+     ],
+     "line_end": 260,
+     "line_start": 260,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "LMS edge route bypasses its new Apache vhost"
+    }
+   ]
+  },
+  {
+   "id": "M92-011",
+   "case": "L10",
+   "repo": "mitchins/needletail-harness",
+   "base_sha": "08847b4cd2691c127597218dfd31457bf246145f",
+   "head_sha": "80bf493d1cae6d9d40fe70894ee294be80292af2",
+   "status": "complete",
+   "tool_calls": 32,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The tier mapper assigns `.nativeStorage` to any primitive-target test whose function name contains `sqlite` or `sigkill`, and `requiredEvidence` makes the STORE-07 and STORE-09 SQLite tests certifying variants. Those tests instantiate `SQLiteProbeStore`, explicitly described as test-local and not product code; the `SessionStore` interface also says SQL lives in M2-A. Consequently, passing this coverage gate can mark STORE-07/09 satisfied even if the eventual production store violates their contracts.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_32bdb320e45fd6c5",
+      "ev_2a3b7948b80d666b",
+      "ev_12512f3c7748a1f8",
+      "ev_613172670b3e2f83"
+     ],
+     "line_end": 138,
+     "line_start": 107,
+     "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+     "revision": "head",
+     "title": "Test-local SQLite probe is counted as native-storage certification"
+    }
+   ]
+  },
+  {
+   "id": "M92-012",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 3,
+   "silence_summary": "Checked the workflow change and its surrounding permissions and build configuration. It only updates the pinned docker/build-push-action from v7.3.0 to v7.4.0; no in-scope regression is evident.",
+   "findings": []
+  },
+  {
+   "id": "M92-013",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 3,
+   "silence_summary": "Reviewed the workflow change and its surrounding configuration. It only updates the pinned docker/build-push-action revision from v7.3.0 to v7.4.0; the workflow permissions, conditions, and action inputs are unchanged. No in-scope regression is evident from the available source.",
+   "findings": []
+  },
+  {
+   "id": "M92-014",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 3,
+   "silence_summary": "Checked the workflow diff and both BASE and HEAD definitions. The only change is a pinned docker/build-push-action upgrade from v7.3.0 to v7.4.0; no contract, authorization, documentation-code, operating-constraint, or semantic-twin regression is evident.",
+   "findings": []
+  },
+  {
+   "id": "M92-015",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 33,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "For two measured outages of 120s and 3600s, this expression reports 3600s rather than the median, 1860s. The operations documentation advertises a median outage duration, so the report can materially misstate typical outage length when the sample count is even.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_014dfeca156fc8dd",
+      "ev_9e1b70957c255e46"
+     ],
+     "line_end": 843,
+     "line_start": 843,
+     "path": "src/frigate_watchdog/store.py",
+     "revision": "head",
+     "title": "Report overstates median outage duration for even-sized samples"
+    }
+   ]
+  },
+  {
+   "id": "M92-016",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 28,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "BASE stores /data in ./data, while HEAD mounts the separate watchdog_data volume. An existing deployment that follows the new setup without copying its state.db will use a fresh store: the service initializes a database when the file is absent, while safety records and recovery limits are persisted there. This can make prior attempt budgets, cooldowns, or latches invisible and allow recovery actions that the old store would have blocked. Document or provide a migration path before switching the canonical volume.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_6a789f87a49bf15f",
+      "ev_27aa177f3df4aabe",
+      "ev_34254918ac6cea2e",
+      "ev_920ba8205fea6546",
+      "ev_97b6a9e6d2472494"
+     ],
+     "line_end": 26,
+     "line_start": 26,
+     "path": "compose.yaml",
+     "revision": "head",
+     "title": "Compose volume change can bypass persisted recovery limits on upgrade"
+    }
+   ]
+  },
+  {
+   "id": "M92-017",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 31,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The report sorts measured outage durations but selects `durations[len(durations) // 2]`. For an even number of durations this returns the upper middle value rather than the median (the mean of the two middle values), so the documented outage-median metric can materially overstate typical duration; for example, [120, 3600] reports 3600 instead of 1860 seconds.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_552fd68aa59a3743",
+      "ev_c6f7a30759ed229b"
+     ],
+     "line_end": 845,
+     "line_start": 843,
+     "path": "src/frigate_watchdog/store.py",
+     "revision": "head",
+     "title": "Report calculates the upper middle outage duration, not the median"
+    }
+   ]
+  },
+  {
+   "id": "M92-018",
+   "case": "KL1",
+   "repo": "mitchins/kinglet-lms",
+   "base_sha": "dbf06e0004a44570dc253e88fffd7433d95997c8",
+   "head_sha": "694269d572bd77791f50dfd61d2ec52323da9c47",
+   "status": "complete",
+   "tool_calls": 33,
+   "silence_summary": "Reviewed the architecture/specification changes, deployed probe handlers, archive worker/gateway, and installation lifecycle tooling. These changes do not establish an application behavior regression, and I found no material contract, authorization, docs_code, operating_constraints, or semantic_twins concern supported by the visible code.",
+   "findings": []
+  },
+  {
+   "id": "M92-019",
+   "case": "KL1",
+   "repo": "mitchins/kinglet-lms",
+   "base_sha": "dbf06e0004a44570dc253e88fffd7433d95997c8",
+   "head_sha": "694269d572bd77791f50dfd61d2ec52323da9c47",
+   "status": "complete",
+   "tool_calls": 22,
+   "silence_summary": "Reviewed the largest archive, deployed API/jobs, runtime and Queue probes, lifecycle/deployment tooling, and the new specification and README. The inspected changes are bounded qualification tooling and proposed contracts; I found no concrete material regression in the scoped categories.",
+   "findings": []
+  },
+  {
+   "id": "M92-020",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 26,
+   "silence_summary": "Reviewed the subscription catalogue and StoreKit flow, selection and refresh behavior, scene-based app lifecycle/configuration changes, and the added test/UAT guidance. I found no concrete material regression within the reviewed changes.",
+   "findings": []
+  },
+  {
+   "id": "M92-021",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 40,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The local StoreKit fixture defines the Basic monthly product as `com.mydaymyway.uat.basic.monthly`, while the added catalogue API test uses `com.appetiser.mydaymywaydev.basic.monthly` for the same plan. Plan discovery requests catalogue-provided IDs and joins StoreKit products by exact ID, so if staging returns the API-test ID, this local StoreKit fixture cannot satisfy it and the plan will not be available locally. The live staging catalogue may differ from the test fixture; that response was not verified.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_2b74a977ac3bf26b",
+      "ev_fd314c8ae1a34669",
+      "ev_2ce2ba23f2f59ec0",
+      "ev_f9c40492332d8600"
+     ],
+     "line_end": 106,
+     "line_start": 106,
+     "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Models/My Day My Way Dev.storekit",
+     "revision": "head",
+     "title": "Local StoreKit fixture IDs differ from catalogue test IDs"
+    }
+   ]
+  },
+  {
+   "id": "M92-022",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 40,
+   "silence_summary": "Reviewed the subscription catalogue and StoreKit changes, subscription selection and purchase flow, app startup/scene lifecycle migration, and related staging/production configuration and UAT documentation. I found no concrete material regression within the visible evidence.",
+   "findings": []
+  },
+  {
+   "id": "M92-023",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 28,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The LMS dev HAProxy backend connects to 172.31.1.60:443, while the added LMS dev vhost listens on 172.31.1.60:9443 and uses the new LMS PHP-FPM socket. Consequently, requests routed through this backend cannot reach that vhost or pool; if this backend is meant to activate the added FPM configuration, LMS dev continues to use a different listener. The behavior of any existing :443 vhost is not established here.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_0024a59ed3e2b120",
+      "ev_c142ec917b0e66f7",
+      "ev_2be5e9cb93d94f56"
+     ],
+     "line_end": 260,
+     "line_start": 260,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "LMS dev backend bypasses its new event-Apache vhost"
+    }
+   ]
+  },
+  {
+   "id": "M92-024",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 25,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The admin and cart rate limits only track and reject requests when CF-Connecting-IP is present, and use its value as the tracking key. The new backend rules also pass that header through as X-Real-IP (lines 234\u2013282). If a direct non-Cloudflare request can reach the edge, a caller can omit the header to skip these limits or supply changing values to evade per-IP tracking, while spoofing the IP reported to backends. The existing live HAProxy configuration instead sets X-Real-IP from the connection source. A network-level Cloudflare-only ingress restriction could mitigate this, but none is established in the reviewed configuration.",
+     "detector": "authorization",
+     "evidence_ids": [
+      "ev_e0549475f0233784",
+      "ev_720f9df6344f439a",
+      "ev_14aa64cf875e11ff",
+      "ev_ce503e4a6f6b3f91"
+     ],
+     "line_end": 150,
+     "line_start": 139,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "Client-supplied Cloudflare IP header can bypass rate limits"
+    }
+   ]
+  },
+  {
+   "id": "M92-025",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 40,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The BASE edge configuration sent epcore to 172.31.1.60:443; HEAD sends it to 172.31.1.60:9443 with Host epcore.effectivepolicy.com.au. The added Effective Policy FPM vhost is loopback-only on 127.0.0.1:8083 and declares effectivepolicy.com.au/www, while the added :9443 vhosts declare other hosts. Thus the new epcore route has no matching epcore vhost in the added event-Apache configuration and may serve the wrong site or fail.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_e4eedff38124bd63",
+      "ev_66cf8eb8d91b82b7",
+      "ev_4a5821df51239670",
+      "ev_c142ec917b0e66f7",
+      "ev_21f04cfcc35533cf",
+      "ev_18ac004d09b930ff"
+     ],
+     "line_end": 187,
+     "line_start": 179,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "Epcore routes to :9443 without a matching vhost"
+    }
+   ]
+  },
+  {
+   "id": "M92-026",
+   "case": "L10",
+   "repo": "mitchins/needletail-harness",
+   "base_sha": "08847b4cd2691c127597218dfd31457bf246145f",
+   "head_sha": "80bf493d1cae6d9d40fe70894ee294be80292af2",
+   "status": "complete",
+   "tool_calls": 37,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "BASE's public Codable CaseResult encoded without evidence_tier; HEAD adds a non-optional EvidenceLayer and coding key but no backward-compatible decoding default. Synthesized decoding therefore rejects prior result JSON that omits the field. This is a compatibility regression for downstream consumers that persist or exchange CaseResult payloads; no such decoder is visible in-tree, so the impact is conditional.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_88c04ecc3169a015",
+      "ev_25957ab15ab72afe"
+     ],
+     "line_end": 240,
+     "line_start": 226,
+     "path": "Sources/NeedletailTestSupport/CaseLedger.swift",
+     "revision": "head",
+     "title": "New required evidence_tier breaks decoding of existing CaseResult JSON"
+    }
+   ]
+  },
+  {
+   "id": "M92-027",
+   "case": "L10",
+   "repo": "mitchins/needletail-harness",
+   "base_sha": "08847b4cd2691c127597218dfd31457bf246145f",
+   "head_sha": "80bf493d1cae6d9d40fe70894ee294be80292af2",
+   "status": "complete",
+   "tool_calls": 30,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "BASE exposed CaseResult as Codable without an evidence_tier field; HEAD adds a non-optional EvidenceLayer and its evidence_tier coding key. With synthesized Codable, an existing serialized record lacking that key cannot be decoded, despite the initializer\u2019s .pure default. This can break consumers of previously emitted reports; no migration or versioning is visible here. Whether persisted reports are in use is uncertain.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_aaa38e90ca9974d1",
+      "ev_b1169341f4fd73d9"
+     ],
+     "line_end": 236,
+     "line_start": 227,
+     "path": "Sources/NeedletailTestSupport/CaseLedger.swift",
+     "revision": "head",
+     "title": "Adding evidence_tier breaks decoding of existing CaseResult JSON"
+    }
+   ]
+  },
+  {
+   "id": "M92-028",
+   "case": "L10",
+   "repo": "mitchins/needletail-harness",
+   "base_sha": "08847b4cd2691c127597218dfd31457bf246145f",
+   "head_sha": "80bf493d1cae6d9d40fe70894ee294be80292af2",
+   "status": "complete",
+   "tool_calls": 25,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "BASE's public Codable CaseResult had no evidence_tier field, so JSON it encoded lacks that key. HEAD adds evidenceTier as a non-optional property and maps it to evidence_tier; synthesized decoding therefore requires the new key, so consumers that persist or exchange BASE-format results will fail to decode them. The initializer's .pure default does not supply a decoding default. No in-repository persisted-result decoder was found, so impact on downstream consumers is uncertain.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_70ed081dbb144c6d",
+      "ev_a54f5b0b71cb3763"
+     ],
+     "line_end": 237,
+     "line_start": 227,
+     "path": "Sources/NeedletailTestSupport/CaseLedger.swift",
+     "revision": "head",
+     "title": "Adding evidence_tier makes prior CaseResult JSON undecodable"
+    }
+   ]
+  },
+  {
+   "id": "M92-029",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 3,
+   "silence_summary": "Checked the workflow before and after: only the pinned docker/build-push-action revision changes, from v7.3.0 to v7.4.0; its invocation and inputs are unchanged. No material regression is established by the available source evidence.",
+   "findings": []
+  },
+  {
+   "id": "M92-030",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 3,
+   "silence_summary": "Checked the workflow change in BASE and HEAD. It only updates the pinned Docker build-push action from v7.3.0 to v7.4.0; no material regression is established by the available evidence.",
+   "findings": []
+  },
+  {
+   "id": "M92-031",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 3,
+   "silence_summary": "Checked the workflow diff and both revisions: the only change is the pinned docker/build-push-action version (v7.3.0 to v7.4.0). The workflow\u2019s permissions and build inputs are unchanged, and the visible evidence establishes no material regression.",
+   "findings": []
+  },
+  {
+   "id": "M92-032",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 21,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "`report()` increments `reboots_sent` for every attempt row, including rows with no recorded outcome. The service commits an attempt reservation before calling `client.reboot()`; if it stops between those steps, no command was sent, but the report still counts one as sent (with `UNRECORDED`). This makes the report\u2019s sent-command metric inaccurate in that scenario.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_b0317c6024746ef0",
+      "ev_081a7d9602593011",
+      "ev_fd2c0fc5ec20e998"
+     ],
+     "line_end": 834,
+     "line_start": 832,
+     "path": "src/frigate_watchdog/store.py",
+     "revision": "head",
+     "title": "Report counts reserved attempts as reboot commands sent"
+    }
+   ]
+  },
+  {
+   "id": "M92-033",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 20,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "BASE mounted `./data` at `/data`, while HEAD mounts a separate external `watchdog_data` volume. An existing deployment that follows the new Compose file without copying its database can start against different state, losing persisted baselines, incidents, attempts, and budgets; operations documentation says those safety records are not pruned. README setup only creates the new volume and gives no upgrade migration step. Document or provide a migration before switching existing deployments.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_6a789f87a49bf15f",
+      "ev_27aa177f3df4aabe",
+      "ev_7fcfedf733ee7b6e",
+      "ev_b33f555e148563e0"
+     ],
+     "line_end": 26,
+     "line_start": 25,
+     "path": "compose.yaml",
+     "revision": "head",
+     "title": "Compose volume change can leave existing safety state behind"
+    }
+   ]
+  },
+  {
+   "id": "M92-034",
+   "case": "FW3",
+   "repo": "mitchins/frigate-watchdog",
+   "base_sha": "956f7445fa13e93309dc5809395cd316ae4d7403",
+   "head_sha": "d9b61df6c889a28b0cb49547979897533b873ba4",
+   "status": "complete",
+   "tool_calls": 28,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "`report()` increments `reboots_sent` for every row in `attempts`, but attempts are durably recorded before the `SystemReboot` send. If the service breaks after reservation and before sending, the report still counts a reboot that was never sent; the CLI also describes this count as \u201csent: reboot commands.\u201d This makes the new report's operational data contract inaccurate.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_dd63b03be6e7ba02",
+      "ev_909c1d90b58603d3",
+      "ev_062ca40260739d01",
+      "ev_861674415e0bd76d"
+     ],
+     "line_end": 837,
+     "line_start": 835,
+     "path": "src/frigate_watchdog/store.py",
+     "revision": "head",
+     "title": "Report counts reserved attempts as reboot commands sent"
+    }
+   ]
+  },
+  {
+   "id": "M92-035",
+   "case": "KL1",
+   "repo": "mitchins/kinglet-lms",
+   "base_sha": "dbf06e0004a44570dc253e88fffd7433d95997c8",
+   "head_sha": "694269d572bd77791f50dfd61d2ec52323da9c47",
+   "status": "complete",
+   "tool_calls": 29,
+   "silence_summary": "Reviewed the highest-churn lifecycle, deployment, archive, dependency, and specification changes, including their relevant configuration and authorization controls. I found no concrete material regression in the inspected paths.",
+   "findings": []
+  },
+  {
+   "id": "M92-036",
+   "case": "KL1",
+   "repo": "mitchins/kinglet-lms",
+   "base_sha": "dbf06e0004a44570dc253e88fffd7433d95997c8",
+   "head_sha": "694269d572bd77791f50dfd61d2ec52323da9c47",
+   "status": "complete",
+   "tool_calls": 34,
+   "silence_summary": "Reviewed the highest-churn lifecycle, deployment runner, API/jobs Workers, archive probe, dependency lock, and the relevant deployment and authorization constraints. I found no material regression supported by the visible source evidence; the paid-target lifecycle path is also documented with an explicit target-selection procedure and evidence of a completed run.",
+   "findings": []
+  },
+  {
+   "id": "M92-037",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 39,
+   "silence_summary": "Reviewed the subscription catalogue, StoreKit product joining and selection flow, API decoding, and the new scene-based app lifecycle. The visible changes preserve the purchase path and handle scene startup/deep-link routing without establishing a material regression.",
+   "findings": []
+  },
+  {
+   "id": "M92-038",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 27,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "Removing this enum breaks the README\u2019s step 4, which still instructs integrators to pass `Subscription.Product.allCases` to `requestProducts`, and step 6, which tells them to edit `Subscription.swift` for product IDs. The new discovery path fetches product IDs from the backend catalogue instead, so the documented setup is no longer valid.",
+     "detector": "docs_code",
+     "evidence_ids": [
+      "ev_e0959ba877bab8cf",
+      "ev_6585d4e969b3f00f",
+      "ev_1e0427d5847af206"
+     ],
+     "line_end": 30,
+     "line_start": 18,
+     "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Models/Subscription/Subscription.swift",
+     "revision": "base",
+     "title": "Update integration instructions after removing Subscription.Product"
+    }
+   ]
+  },
+  {
+   "id": "M92-039",
+   "case": "L06",
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "base_sha": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86",
+   "head_sha": "4051ff05090a76165f1a533675086e5760b97cbd",
+   "status": "complete",
+   "tool_calls": 37,
+   "silence_summary": "Reviewed the subscription catalogue/API and StoreKit changes, plan joining and selection/purchase flow, the removed active-subscription lookup, and the new scene lifecycle configuration. The visible changes did not establish a material regression; the local UI-test product fixture is documented as not exercising purchase, and the production purchase path still uses StoreKit products.",
+   "findings": []
+  },
+  {
+   "id": "M92-040",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 40,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The LMS backend sends requests to 172.31.1.60:443, but the newly added LMS Apache vhost listens on 172.31.1.60:9443. Consequently, requests through this edge route do not reach that vhost or its configured FPM handler; whether the :443 service still provides a working alternative is uncertain.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_c80a5d2e85b29142",
+      "ev_c6d399c886333621"
+     ],
+     "line_end": 260,
+     "line_start": 260,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "LMS dev route bypasses its new FPM vhost"
+    }
+   ]
+  },
+  {
+   "id": "M92-041",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 27,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "For an epcore request to `/cart` with `remove_item=` and `_wpnonce=` in the query, this rule returns 403 without checking whether the nonce is valid. A legitimate cart-removal request using that path shape is therefore blocked; BASE routed epcore requests to its backend without this cart-removal rejection. This depends on the site issuing a no-trailing-slash `/cart` URL.",
+     "detector": "contracts",
+     "evidence_ids": [
+      "ev_32a3409c0307d0d7",
+      "ev_cf792cffa79d5ed5"
+     ],
+     "line_end": 129,
+     "line_start": 126,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "Valid WooCommerce cart removals can be denied"
+    }
+   ]
+  },
+  {
+   "id": "M92-042",
+   "case": "L08",
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "base_sha": "aa807b86fda364ef0723b536672e07cca4646c6e",
+   "head_sha": "aff2a0680940964ce0d7304a2699f0415893a4b4",
+   "status": "complete",
+   "tool_calls": 31,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The backend receives X-Real-IP from the request's CF-Connecting-IP header, and the edge also keys its login rate limit on that header. The frontend listens on :443 without a visible source restriction. If non-Cloudflare clients can reach the public edge listener, they can forge or rotate this header to spoof the backend client IP and evade the per-IP rate limit. BASE instead set the backend X-Real-IP from the socket source. External network restrictions may mitigate this, but none are established in the inspected repository evidence.",
+     "detector": "operating_constraints",
+     "evidence_ids": [
+      "ev_3a600cade041e433",
+      "ev_634f7b98c51ea049",
+      "ev_5099599cf55a1066",
+      "ev_63809876322497cd",
+      "ev_232b460222c2a150"
+     ],
+     "line_end": 234,
+     "line_start": 234,
+     "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+     "revision": "head",
+     "title": "Client-supplied Cloudflare IP header controls backend identity and rate limits"
+    }
+   ]
+  },
+  {
+   "id": "M92-043",
+   "case": "L10",
+   "repo": "mitchins/needletail-harness",
+   "base_sha": "08847b4cd2691c127597218dfd31457bf246145f",
+   "head_sha": "80bf493d1cae6d9d40fe70894ee294be80292af2",
+   "status": "complete",
+   "tool_calls": 39,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "The ingestion gate requires the SQLite contract tests to certify STORE-07 and STORE-09, but those tests execute `SQLiteProbeStore`, explicitly marked as test-local and not product code. The catalogue defines these as native-storage requirements, while the `SessionStore` source says SQL belongs to M2-A. Thus a broken or absent production storage implementation would not prevent these probe tests from passing and the coverage gate from marking those cases satisfied.",
+     "detector": "semantic_twins",
+     "evidence_ids": [
+      "ev_27cc54e7a798f45e",
+      "ev_c0053386bba84bb7",
+      "ev_95f0ad03dd395f69",
+      "ev_a4673ac5d8748065",
+      "ev_32d1d8a5c88872f0"
+     ],
+     "line_end": 134,
+     "line_start": 133,
+     "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+     "revision": "head",
+     "title": "Test-local SQLite probe certifies product storage cases"
+    }
+   ]
+  },
+  {
+   "id": "M92-044",
+   "case": "L10",
+   "repo": "mitchins/needletail-harness",
+   "base_sha": "08847b4cd2691c127597218dfd31457bf246145f",
+   "head_sha": "80bf493d1cae6d9d40fe70894ee294be80292af2",
+   "status": "complete",
+   "tool_calls": 38,
+   "silence_summary": null,
+   "findings": [
+    {
+     "claim": "This required-evidence mapping makes STORE_02_sigkillMidTransactionRollsBack a certifying variant, and the ingestion test requires every mapped case to appear satisfied. But that probe only commits a generic row, kills a separate sqlite3 process during an uncommitted insert, and verifies rollback; it does not exercise crashes before/after an intent or side effect, or prevent automatic side-effect replay as STORE-02 requires. The M2-0 coverage run can therefore report STORE-02 satisfied while the production-store crash qualification remains outstanding.",
+     "detector": "semantic_twins",
+     "evidence_ids": [
+      "ev_eefa24856a88e825",
+      "ev_b9b9a7ec93c8457f",
+      "ev_7987d91f96c36873",
+      "ev_3a22e4c5155a0574",
+      "ev_a2c98f52e00a0638",
+      "ev_d52e7bc882d4a24e"
+     ],
+     "line_end": 138,
+     "line_start": 138,
+     "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+     "revision": "head",
+     "title": "STORE-02 is certified by a generic SQLite rollback probe"
+    }
+   ]
+  },
+  {
+   "id": "M92-045",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 3,
+   "silence_summary": "Checked the workflow change in BASE and HEAD: it only updates the pinned docker/build-push-action from v7.3.0 to v7.4.0. The visible workflow settings are otherwise unchanged, and the available evidence does not establish a material regression from this upgrade.",
+   "findings": []
+  },
+  {
+   "id": "M92-046",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 3,
+   "silence_summary": "Checked the workflow diff and both revisions. The only change is the pinned docker/build-push-action version, from v7.3.0 to v7.4.0; the workflow inputs, permissions, and surrounding steps are unchanged. No material regression is established by the available evidence.",
+   "findings": []
+  },
+  {
+   "id": "M92-047",
+   "case": "WT4",
+   "repo": "mitchins/wall-tidbits",
+   "base_sha": "9333622385f7139ae2eddeb4a1efaec42c59f1aa",
+   "head_sha": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71",
+   "status": "complete",
+   "tool_calls": 4,
+   "silence_summary": "Reviewed the workflow change and both revisions. The only change is the pinned docker/build-push-action version; the visible build, publish, permissions, and tagging configuration is unchanged. No material regression is established by the available evidence.",
+   "findings": []
+  }
+ ]
+}

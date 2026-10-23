@@ -1,0 +1,287 @@
+{
+ "schema_version": "m9.2.blindmap.v1",
+ "map": {
+  "M92-001": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/A/FW3/rep1/95ffcc22e9a22d2f/d27ee046f43db214"
+  },
+  "M92-002": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/A/FW3/rep2/95ffcc22e9a22d2f/fef79d355aff1161"
+  },
+  "M92-003": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/A/FW3/rep3/95ffcc22e9a22d2f/bed940b3e0133433"
+  },
+  "M92-004": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/A/KL1/rep1/5b9c3cb07e872b5d/ba749421cfa42a33"
+  },
+  "M92-005": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/A/L06/rep1/13d00e7edc57901b/8f7897366acc06d1"
+  },
+  "M92-006": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/A/L06/rep2/13d00e7edc57901b/0fc2c13ae676ee98"
+  },
+  "M92-007": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/A/L06/rep3/13d00e7edc57901b/70dcef38799325fc"
+  },
+  "M92-008": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/A/L08/rep1/e8e31edd3cf55682/ebe01125563d0eeb"
+  },
+  "M92-009": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/A/L08/rep2/e8e31edd3cf55682/4d1cf46d4fe6170f"
+  },
+  "M92-010": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/A/L08/rep3/e8e31edd3cf55682/7af26a609199100c"
+  },
+  "M92-011": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/A/L10/rep1/18ad0f2901caefe1/9ec1cc4540a15e58"
+  },
+  "M92-012": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/A/WT4/rep1/1b5ad28e80114edc/a764c12370ca2d35"
+  },
+  "M92-013": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/A/WT4/rep2/1b5ad28e80114edc/9162fe5ac13b955b"
+  },
+  "M92-014": {
+   "arm": "A",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/A/WT4/rep3/1b5ad28e80114edc/e3c001089e2fa1b0"
+  },
+  "M92-015": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/B/FW3/rep1/fcefa041007053f6/5dde3ea5eeab92d4"
+  },
+  "M92-016": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/B/FW3/rep2/fcefa041007053f6/bb03c13b57055d2b"
+  },
+  "M92-017": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/B/FW3/rep3/fcefa041007053f6/cab0b74d8bc6198e"
+  },
+  "M92-018": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/B/KL1/rep1/90d418e119f07a67/797647dcd117dc91"
+  },
+  "M92-019": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/B/KL1/rep3/90d418e119f07a67/701b413330c1069d"
+  },
+  "M92-020": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/B/L06/rep1/410a6a7bd15d73ae/5ed7b7e4d857b687"
+  },
+  "M92-021": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/B/L06/rep2/410a6a7bd15d73ae/448830ee1365862d"
+  },
+  "M92-022": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/B/L06/rep3/410a6a7bd15d73ae/cbb44f6f001dfb09"
+  },
+  "M92-023": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/B/L08/rep1/382d4ec6ab7ebabb/2faa9b1603f60733"
+  },
+  "M92-024": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/B/L08/rep2/382d4ec6ab7ebabb/5412341271aad4cb"
+  },
+  "M92-025": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/B/L08/rep3/382d4ec6ab7ebabb/8b0dd4338d476c96"
+  },
+  "M92-026": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/B/L10/rep1/08d94118ff333e17/f72696be3379bd0d"
+  },
+  "M92-027": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/B/L10/rep2/08d94118ff333e17/58755aa28d9bf00d"
+  },
+  "M92-028": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/B/L10/rep3/08d94118ff333e17/c320ac9d5da5d1cd"
+  },
+  "M92-029": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/B/WT4/rep1/143e44488f2b6a40/7fb7fbcd30ee73d5"
+  },
+  "M92-030": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/B/WT4/rep2/143e44488f2b6a40/533427da1c9617d6"
+  },
+  "M92-031": {
+   "arm": "B",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/B/WT4/rep3/143e44488f2b6a40/b31aa2a8643dba4d"
+  },
+  "M92-032": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/C/FW3/rep1/eaaff05e342c19c3/a43879ffdbc87b2b"
+  },
+  "M92-033": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/C/FW3/rep2/eaaff05e342c19c3/8b7a88a96aa65076"
+  },
+  "M92-034": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/C/FW3/rep3/eaaff05e342c19c3/c2c86ae6c70c4428"
+  },
+  "M92-035": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/C/KL1/rep1/dd5d501f1c024a7b/7df595879148cd1a"
+  },
+  "M92-036": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/C/KL1/rep2/dd5d501f1c024a7b/227db3bc17301c3d"
+  },
+  "M92-037": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/C/L06/rep1/8e84b5a98cb70d99/719f68121f52d296"
+  },
+  "M92-038": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/C/L06/rep2/8e84b5a98cb70d99/82e06023936d5da0"
+  },
+  "M92-039": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/C/L06/rep3/8e84b5a98cb70d99/4fc0fa4a399f316e"
+  },
+  "M92-040": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/C/L08/rep1/17aa5f1e287890b0/9b4cca877953294c"
+  },
+  "M92-041": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/C/L08/rep2/17aa5f1e287890b0/840dd93311488fdc"
+  },
+  "M92-042": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/C/L08/rep3/17aa5f1e287890b0/8b94dfbef868bbb8"
+  },
+  "M92-043": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/C/L10/rep1/94f19ce25f484ea6/1e7be69d5d6a63b0"
+  },
+  "M92-044": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/C/L10/rep3/94f19ce25f484ea6/f9a6f0c2d18e0862"
+  },
+  "M92-045": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep1",
+   "run_dir": "/tmp/m9_2/runs/luna/C/WT4/rep1/9395da4b4b2bd3ad/bdf7ea250bc81670"
+  },
+  "M92-046": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep2",
+   "run_dir": "/tmp/m9_2/runs/luna/C/WT4/rep2/9395da4b4b2bd3ad/1a74e921af37b19c"
+  },
+  "M92-047": {
+   "arm": "C",
+   "model": "luna",
+   "rep": "rep3",
+   "run_dir": "/tmp/m9_2/runs/luna/C/WT4/rep3/9395da4b4b2bd3ad/8f62383e3bfb36a7"
+  }
+ }
+}

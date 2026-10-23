@@ -85,7 +85,9 @@ def build(root: Path):
             a.setdefault("n_other", 0)
             a["n_other"] += 1
         a["tool_calls"] += r["tool_calls"] or 0
-        if r["accounting_status"] == "UNKNOWN":
+        # §9: unknown stays unknown; only confirmed spend aggregates as $.
+        if r["accounting_status"] not in ("CONFIRMED_USAGE",
+                                          "CONFIRMED_ZERO_USAGE"):
             a["unknown_spend_runs"] += 1
         else:
             a["usd"] += r["usd_estimate"] or 0.0

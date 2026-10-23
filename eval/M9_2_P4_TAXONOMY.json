@@ -1,0 +1,4775 @@
+{
+ "false_findings": [
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "src/frigate_watchdog/policy.py",
+   "title": "Unsupported preflight operation can latch recovery as if reboot were unsupported",
+   "trace": "P4-luna/luna/95ffcc22e9a22d2f/fef79d355aff1161"
+  },
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "README.md",
+   "title": "README labels the development plan reviewed while its amendment review is pending",
+   "trace": "P4-luna/luna/5b9c3cb07e872b5d/ba749421cfa42a33"
+  },
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+   "title": "Test-local SQLite probe is counted as native-storage certification",
+   "trace": "P4-luna/luna/18ad0f2901caefe1/9ec1cc4540a15e58"
+  },
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "src/frigate_watchdog/store.py",
+   "title": "Report overstates median outage duration for even-sized samples",
+   "trace": "P4-luna/luna/fcefa041007053f6/5dde3ea5eeab92d4"
+  },
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "compose.yaml",
+   "title": "Compose volume change can bypass persisted recovery limits on upgrade",
+   "trace": "P4-luna/luna/fcefa041007053f6/bb03c13b57055d2b"
+  },
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Models/My Day My Way Dev.storekit",
+   "title": "Local StoreKit fixture IDs differ from catalogue test IDs",
+   "trace": "P4-luna/luna/410a6a7bd15d73ae/448830ee1365862d"
+  },
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+   "title": "Client-supplied Cloudflare IP header can bypass rate limits",
+   "trace": "P4-luna/luna/382d4ec6ab7ebabb/5412341271aad4cb"
+  },
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "compose.yaml",
+   "title": "Compose volume change can leave existing safety state behind",
+   "trace": "P4-luna/luna/eaaff05e342c19c3/8b7a88a96aa65076"
+  },
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Models/Subscription/Subscription.swift",
+   "title": "Update integration instructions after removing Subscription.Product",
+   "trace": "P4-luna/luna/8e84b5a98cb70d99/82e06023936d5da0"
+  },
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+   "title": "Client-supplied Cloudflare IP header controls backend identity and rate limits",
+   "trace": "P4-luna/luna/17aa5f1e287890b0/8b94dfbef868bbb8"
+  },
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+   "title": "Test-local SQLite probe certifies product storage cases",
+   "trace": "P4-luna/luna/94f19ce25f484ea6/1e7be69d5d6a63b0"
+  },
+  {
+   "class": "UNSUPPORTED_CLAIM",
+   "judgement": "default: overlaps no decisive span; needs adjudication",
+   "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+   "title": "STORE-02 is certified by a generic SQLite rollback probe",
+   "trace": "P4-luna/luna/94f19ce25f484ea6/f9a6f0c2d18e0862"
+  }
+ ],
+ "rows": [
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Even-sized outage samples report the upper middle value, not the median"
+   ],
+   "item": "FW3-median",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "durations",
+    "median",
+    "outage_median",
+    "upper middle"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 26,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_da8bf76163df8236",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      780,
+      850
+     ]
+    },
+    {
+     "evidence_id": "ev_f59dee8e4ce3c703",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      828,
+      848
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/95ffcc22e9a22d2f/d27ee046f43db214",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "The report counts reserved attempts as reboots sent"
+   ],
+   "item": "FW3-reboots",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "reboots_sent",
+    "reservation",
+    "reserved"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 26,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_948b7d3cc37f8a60",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      833,
+      833
+     ]
+    },
+    {
+     "evidence_id": "ev_da8bf76163df8236",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      780,
+      850
+     ]
+    },
+    {
+     "evidence_id": "ev_f59dee8e4ce3c703",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      828,
+      848
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/95ffcc22e9a22d2f/d27ee046f43db214",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-restart",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 26,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    },
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/95ffcc22e9a22d2f/d27ee046f43db214",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-median",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_3c08e8c099fd5315",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      740,
+      865
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/95ffcc22e9a22d2f/fef79d355aff1161",
+   "unmatched_overlap_titles": [
+    "Report can overstate reserved attempts as reboots sent"
+   ],
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Report can overstate reserved attempts as reboots sent"
+   ],
+   "item": "FW3-reboots",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "reboots_sent",
+    "reservation",
+    "reserved"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_3c08e8c099fd5315",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      740,
+      865
+     ]
+    },
+    {
+     "evidence_id": "ev_7469049ec8b7ae4c",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      489
+     ]
+    },
+    {
+     "evidence_id": "ev_75917c903e1bdb59",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      499
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/95ffcc22e9a22d2f/fef79d355aff1161",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-restart",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    },
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/95ffcc22e9a22d2f/fef79d355aff1161",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-median",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 35,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_9c3b0476932adf38",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      800,
+      855
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/95ffcc22e9a22d2f/bed940b3e0133433",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Report counts reserved attempts as reboots sent"
+   ],
+   "item": "FW3-reboots",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "reboots_sent",
+    "reserved"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 35,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_9c3b0476932adf38",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      800,
+      855
+     ]
+    },
+    {
+     "evidence_id": "ev_7469049ec8b7ae4c",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      489
+     ]
+    },
+    {
+     "evidence_id": "ev_75917c903e1bdb59",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      499
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/95ffcc22e9a22d2f/bed940b3e0133433",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-restart",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 35,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    },
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/95ffcc22e9a22d2f/bed940b3e0133433",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-isolation",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "complete",
+   "tool_calls": 21,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/5b9c3cb07e872b5d/ba749421cfa42a33",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "README and milestone ledger report conflicting test-suite totals"
+   ],
+   "item": "KL1-readme",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "ledger"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "complete",
+   "tool_calls": 21,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b29df07b4d35662c",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_3d7734c19d8df732",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      61,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_c93a0e374c2c713f",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      56,
+      61
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/5b9c3cb07e872b5d/ba749421cfa42a33",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-isolation",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "incomplete_budget_exhausted",
+   "tool_calls": 38,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_938ff021248f1bf3",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      260
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/5b9c3cb07e872b5d/08162e4fd0bd030a",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-readme",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "incomplete_budget_exhausted",
+   "tool_calls": 38,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b29df07b4d35662c",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      61
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/5b9c3cb07e872b5d/08162e4fd0bd030a",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-isolation",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "incomplete_budget_exhausted",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_0f6127afa699b9f6",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      250
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/5b9c3cb07e872b5d/dd9f1610f94ae5b9",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-readme",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "incomplete_budget_exhausted",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_e625e1a5b8ad6347",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      30,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_b2a3f8ffaa761b1b",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      55,
+      61
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/5b9c3cb07e872b5d/dd9f1610f94ae5b9",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Normalized product IDs are joined using their unnormalized values"
+   ],
+   "item": "L06-trim",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "catalogue",
+    "join",
+    "trim",
+    "whitespace"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "run_shas": [
+    "6509400ca318",
+    "4051ff05090a"
+   ],
+   "status": "complete",
+   "tool_calls": 32,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_c9bc21dd3d0a5a62",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_b78a9290508518cf",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      27,
+      34
+     ]
+    },
+    {
+     "evidence_id": "ev_8d28abe546d047f6",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      70
+     ]
+    },
+    {
+     "evidence_id": "ev_f9a274374d90933f",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      47,
+      70
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/13d00e7edc57901b/8f7897366acc06d1",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Trimmed catalogue product IDs fail to join StoreKit results"
+   ],
+   "item": "L06-trim",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "catalogue",
+    "join",
+    "trim",
+    "whitespace"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "run_shas": [
+    "6509400ca318",
+    "4051ff05090a"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_c9bc21dd3d0a5a62",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_8d28abe546d047f6",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      70
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/13d00e7edc57901b/0fc2c13ae676ee98",
+   "variant": null
+  },
+  {
+   "class": "CONNECTED_SUPPRESSED",
+   "item": "L06-trim",
+   "judgement": "judgement: decisive location read and consequence language present ['catalogue'] in the model's own conclusion, but no finding filed",
+   "keyword_hits": [
+    "catalogue"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "run_shas": [
+    "6509400ca318",
+    "4051ff05090a"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_c9bc21dd3d0a5a62",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_0d466ca25d9b3cc8",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      10,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_8d28abe546d047f6",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      70
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/13d00e7edc57901b/70dcef38799325fc",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "LMS backend targets a different port than its event-Apache vhost"
+   ],
+   "item": "L08-lms",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    ":443",
+    ":9443",
+    "lms",
+    "vhost"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 22,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_962867ea22c1cbe1",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      1,
+      284
+     ]
+    },
+    {
+     "evidence_id": "ev_ba76e628b20f8704",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      250,
+      250
+     ]
+    },
+    {
+     "evidence_id": "ev_6a850f466a080231",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      260,
+      260
+     ]
+    },
+    {
+     "evidence_id": "ev_6a850f466a080231",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      260,
+      260
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/e8e31edd3cf55682/ebe01125563d0eeb",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-epcore",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 22,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_962867ea22c1cbe1",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      1,
+      284
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/e8e31edd3cf55682/ebe01125563d0eeb",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-403",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 22,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_962867ea22c1cbe1",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      1,
+      284
+     ]
+    },
+    {
+     "evidence_id": "ev_962867ea22c1cbe1",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      1,
+      284
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/e8e31edd3cf55682/ebe01125563d0eeb",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "LMS dev backend targets a different port than its new Apache vhost"
+   ],
+   "item": "L08-lms",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    ":443",
+    ":9443",
+    "lms",
+    "vhost"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 26,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_83e33bfdd9349077",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      254,
+      254
+     ]
+    },
+    {
+     "evidence_id": "ev_6a850f466a080231",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      260,
+      260
+     ]
+    },
+    {
+     "evidence_id": "ev_6a850f466a080231",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      260,
+      260
+     ]
+    },
+    {
+     "evidence_id": "ev_536c3e81adbb4285",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      250,
+      262
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/e8e31edd3cf55682/4d1cf46d4fe6170f",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Epcore backend has no matching vhost among the added event-Apache configs"
+   ],
+   "item": "L08-epcore",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "9443",
+    "default vhost",
+    "epcore"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 26,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_95f108558f925f66",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      179,
+      179
+     ]
+    },
+    {
+     "evidence_id": "ev_ee34c2cf0cdd57ee",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      187,
+      187
+     ]
+    },
+    {
+     "evidence_id": "ev_ee34c2cf0cdd57ee",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      187,
+      187
+     ]
+    },
+    {
+     "evidence_id": "ev_5fa1efce6e44bfb1",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      175,
+      190
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/e8e31edd3cf55682/4d1cf46d4fe6170f",
+   "variant": null
+  },
+  {
+   "class": "NEVER_EXAMINED",
+   "item": "L08-403",
+   "judgement": "deterministic: no evidence touches decisive span",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 26,
+   "touch_evidence": [],
+   "touched": false,
+   "trace": "P4-luna/luna/e8e31edd3cf55682/4d1cf46d4fe6170f",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "LMS edge route bypasses its new Apache vhost"
+   ],
+   "item": "L08-lms",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    ":443",
+    ":9443",
+    "lms",
+    "vhost"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 24,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_1fb448ba290e4e85",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      176,
+      284
+     ]
+    },
+    {
+     "evidence_id": "ev_a79cd1101a1a500b",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      250,
+      280
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/e8e31edd3cf55682/7af26a609199100c",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Epcore edge route does not match the added FPM vhost"
+   ],
+   "item": "L08-epcore",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "9443",
+    "epcore"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 24,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_95f108558f925f66",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      179,
+      179
+     ]
+    },
+    {
+     "evidence_id": "ev_ee34c2cf0cdd57ee",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      187,
+      187
+     ]
+    },
+    {
+     "evidence_id": "ev_1fb448ba290e4e85",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      176,
+      284
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/e8e31edd3cf55682/7af26a609199100c",
+   "variant": null
+  },
+  {
+   "class": "NEVER_EXAMINED",
+   "item": "L08-403",
+   "judgement": "deterministic: no evidence touches decisive span",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 24,
+   "touch_evidence": [],
+   "touched": false,
+   "trace": "P4-luna/luna/e8e31edd3cf55682/7af26a609199100c",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L10-evidenceTier",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 32,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_c4424db44aecb23c",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      236,
+      236
+     ]
+    },
+    {
+     "evidence_id": "ev_04412e57453efa8f",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      220,
+      220
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/18ad0f2901caefe1/9ec1cc4540a15e58",
+   "variant": null
+  },
+  {
+   "class": "CORRECT_NON_FINDING",
+   "item": "L10-tier-trap",
+   "judgement": "no finding at trap site (correct)",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 32,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_42c411ee6db9e801",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      296,
+      296
+     ]
+    },
+    {
+     "evidence_id": "ev_9b6f8807ecc76ec8",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      302,
+      302
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/18ad0f2901caefe1/9ec1cc4540a15e58",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L10-evidenceTier",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "unresolved_unparseable",
+   "tool_calls": 34,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_675acf4f1535c1af",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      220,
+      220
+     ]
+    },
+    {
+     "evidence_id": "ev_131c37801767f13c",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      215,
+      335
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/18ad0f2901caefe1/f4879908834f5f91",
+   "variant": null
+  },
+  {
+   "class": "CORRECT_NON_FINDING",
+   "item": "L10-tier-trap",
+   "judgement": "no finding at trap site (correct)",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "unresolved_unparseable",
+   "tool_calls": 34,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_131c37801767f13c",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      215,
+      335
+     ]
+    },
+    {
+     "evidence_id": "ev_07fd52518667249e",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      215,
+      415
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/18ad0f2901caefe1/f4879908834f5f91",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L10-evidenceTier",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "incomplete_budget_exhausted",
+   "tool_calls": 34,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_675acf4f1535c1af",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      220,
+      220
+     ]
+    },
+    {
+     "evidence_id": "ev_c4424db44aecb23c",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      236,
+      236
+     ]
+    },
+    {
+     "evidence_id": "ev_acc6f8cfbab85426",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      212,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_ce13f3366827aef0",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      212,
+      366
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/18ad0f2901caefe1/a728da0ca4990f6f",
+   "variant": null
+  },
+  {
+   "class": "CORRECT_NON_FINDING",
+   "item": "L10-tier-trap",
+   "judgement": "no finding at trap site (correct)",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "incomplete_budget_exhausted",
+   "tool_calls": 34,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_acc6f8cfbab85426",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      212,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_ce13f3366827aef0",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      212,
+      366
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/18ad0f2901caefe1/a728da0ca4990f6f",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-median",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 33,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_3771662f8c958371",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      730,
+      850
+     ]
+    },
+    {
+     "evidence_id": "ev_6d77d130ef4a9823",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      817,
+      849
+     ]
+    },
+    {
+     "evidence_id": "ev_014dfeca156fc8dd",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      839,
+      847
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/fcefa041007053f6/5dde3ea5eeab92d4",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-reboots",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 33,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_3771662f8c958371",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      730,
+      850
+     ]
+    },
+    {
+     "evidence_id": "ev_6d77d130ef4a9823",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      817,
+      849
+     ]
+    },
+    {
+     "evidence_id": "ev_7469049ec8b7ae4c",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      489
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/fcefa041007053f6/5dde3ea5eeab92d4",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-restart",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 33,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    },
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/fcefa041007053f6/5dde3ea5eeab92d4",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-median",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 28,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/fcefa041007053f6/bb03c13b57055d2b",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-reboots",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 28,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_7469049ec8b7ae4c",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      489
+     ]
+    },
+    {
+     "evidence_id": "ev_75917c903e1bdb59",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      499
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/fcefa041007053f6/bb03c13b57055d2b",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-restart",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 28,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    },
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/fcefa041007053f6/bb03c13b57055d2b",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Report calculates the upper middle outage duration, not the median"
+   ],
+   "item": "FW3-median",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "durations",
+    "median",
+    "upper middle"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 31,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_9c3b0476932adf38",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      800,
+      855
+     ]
+    },
+    {
+     "evidence_id": "ev_552fd68aa59a3743",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      836,
+      850
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/fcefa041007053f6/cab0b74d8bc6198e",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-reboots",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 31,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_9c3b0476932adf38",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      800,
+      855
+     ]
+    },
+    {
+     "evidence_id": "ev_552fd68aa59a3743",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      836,
+      850
+     ]
+    },
+    {
+     "evidence_id": "ev_7469049ec8b7ae4c",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      489
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/fcefa041007053f6/cab0b74d8bc6198e",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-restart",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 31,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    },
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/fcefa041007053f6/cab0b74d8bc6198e",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-isolation",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "complete",
+   "tool_calls": 33,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/90d418e119f07a67/797647dcd117dc91",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-readme",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "complete",
+   "tool_calls": 33,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b29df07b4d35662c",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      61
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/90d418e119f07a67/797647dcd117dc91",
+   "variant": null
+  },
+  {
+   "class": "BUDGET_EXHAUSTED_BEFORE",
+   "item": "KL1-isolation",
+   "judgement": "deterministic: incomplete status, no touch",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "incomplete_budget_exhausted",
+   "tool_calls": 34,
+   "touch_evidence": [],
+   "touched": false,
+   "trace": "P4-luna/luna/90d418e119f07a67/c74e9a6e747ff490",
+   "variant": null
+  },
+  {
+   "class": "BUDGET_EXHAUSTED_BEFORE",
+   "item": "KL1-readme",
+   "judgement": "deterministic: incomplete status, no touch",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "incomplete_budget_exhausted",
+   "tool_calls": 34,
+   "touch_evidence": [],
+   "touched": false,
+   "trace": "P4-luna/luna/90d418e119f07a67/c74e9a6e747ff490",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-isolation",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "complete",
+   "tool_calls": 22,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/90d418e119f07a67/701b413330c1069d",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-readme",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "complete",
+   "tool_calls": 22,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b29df07b4d35662c",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      61
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/90d418e119f07a67/701b413330c1069d",
+   "variant": null
+  },
+  {
+   "class": "CONNECTED_SUPPRESSED",
+   "item": "L06-trim",
+   "judgement": "judgement: decisive location read and consequence language present ['catalogue'] in the model's own conclusion, but no finding filed",
+   "keyword_hits": [
+    "catalogue"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "run_shas": [
+    "6509400ca318",
+    "4051ff05090a"
+   ],
+   "status": "complete",
+   "tool_calls": 26,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_c9bc21dd3d0a5a62",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_8d28abe546d047f6",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      70
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/410a6a7bd15d73ae/5ed7b7e4d857b687",
+   "variant": null
+  },
+  {
+   "class": "CONNECTED_SUPPRESSED",
+   "item": "L06-trim",
+   "judgement": "judgement: decisive location read and consequence language present ['join', 'catalogue'] in the model's own conclusion, but no finding filed",
+   "keyword_hits": [
+    "join",
+    "catalogue"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "run_shas": [
+    "6509400ca318",
+    "4051ff05090a"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_c9bc21dd3d0a5a62",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_8d28abe546d047f6",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      70
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/410a6a7bd15d73ae/448830ee1365862d",
+   "variant": null
+  },
+  {
+   "class": "CONNECTED_SUPPRESSED",
+   "item": "L06-trim",
+   "judgement": "judgement: decisive location read and consequence language present ['catalogue'] in the model's own conclusion, but no finding filed",
+   "keyword_hits": [
+    "catalogue"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "run_shas": [
+    "6509400ca318",
+    "4051ff05090a"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_c9bc21dd3d0a5a62",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_8d28abe546d047f6",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      70
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/410a6a7bd15d73ae/cbb44f6f001dfb09",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "LMS dev backend bypasses its new event-Apache vhost"
+   ],
+   "item": "L08-lms",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    ":443",
+    ":9443",
+    "lms",
+    "vhost"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 28,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_5332c27e40b46f5b",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      228,
+      257
+     ]
+    },
+    {
+     "evidence_id": "ev_0024a59ed3e2b120",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      257,
+      260
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/382d4ec6ab7ebabb/2faa9b1603f60733",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-epcore",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 28,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_ee34c2cf0cdd57ee",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      187,
+      187
+     ]
+    },
+    {
+     "evidence_id": "ev_95f108558f925f66",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      179,
+      179
+     ]
+    },
+    {
+     "evidence_id": "ev_ee34c2cf0cdd57ee",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      187,
+      187
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/382d4ec6ab7ebabb/2faa9b1603f60733",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-403",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 28,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_bc7eaca3ef41f046",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      80,
+      80
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/382d4ec6ab7ebabb/2faa9b1603f60733",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-lms",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 25,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_6a850f466a080231",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      260,
+      260
+     ]
+    },
+    {
+     "evidence_id": "ev_cc31e9df097f69b3",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      258,
+      258
+     ]
+    },
+    {
+     "evidence_id": "ev_720f9df6344f439a",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      225,
+      284
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/382d4ec6ab7ebabb/5412341271aad4cb",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-epcore",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 25,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b560231e9e6f76b1",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      183,
+      183
+     ]
+    },
+    {
+     "evidence_id": "ev_04c975b7202de0c5",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      165,
+      224
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/382d4ec6ab7ebabb/5412341271aad4cb",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-403",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 25,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_2d23cf3dd3e8f6ad",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      28,
+      100
+     ]
+    },
+    {
+     "evidence_id": "ev_f5f3cf9c0f8d5718",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      100,
+      158
+     ]
+    },
+    {
+     "evidence_id": "ev_e0549475f0233784",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      125,
+      150
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/382d4ec6ab7ebabb/5412341271aad4cb",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-lms",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_962867ea22c1cbe1",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      1,
+      284
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/382d4ec6ab7ebabb/8b0dd4338d476c96",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Epcore routes to :9443 without a matching vhost"
+   ],
+   "item": "L08-epcore",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "9443",
+    "epcore"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_ee34c2cf0cdd57ee",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      187,
+      187
+     ]
+    },
+    {
+     "evidence_id": "ev_f071127343028f19",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      186,
+      186
+     ]
+    },
+    {
+     "evidence_id": "ev_95f108558f925f66",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      179,
+      179
+     ]
+    },
+    {
+     "evidence_id": "ev_ee34c2cf0cdd57ee",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      187,
+      187
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/382d4ec6ab7ebabb/8b0dd4338d476c96",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-403",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_bc7eaca3ef41f046",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      80,
+      80
+     ]
+    },
+    {
+     "evidence_id": "ev_962867ea22c1cbe1",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      1,
+      284
+     ]
+    },
+    {
+     "evidence_id": "ev_962867ea22c1cbe1",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      1,
+      284
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/382d4ec6ab7ebabb/8b0dd4338d476c96",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "New required evidence_tier breaks decoding of existing CaseResult JSON"
+   ],
+   "item": "L10-evidenceTier",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "decod",
+    "evidence_tier"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 37,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_7b0d43d75b75e4b2",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      227,
+      227
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/08d94118ff333e17/f72696be3379bd0d",
+   "variant": null
+  },
+  {
+   "class": "CORRECT_NON_FINDING",
+   "item": "L10-tier-trap",
+   "judgement": "no finding at trap site (correct)",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 37,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_2618c4167381946b",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      301,
+      301
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/08d94118ff333e17/f72696be3379bd0d",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Adding evidence_tier breaks decoding of existing CaseResult JSON"
+   ],
+   "item": "L10-evidenceTier",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "decod",
+    "evidence_tier"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 30,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_8f31f46684ca2f99",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      190,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_3c2289d93fb97bf9",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      190,
+      366
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/08d94118ff333e17/58755aa28d9bf00d",
+   "variant": null
+  },
+  {
+   "class": "CORRECT_NON_FINDING",
+   "item": "L10-tier-trap",
+   "judgement": "no finding at trap site (correct)",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 30,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_8f31f46684ca2f99",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      190,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_3c2289d93fb97bf9",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      190,
+      366
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/08d94118ff333e17/58755aa28d9bf00d",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Adding evidence_tier makes prior CaseResult JSON undecodable"
+   ],
+   "item": "L10-evidenceTier",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "decod",
+    "evidenceTier",
+    "evidence_tier"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 25,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_c8c35d96017109ee",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      230,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_c4424db44aecb23c",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      236,
+      236
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/08d94118ff333e17/c320ac9d5da5d1cd",
+   "variant": null
+  },
+  {
+   "class": "CORRECT_NON_FINDING",
+   "item": "L10-tier-trap",
+   "judgement": "no finding at trap site (correct)",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 25,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_c8c35d96017109ee",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      230,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_a54f5b0b71cb3763",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      218,
+      326
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/08d94118ff333e17/c320ac9d5da5d1cd",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-median",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 21,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_eb53ef97fe45e750",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      795,
+      855
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/eaaff05e342c19c3/a43879ffdbc87b2b",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Report counts reserved attempts as reboot commands sent"
+   ],
+   "item": "FW3-reboots",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "reboots_sent",
+    "reservation",
+    "reserved"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 21,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_eb53ef97fe45e750",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      795,
+      855
+     ]
+    },
+    {
+     "evidence_id": "ev_b0317c6024746ef0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      828,
+      842
+     ]
+    },
+    {
+     "evidence_id": "ev_7469049ec8b7ae4c",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      489
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/eaaff05e342c19c3/a43879ffdbc87b2b",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-restart",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 21,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    },
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/eaaff05e342c19c3/a43879ffdbc87b2b",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-median",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 20,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/eaaff05e342c19c3/8b7a88a96aa65076",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-reboots",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 20,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_7469049ec8b7ae4c",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      489
+     ]
+    },
+    {
+     "evidence_id": "ev_75917c903e1bdb59",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      499
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/eaaff05e342c19c3/8b7a88a96aa65076",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-restart",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 20,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    },
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/eaaff05e342c19c3/8b7a88a96aa65076",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-median",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 28,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_61ea4eb77bd7e299",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      700,
+      855
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/eaaff05e342c19c3/c2c86ae6c70c4428",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Report counts reserved attempts as reboot commands sent"
+   ],
+   "item": "FW3-reboots",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "reboots_sent",
+    "reservation",
+    "reserved"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 28,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b264ddda85473af0",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      867
+     ]
+    },
+    {
+     "evidence_id": "ev_61ea4eb77bd7e299",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      700,
+      855
+     ]
+    },
+    {
+     "evidence_id": "ev_94f60cf7c9e9446f",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      831,
+      831
+     ]
+    },
+    {
+     "evidence_id": "ev_dd63b03be6e7ba02",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      825,
+      842
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/eaaff05e342c19c3/c2c86ae6c70c4428",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "FW3-restart",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/frigate-watchdog",
+   "run_shas": [
+    "956f7445fa13",
+    "d9b61df6c889"
+   ],
+   "status": "complete",
+   "tool_calls": 28,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    },
+    {
+     "evidence_id": "ev_f7de6bf7047a0d75",
+     "revision": "base",
+     "revision_sha": "956f7445",
+     "span": [
+      1,
+      1256
+     ]
+    },
+    {
+     "evidence_id": "ev_6775ce39a7b1ceb4",
+     "revision": "head",
+     "revision_sha": "d9b61df6",
+     "span": [
+      1,
+      1277
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/eaaff05e342c19c3/c2c86ae6c70c4428",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-isolation",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "complete",
+   "tool_calls": 29,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/dd5d501f1c024a7b/7df595879148cd1a",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-readme",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "complete",
+   "tool_calls": 29,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b29df07b4d35662c",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      61
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/dd5d501f1c024a7b/7df595879148cd1a",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-isolation",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "complete",
+   "tool_calls": 34,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/dd5d501f1c024a7b/227db3bc17301c3d",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-readme",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "complete",
+   "tool_calls": 34,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b29df07b4d35662c",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      61
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/dd5d501f1c024a7b/227db3bc17301c3d",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-isolation",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "unresolved_empty_final",
+   "tool_calls": 15,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    },
+    {
+     "evidence_id": "ev_52a0dff09ff5d1d5",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      862
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/dd5d501f1c024a7b/1d9dec2fde2b7b5a",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "KL1-readme",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/kinglet-lms",
+   "run_shas": [
+    "dbf06e0004a4",
+    "694269d572bd"
+   ],
+   "status": "unresolved_empty_final",
+   "tool_calls": 15,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b29df07b4d35662c",
+     "revision": "head",
+     "revision_sha": "694269d5",
+     "span": [
+      1,
+      61
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/dd5d501f1c024a7b/1d9dec2fde2b7b5a",
+   "variant": null
+  },
+  {
+   "class": "CONNECTED_SUPPRESSED",
+   "item": "L06-trim",
+   "judgement": "judgement: decisive location read and consequence language present ['join', 'catalogue'] in the model's own conclusion, but no finding filed",
+   "keyword_hits": [
+    "join",
+    "catalogue"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "run_shas": [
+    "6509400ca318",
+    "4051ff05090a"
+   ],
+   "status": "complete",
+   "tool_calls": 39,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_c9bc21dd3d0a5a62",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_c9bc21dd3d0a5a62",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_8d28abe546d047f6",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      70
+     ]
+    },
+    {
+     "evidence_id": "ev_8d28abe546d047f6",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      70
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/8e84b5a98cb70d99/719f68121f52d296",
+   "variant": null
+  },
+  {
+   "class": "CONNECTED_SUPPRESSED",
+   "item": "L06-trim",
+   "judgement": "judgement: decisive location read and consequence language present ['catalogue'] in the model's own conclusion, but no finding filed",
+   "keyword_hits": [
+    "catalogue"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "run_shas": [
+    "6509400ca318",
+    "4051ff05090a"
+   ],
+   "status": "complete",
+   "tool_calls": 27,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_c9bc21dd3d0a5a62",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_0d466ca25d9b3cc8",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      10,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_8d28abe546d047f6",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      70
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/8e84b5a98cb70d99/82e06023936d5da0",
+   "variant": null
+  },
+  {
+   "class": "CONNECTED_SUPPRESSED",
+   "item": "L06-trim",
+   "judgement": "judgement: decisive location read and consequence language present ['join', 'catalogue'] in the model's own conclusion, but no finding filed",
+   "keyword_hits": [
+    "join",
+    "catalogue"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "My-Day-My-Way/my-day-my-way-ios",
+   "run_shas": [
+    "6509400ca318",
+    "4051ff05090a"
+   ],
+   "status": "complete",
+   "tool_calls": 37,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_c9bc21dd3d0a5a62",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_0d466ca25d9b3cc8",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      10,
+      61
+     ]
+    },
+    {
+     "evidence_id": "ev_8d28abe546d047f6",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      70
+     ]
+    },
+    {
+     "evidence_id": "ev_8d28abe546d047f6",
+     "revision": "head",
+     "revision_sha": "4051ff05",
+     "span": [
+      1,
+      70
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/8e84b5a98cb70d99/4fc0fa4a399f316e",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "LMS dev route bypasses its new FPM vhost"
+   ],
+   "item": "L08-lms",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    ":443",
+    ":9443",
+    "lms",
+    "vhost"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_cc31e9df097f69b3",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      258,
+      258
+     ]
+    },
+    {
+     "evidence_id": "ev_c80a5d2e85b29142",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      248,
+      284
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/17aa5f1e287890b0/9b4cca877953294c",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-epcore",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_ee34c2cf0cdd57ee",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      187,
+      187
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/17aa5f1e287890b0/9b4cca877953294c",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-403",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 40,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_bc7eaca3ef41f046",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      80,
+      80
+     ]
+    },
+    {
+     "evidence_id": "ev_776b6252d314c135",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      25,
+      160
+     ]
+    },
+    {
+     "evidence_id": "ev_bc7eaca3ef41f046",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      80,
+      80
+     ]
+    },
+    {
+     "evidence_id": "ev_776b6252d314c135",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      25,
+      160
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/17aa5f1e287890b0/9b4cca877953294c",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-lms",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 27,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_6ea2a55282b5efe6",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      175,
+      284
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/17aa5f1e287890b0/840dd93311488fdc",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-epcore",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 27,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b46ff1dca730d830",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      25,
+      175
+     ]
+    },
+    {
+     "evidence_id": "ev_ee34c2cf0cdd57ee",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      187,
+      187
+     ]
+    },
+    {
+     "evidence_id": "ev_6ea2a55282b5efe6",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      175,
+      284
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/17aa5f1e287890b0/840dd93311488fdc",
+   "variant": null
+  },
+  {
+   "class": "FOUND",
+   "finding_titles": [
+    "Valid WooCommerce cart removals can be denied"
+   ],
+   "item": "L08-403",
+   "judgement": "finding overlaps decisive span with mechanism language; mechanism confirmed by M8/M9.1 adjudication for this item",
+   "matched_keywords": [
+    "403",
+    "WooCommerce",
+    "_wpnonce",
+    "cart",
+    "remove_item"
+   ],
+   "model": "luna",
+   "n_finding_overlap": 1,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 27,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_b46ff1dca730d830",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      25,
+      175
+     ]
+    },
+    {
+     "evidence_id": "ev_bc7eaca3ef41f046",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      80,
+      80
+     ]
+    },
+    {
+     "evidence_id": "ev_32a3409c0307d0d7",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      65,
+      135
+     ]
+    },
+    {
+     "evidence_id": "ev_b46ff1dca730d830",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      25,
+      175
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/17aa5f1e287890b0/840dd93311488fdc",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-lms",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 31,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_cc31e9df097f69b3",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      258,
+      258
+     ]
+    },
+    {
+     "evidence_id": "ev_720f9df6344f439a",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      225,
+      284
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/17aa5f1e287890b0/8b94dfbef868bbb8",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-epcore",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 31,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_f071127343028f19",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      186,
+      186
+     ]
+    },
+    {
+     "evidence_id": "ev_f071127343028f19",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      186,
+      186
+     ]
+    },
+    {
+     "evidence_id": "ev_b560231e9e6f76b1",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      183,
+      183
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/17aa5f1e287890b0/8b94dfbef868bbb8",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L08-403",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language); connected instead to a different defect in the same file, no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "Smart-Compliance-Systems/scs-infra",
+   "run_shas": [
+    "aa807b86fda3",
+    "aff2a0680940"
+   ],
+   "status": "complete",
+   "tool_calls": 31,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_8c3d45f33df49ca4",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      70,
+      88
+     ]
+    },
+    {
+     "evidence_id": "ev_c0db9fd7382ac562",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      75,
+      75
+     ]
+    },
+    {
+     "evidence_id": "ev_498d37dabe71452b",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      76,
+      76
+     ]
+    },
+    {
+     "evidence_id": "ev_f2eecfba0cda138e",
+     "revision": "head",
+     "revision_sha": "aff2a068",
+     "span": [
+      88,
+      150
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/17aa5f1e287890b0/8b94dfbef868bbb8",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L10-evidenceTier",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 39,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_c4424db44aecb23c",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      236,
+      236
+     ]
+    },
+    {
+     "evidence_id": "ev_578bad2d4fd78f6d",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      210,
+      390
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/94f19ce25f484ea6/1e7be69d5d6a63b0",
+   "variant": null
+  },
+  {
+   "class": "CORRECT_NON_FINDING",
+   "item": "L10-tier-trap",
+   "judgement": "no finding at trap site (correct)",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 39,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_578bad2d4fd78f6d",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      210,
+      390
+     ]
+    },
+    {
+     "evidence_id": "ev_7b859fe60febb06c",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      210,
+      345
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/94f19ce25f484ea6/1e7be69d5d6a63b0",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L10-evidenceTier",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "unresolved_empty_final",
+   "tool_calls": 37,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_052cb309671818d8",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      205,
+      365
+     ]
+    },
+    {
+     "evidence_id": "ev_4ac7030acf90cd78",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      208,
+      408
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/94f19ce25f484ea6/8b223cb30417c25b",
+   "variant": null
+  },
+  {
+   "class": "CORRECT_NON_FINDING",
+   "item": "L10-tier-trap",
+   "judgement": "no finding at trap site (correct)",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "unresolved_empty_final",
+   "tool_calls": 37,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_052cb309671818d8",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      205,
+      365
+     ]
+    },
+    {
+     "evidence_id": "ev_4ac7030acf90cd78",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      208,
+      408
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/94f19ce25f484ea6/8b223cb30417c25b",
+   "variant": null
+  },
+  {
+   "class": "EXAMINED_NOT_CONNECTED",
+   "item": "L10-evidenceTier",
+   "judgement": "judgement: decisive location read (or overlapped without mechanism language), no consequence language in the model's conclusion",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 38,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_675acf4f1535c1af",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      220,
+      220
+     ]
+    },
+    {
+     "evidence_id": "ev_c4424db44aecb23c",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      236,
+      236
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/94f19ce25f484ea6/f9a6f0c2d18e0862",
+   "variant": null
+  },
+  {
+   "class": "CORRECT_NON_FINDING",
+   "item": "L10-tier-trap",
+   "judgement": "no finding at trap site (correct)",
+   "model": "luna",
+   "n_finding_overlap": 0,
+   "repo": "mitchins/needletail-harness",
+   "run_shas": [
+    "08847b4cd269",
+    "80bf493d1cae"
+   ],
+   "status": "complete",
+   "tool_calls": 38,
+   "touch_evidence": [
+    {
+     "evidence_id": "ev_49cbb0fc5ca40684",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      1,
+      366
+     ]
+    },
+    {
+     "evidence_id": "ev_5a662a238fa70929",
+     "revision": "head",
+     "revision_sha": "80bf493d",
+     "span": [
+      1,
+      422
+     ]
+    },
+    {
+     "evidence_id": "ev_42c411ee6db9e801",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      296,
+      296
+     ]
+    },
+    {
+     "evidence_id": "ev_9b6f8807ecc76ec8",
+     "revision": "base",
+     "revision_sha": "08847b4c",
+     "span": [
+      302,
+      302
+     ]
+    }
+   ],
+   "touched": true,
+   "trace": "P4-luna/luna/94f19ce25f484ea6/f9a6f0c2d18e0862",
+   "variant": null
+  }
+ ],
+ "schema_version": "m9.2.p4tax.v1"
+}
