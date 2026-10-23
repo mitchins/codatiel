@@ -107,10 +107,13 @@ def discover_prs(repo: str, limit: int = 20) -> tuple[list[dict] | None, str | N
 
 def fetch_pr_shas(repo: str, number: int) -> tuple[dict | None, str | None]:
     """Read-only SHA revalidation (gh pr view). No mutations, ever."""
-    proc = subprocess.run(
-        ["gh", "pr", "view", str(number), "--repo", repo,
-         "--json", "number,headRefOid,baseRefOid,url"],
-        capture_output=True, text=True, timeout=60)
+    try:
+        proc = subprocess.run(
+            ["gh", "pr", "view", str(number), "--repo", repo,
+             "--json", "number,headRefOid,baseRefOid,url"],
+            capture_output=True, text=True, timeout=60)
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
     if proc.returncode != 0:
         return None, proc.stderr.strip()[:1000]
     try:
@@ -272,7 +275,10 @@ def poll_once(cfg: WatcherConfig, state: dict, *,
                 sp["paused_notified"] = True
         return summary
     for repo in cfg.repos:
-        prs, error = discover(repo, cfg.pr_limit)
+        try:
+            prs, error = discover(repo, cfg.pr_limit)
+        except Exception as exc:
+            prs, error = None, f"{type(exc).__name__}: {exc}"
         if prs is None:
             summary["errors"].append({"repo": repo, "error": error})
             continue
@@ -311,19 +317,66 @@ def poll_once(cfg: WatcherConfig, state: dict, *,
             if budget_exhausted(state, day, cfg):
                 summary["paused"] = True
                 break
-            out = review_luna(repo, number)
+            # Delivery-pending pair: redeliver the existing run's exact
+            # digest bytes (rebuilt identically) — never pay for a second
+            # review to fix a transport failure.
+            pending = [r for r in entry.get("reviews", [])
+                       if (r.get("base"), r.get("head")) == (base, head)
+                       and r.get("run_dir") and not r.get("delivered")]
+            if pending:
+                rec = pending[-1]
+                try:
+                    subj, body = build_review_email(Path(rec["run_dir"]))
+                    receipt = deliver(rec["run_dir"], subj, body)
+                    result = classify_receipt(receipt)
+                except Exception as exc:
+                    result = "transport-error"
+                    summary["errors"].append({"pr": key,
+                                              "error": f"{type(exc).__name__}: {exc}"})
+                rec["delivery"] = result
+                if result == "delivered":
+                    rec["delivered"] = True
+                summary["emails"].append({"pr": key, "result": result,
+                                          "redelivery": True})
+                summary["reviewed"].append({"pr": key, **rec,
+                                            "redelivered": True})
+                continue
+            try:
+                out = review_luna(repo, number)
+            except Exception as exc:
+                out = {"status": "failed", "stage": "agent",
+                       "error": f"{type(exc).__name__}: {exc}"}
             rec = register_review(state, entry, base, head, out, day,
                                   second_pass=False)
             stale = False
-            if out.get("run_dir"):
-                live, _ = fetch_shas(repo, number)
+            if out.get("run_dir") and not all(
+                    (Path(out["run_dir"]) / f).exists()
+                    for f in ("run.json", "metrics.json",
+                              "shadow_result.json")):
+                rec["error"] = "run artifacts missing; no delivery attempted"
+                summary["errors"].append({"pr": key,
+                                          "error": rec["error"]})
+            if out.get("run_dir") and "error" not in rec:
+                try:
+                    live, live_error = fetch_shas(repo, number)
+                except Exception as exc:
+                    live, live_error = None, f"{type(exc).__name__}: {exc}"
+                if live_error:
+                    summary["errors"].append({"pr": key,
+                                              "error": live_error})
                 if live and (str(live.get("baseRefOid") or ""),
                              str(live.get("headRefOid") or "")) != (base, head):
                     stale = True
                     rec["stale_during_run"] = True
-                subj, body = build_review_email(out["run_dir"], stale=stale)
-                receipt = deliver(out["run_dir"], subj, body)
-                result = classify_receipt(receipt)
+                try:
+                    subj, body = build_review_email(out["run_dir"],
+                                                    stale=stale)
+                    receipt = deliver(out["run_dir"], subj, body)
+                    result = classify_receipt(receipt)
+                except Exception as exc:
+                    result = "transport-error"
+                    summary["errors"].append({"pr": key,
+                                              "error": f"{type(exc).__name__}: {exc}"})
                 rec["delivery"] = result
                 summary["emails"].append({"pr": key, "result": result,
                                           "stale": stale})
@@ -333,14 +386,23 @@ def poll_once(cfg: WatcherConfig, state: dict, *,
             if (out.get("run_dir") and review_haiku is not None
                     and out.get("status") in HAIKU_TRIGGER_STATUSES
                     and not budget_exhausted(state, day, cfg)):
-                out2 = review_haiku(repo, number)
+                try:
+                    out2 = review_haiku(repo, number)
+                except Exception as exc:
+                    out2 = {"status": "failed", "stage": "agent",
+                            "error": f"{type(exc).__name__}: {exc}"}
                 rec2 = register_review(state, entry, base, head, out2, day,
                                        second_pass=True)
                 if out2.get("run_dir"):
-                    subj2, body2 = build_review_email(
-                        out2["run_dir"], second_pass=True)
-                    receipt2 = deliver(out2["run_dir"], subj2, body2)
-                    result2 = classify_receipt(receipt2)
+                    try:
+                        subj2, body2 = build_review_email(
+                            out2["run_dir"], second_pass=True)
+                        receipt2 = deliver(out2["run_dir"], subj2, body2)
+                        result2 = classify_receipt(receipt2)
+                    except Exception as exc:
+                        result2 = "transport-error"
+                        summary["errors"].append(
+                            {"pr": key, "error": f"{type(exc).__name__}: {exc}"})
                     rec2["delivery"] = result2
                     summary["emails"].append({"pr": key, "result": result2,
                                               "follow_up": True})
@@ -365,11 +427,18 @@ def register_review(state: dict, entry: dict, base: str, head: str,
         try:
             metrics = json.loads((Path(out["run_dir"]) / "metrics.json")
                                  .read_text(encoding="utf-8"))
-            usd = (metrics.get("spend") or {}).get("usd_estimate") or 0.0
+            usd = (metrics.get("spend") or {}).get("usd_estimate")
+            usd = float(usd) if usd is not None else 0.0
         except Exception:
-            usd = 0.0
-        debit_spend(state, day, usd)
-        rec["usd"] = usd
+            usd = None
+        if usd is None:
+            # Never invent a zero: unreadable spend stays unknown and the
+            # pair stays out of the delivered set, so it is revisited.
+            rec["usd"] = "unknown"
+            rec["spend_unknown"] = True
+        else:
+            debit_spend(state, day, usd)
+            rec["usd"] = usd
     else:
         rec["error"] = out.get("error", "no run_dir")
     entry.setdefault("reviews", []).append(rec)

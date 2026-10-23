@@ -215,16 +215,50 @@ def test_smtp_failure_retries_delivery_without_new_inference(tmp_path):
     assert out["emails"][0]["result"] == "failed"
     assert out["reviewed"][0]["delivered"] is False
     h.receipt = {"succeeded": 1, "failed": 0, "email_id": "e2"}
+    reviews_before = h.reviews
     out = run_poll(cfg, state, h, now=2000.0)
-    # unchanged SHA: no new review; redelivery happens on replay path.
-    # poll itself must not re-review a failed-delivery pair silently...
-    # pair is not marked delivered, not in `done`, but head unchanged and
-    # first_seen already past: poll would re-review. Assert redelivery
-    # instead goes through replay-delivery with identical bytes:
-    from codatiel_i2 import service as S
-    run_dir = Path(h.sent[0]["run_dir"])
-    subj, body = W.build_review_email(run_dir)
-    assert (subj, body) == (h.sent[0]["subject"], h.sent[0]["body"])
+    assert h.reviews == reviews_before, "no second inference for transport failure"
+    assert out["emails"][0]["redelivery"] is True
+    assert out["reviewed"][0]["delivered"] is True
+    assert out["reviewed"][0].get("redelivered") is True
+    first = h.sent[0]
+    assert (first["subject"], first["body"]) == W.build_review_email(
+        Path(first["run_dir"]))
+
+
+def test_transport_exception_does_not_lose_poll_state(tmp_path):
+    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
+    h.prs = [pr()]
+
+    def boom(*a: object) -> dict:
+        raise ConnectionError("smtp down")
+
+    run_poll(cfg, state, h, now=1000.0)  # prime debounce
+    out = W.poll_once(cfg, state, now=2000.0, day="2026-10-23",
+                      discover=h.discover, fetch_shas=h.fetch,
+                      review_luna=h.review_luna,
+                      review_haiku=h.review_haiku, deliver=boom)
+    assert out["reviewed"][0]["delivery"] == "transport-error"
+    assert out["reviewed"][0]["delivered"] is False
+
+
+def test_missing_run_artifacts_skip_delivery(tmp_path):
+    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
+    h.prs = [pr()]
+
+    def ghost_luna(repo: str, number: int):
+        h.reviews += 1
+        return {"status": "complete", "stage": "done",
+                "run_dir": str(tmp_path / "ghost"), "model": "luna"}
+
+    run_poll(cfg, state, h, now=1000.0)  # prime debounce
+    out = W.poll_once(cfg, state, now=2000.0, day="2026-10-23",
+                      discover=h.discover, fetch_shas=h.fetch,
+                      review_luna=ghost_luna,
+                      review_haiku=h.review_haiku, deliver=h.deliver)
+    assert h.sent == []
+    assert "missing" in out["reviewed"][0]["error"]
+    assert out["reviewed"][0]["usd"] == "unknown"
 
 
 def test_ambiguous_receipt_classification_and_replay_idempotency(tmp_path):
