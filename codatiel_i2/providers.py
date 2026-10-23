@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-BACKENDS = ("luna", "haiku", "gemma")
+BACKENDS = ("luna", "haiku", "gemma", "deepseek")
 
 _PROFILE_PATH = Path(__file__).resolve().parent / "config" / "model_profiles.json"
 
@@ -75,6 +75,13 @@ def build_model(name: str) -> tuple[Any, Any]:
             api_key=None), _default_settings())
     if name == "haiku":
         return runtime_sdk.HaikuModel(), _default_settings()
+    if name == "deepseek":
+        profiles = load_profiles()
+        profile = profiles[name]
+        return (runtime_sdk.deepseek_model(
+            model=str(profile.get("model", "deepseek-flash")),
+            base_url=str(profile.get("base_url", "")) or None),
+            runtime_sdk.deepseek_model_settings())
     raise ValueError(f"unknown backend {name!r}")
 
 

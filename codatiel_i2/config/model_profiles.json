@@ -67,6 +67,27 @@
       "expected_context": 200000
     },
     {
+      "profile": "deepseek_flash_review",
+      "backend": "deepseek",
+      "provider": "deepseek_openai_compatible",
+      "model": "deepseek-flash",
+      "served_model_claim": "DeepSeek-V4.1-Flash-1017 (per provider docs 2026-10-23; verify per run)",
+      "base_url": "https://api.deepseek.com",
+      "role": "review_backend",
+      "privacy": "UNVERIFIED_NO_TRAINING_CLAIM_M10_SCOPE_FROZEN_PUBLIC_PRIVATE_CASES_ONLY",
+      "thinking": "enabled_explicit_extra_body_default_effort",
+      "rate_usd_per_mtok": {
+        "input": 0.30,
+        "input_cache_hit": 0.006,
+        "output": 1.20
+      },
+      "rate_status": "peak_tier_official_docs_2026-10-23_cache_hit_miss_split",
+      "max_usd_per_review": 1.0,
+      "credential_env": "DEEPSEEK_API_KEY",
+      "expected_context": 1000000,
+      "output_bound_per_request": 8192
+    },
+    {
       "profile": "gemma_review",
       "backend": "gemma",
       "provider": "openai_compatible",

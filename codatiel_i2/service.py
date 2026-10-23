@@ -730,7 +730,7 @@ def _parse_model_output(final: Any) -> tuple[dict, list[str]]:
 
 
 def _model_is_paid_backend(model_name: str) -> bool:
-    return model_name.split(":")[0] in ("luna", "haiku")
+    return model_name.split(":")[0] in ("luna", "haiku", "deepseek")
 
 
 def _model_is_zero_cost(model_name: str, rate_status: str) -> bool:

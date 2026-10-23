@@ -325,9 +325,24 @@ class UsageRecordingModel(_SDKModel):
     async def get_response(self, *args: Any, **kwargs: Any) -> Any:
         response = await self._model.get_response(*args, **kwargs)
         try:
+            usage = getattr(response, "usage", None)
+            cached = reasoning = None
+            if (getattr(self._model, "provider_usage_details", False)
+                    and usage is not None):
+                # Provider-reported token details only: the adapter marks
+                # them as sourced from the provider payload, never inferred.
+                try:
+                    cached = usage.input_tokens_details.cached_tokens
+                except (AttributeError, TypeError):
+                    cached = None
+                try:
+                    reasoning = usage.output_tokens_details.reasoning_tokens
+                except (AttributeError, TypeError):
+                    reasoning = None
             added = self.ledger.record_response(
-                getattr(response, "response_id", None),
-                getattr(response, "usage", None))
+                getattr(response, "response_id", None), usage,
+                cached_input_tokens=cached,
+                reasoning_output_tokens=reasoning)
             if added:
                 unknown_ids = getattr(self._model, "_unknown_usage_response_ids", ())
                 if getattr(response, "response_id", None) in (unknown_ids or ()):
@@ -407,6 +422,63 @@ def gemma_model(*, model: str, base_url: str | None = None,
     key = api_key or os.environ.get("GEMMA_API_KEY") or "local"
     client = AsyncOpenAI(base_url=base, api_key=key)
     return OpenAIChatCompletionsModel(model=model, openai_client=client)
+
+
+def deepseek_model(*, model: str = "deepseek-flash",
+                   base_url: str | None = None,
+                   api_key: str | None = None) -> Any:
+    """Build the DeepSeek Flash backend (M10 primary: thinking enabled).
+
+    M10 primary configuration (recorded 2026-10-23, before any evaluation
+    run): thinking ENABLED (explicit ``extra_body`` toggle, provider
+    default), default effort. Rationale: provider default (no tuning);
+    the installed SDK replays ``reasoning_content`` for deepseek models,
+    which thinking mode with tools requires (else HTTP 400); the M9.2
+    escalation hypothesis is reasoning-side, making the thinking variant
+    the theoretically interesting challenger; parity with Haiku's adaptive
+    thinking. If thinking mode proves incompatible, fall back to
+    non-thinking and record the switch as a compatibility finding.
+
+    ``provider_usage_details`` marks SDK Usage token details as
+    provider-reported: DeepSeek returns ``prompt_tokens_details``
+    (cached tokens) and ``completion_tokens_details`` (reasoning tokens)
+    in chat-completion usage (verified by raw probe in M10 smoke test), so
+    the spend ledger may record them as reported — never as inferred.
+    ``reasoning_content`` text is counted via reasoning tokens, never
+    stored: it is deliberation, not review evidence.
+    """
+    import os
+    ensure_local_tracing()
+    require_sdk()
+    from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+    try:
+        from openai import AsyncOpenAI
+    except Exception as exc:
+        raise RuntimeError("openai package required for the DeepSeek backend") from exc
+    base = (base_url or os.environ.get("DEEPSEEK_BASE_URL")
+            or "https://api.deepseek.com").rstrip("/")
+    key = api_key or os.environ.get("DEEPSEEK_API_KEY")
+    if not key:
+        raise RuntimeError("DEEPSEEK_API_KEY is not set")
+    client = AsyncOpenAI(base_url=base, api_key=key)
+
+    class DeepSeekModel(OpenAIChatCompletionsModel):
+        provider_usage_details = True
+
+    return DeepSeekModel(model=model, openai_client=client)
+
+
+def deepseek_model_settings() -> Any:
+    """ModelSettings for DeepSeek: explicit thinking toggle + output bound.
+
+    Thinking enabled explicitly (not relied on as a silent default);
+    ``max_tokens=8192`` bounds output tokens per request (parity with the
+    Haiku adapter). No temperature/top_p: thinking mode ignores them.
+    """
+    agents = require_sdk()
+    from agents.model_settings import ModelSettings
+    return ModelSettings(max_tokens=8192,
+                         extra_body={"thinking": {"type": "enabled"}})
 
 
 class HaikuModel(_SDKModel):

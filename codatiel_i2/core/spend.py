@@ -94,7 +94,9 @@ class SpendLedger:
                 base_requests = int((previous or {}).get("requests", 1) or 1)
                 merged[key] = {"response_id": key, "requests": base_requests,
                                "input_tokens": None, "output_tokens": None,
-                               "usage_known": False}
+                               "usage_known": False,
+                               "cached_input_tokens": None,
+                               "reasoning_output_tokens": None}
             elif key not in merged and key not in self.entries:
                 merged[key] = {
                     "response_id": key,
@@ -102,6 +104,8 @@ class SpendLedger:
                     "input_tokens": row.get("input_tokens"),
                     "output_tokens": row.get("output_tokens"),
                     "usage_known": bool(row.get("usage_known", False)),
+                    "cached_input_tokens": row.get("cached_input_tokens"),
+                    "reasoning_output_tokens": row.get("reasoning_output_tokens"),
                 }
         for key, entry in merged.items():
             if key not in self.entries:
@@ -121,13 +125,21 @@ class SpendLedger:
         except OSError as exc:
             self.sink_error = f"{type(exc).__name__}: {exc}"
 
-    def record_response(self, response_id: Any, usage: Any) -> bool:
+    def record_response(self, response_id: Any, usage: Any,
+                        cached_input_tokens: Any = None,
+                        reasoning_output_tokens: Any = None) -> bool:
         """Record one completed provider response.
 
         Returns True when this response added new usage, False when its ID was
         already reconciled. A missing response ID cannot be deduplicated, so it
         is kept as unknown rather than silently merged. Every new entry is
         appended to the sink immediately when one is attached.
+
+        ``cached_input_tokens`` / ``reasoning_output_tokens`` are recorded
+        only when the caller passes provider-reported token details (backends
+        whose adapter marks usage details as provider-sourced). They default
+        to None (not reported), never to zero: an absent detail must not
+        masquerade as a reported zero.
         """
         key = str(response_id) if response_id not in (None, "") else None
         if key is not None and key in self.entries:
@@ -139,11 +151,17 @@ class SpendLedger:
         output_tokens = _as_int(getattr(usage, "output_tokens", None)) if usage is not None else None
         if usage is None or requests is None or input_tokens is None or output_tokens is None:
             entry = {"response_id": key, "requests": 1 if usage is None else max(1, requests or 1),
-                     "input_tokens": None, "output_tokens": None, "usage_known": False}
+                     "input_tokens": None, "output_tokens": None, "usage_known": False,
+                     "cached_input_tokens": None, "reasoning_output_tokens": None}
         else:
             entry = {"response_id": key, "requests": max(1, requests),
                      "input_tokens": input_tokens, "output_tokens": output_tokens,
-                     "usage_known": True}
+                     "usage_known": True,
+                     "cached_input_tokens": (None if cached_input_tokens is None
+                                             else _as_int(cached_input_tokens)),
+                     "reasoning_output_tokens": (
+                         None if reasoning_output_tokens is None
+                         else _as_int(reasoning_output_tokens))}
         self.entries[key] = entry
         self.order.append(key)
         self._append_sink(entry)
@@ -159,6 +177,8 @@ class SpendLedger:
         entry["input_tokens"] = None
         entry["output_tokens"] = None
         entry["usage_known"] = False
+        entry["cached_input_tokens"] = None
+        entry["reasoning_output_tokens"] = None
         self._append_sink({**entry, "usage_known_correction": True})
 
     def note_recording_error(self) -> None:
@@ -188,17 +208,39 @@ class SpendLedger:
         except (TypeError, ValueError):
             return None, None
 
+    def _rate_hit(self) -> float | None:
+        try:
+            hit = self.rate.get("input_cache_hit")
+            return float(hit) if hit is not None else None
+        except (TypeError, ValueError):
+            return None
+
     def confirmed_usd(self) -> float | None:
         """Confirmed lower-bound cost of known-usage requests, or None when
-        rates are unconfirmed."""
+        rates are unconfirmed.
+
+        When the rate provides ``input_cache_hit`` and an entry carries
+        provider-reported ``cached_input_tokens``, that slice is priced at
+        the hit rate and the remainder at the miss (``input``) rate.
+        Otherwise the flat ``input`` rate applies — a conservative upper
+        bound when caching is unpriced.
+        """
         rate_in, rate_out = self._rate_pair()
         if rate_in is None or rate_out is None:
             return None
-        known_in = sum(entry["input_tokens"] for entry in self.entries.values()
-                       if entry["usage_known"])
-        known_out = sum(entry["output_tokens"] for entry in self.entries.values()
-                        if entry["usage_known"])
-        return (known_in / 1e6 * rate_in) + (known_out / 1e6 * rate_out)
+        rate_hit = self._rate_hit()
+        total = 0.0
+        for entry in self.entries.values():
+            if not entry["usage_known"]:
+                continue
+            cached = entry.get("cached_input_tokens")
+            if rate_hit is not None and cached is not None:
+                total += ((entry["input_tokens"] - cached) / 1e6 * rate_in
+                          + cached / 1e6 * rate_hit)
+            else:
+                total += entry["input_tokens"] / 1e6 * rate_in
+            total += entry["output_tokens"] / 1e6 * rate_out
+        return total
 
     def has_confirmed_tokens(self) -> bool:
         return any(entry["usage_known"] and (entry["input_tokens"] or entry["output_tokens"])
@@ -213,6 +255,17 @@ class SpendLedger:
                         if entry["usage_known"])
         known_requests = sum(entry["requests"] for entry in self.entries.values()
                              if entry["usage_known"])
+        detail_responses = sum(
+            1 for entry in self.entries.values()
+            if entry["usage_known"] and (
+                entry.get("cached_input_tokens") is not None
+                or entry.get("reasoning_output_tokens") is not None))
+        cached_in = sum(entry.get("cached_input_tokens") or 0
+                        for entry in self.entries.values()
+                        if entry["usage_known"])
+        reasoning_out = sum(entry.get("reasoning_output_tokens") or 0
+                            for entry in self.entries.values()
+                            if entry["usage_known"])
         unknown_requests = sum(entry["requests"] for entry in self.entries.values()
                                if not entry["usage_known"])
         unknown_ids = [entry["response_id"] for entry in self.entries.values()
@@ -225,8 +278,11 @@ class SpendLedger:
             usd = None
         record = {"usage": {"requests": known_requests + unknown_requests,
                             "input_tokens": known_in, "output_tokens": known_out},
-                  "known_requests": known_requests,
-                  "unknown_requests": unknown_requests,
+                   "known_requests": known_requests,
+                   "usage_details_reported_responses": detail_responses,
+                   "cached_input_tokens": cached_in,
+                   "reasoning_output_tokens": reasoning_out,
+                   "unknown_requests": unknown_requests,
                   "unknown_response_ids": unknown_ids,
                   "rate_status": self.rate_status,
                   "rate_confirmed": rate_confirmed,
