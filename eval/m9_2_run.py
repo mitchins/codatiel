@@ -103,7 +103,17 @@ def main(case_id: str, model_name: str, arm: str, rep: int):
         if mp.exists():
             spend = json.loads(mp.read_text()).get("spend", {})
     usd = spend.get("usd_estimate") or 0.0
-    if spend.get("accounting_status") == "UNKNOWN":
+    # §9: unknown usage stays UNKNOWN in the record, but ceiling debit is
+    # conservative: any run where inference actually occurred debits its
+    # (possibly estimated) spend; only pre-response infra failures
+    # (billing-blocked, auth, network — no model response possible) debit
+    # $0. Incompletes keep their partial spend.
+    err = out.get("error") or ""
+    pre_response_infra = (out.get("stage") == "agent" and any(
+        s in err for s in ("credit balance", "authentication",
+                           "PermissionDenied", "ConnectionError",
+                           "Timeout", "timed out", "APIConnectionError")))
+    if pre_response_infra:
         usd = 0.0
     lg["spent_usd"] = round(lg["spent_usd"] + usd, 4)
     lg["runs"].append({"case": case_id, "model": model_name, "arm": arm,
