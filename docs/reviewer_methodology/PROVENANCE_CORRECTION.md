@@ -21,15 +21,18 @@ file list as the first user message. What challenger runs received was the
 
 ## What was actually sent, per period
 
-`CANONICAL_INSTRUCTIONS` is byte-identical from the I2 import (`eee6ec1`)
-through M9.1 (`3497ab5`) — verified by extraction from each commit touching
-`codatiel_i2/service.py`:
+`CANONICAL_INSTRUCTIONS` evaluates to identical runtime bytes from the I2
+import (`eee6ec1`) through M9.1 (`3497ab5`) — verified by AST literal
+evaluation of the constant in each commit touching
+`codatiel_i2/service.py` (the runtime string, post line-continuation, is
+what the model received; a hash of the raw source text would differ and
+is not the sent bytes):
 
-| Period | Commits | CANONICAL_INSTRUCTIONS sha256 |
+| Period | Commits | runtime sha256 of CANONICAL_INSTRUCTIONS |
 |---|---|---|
-| I2 import → M9.1 | `eee6ec1`, `ad26f5a`, `40b40e3`, `59c0e3e`, `531046b`, `3497ab5` | `2b55cb76a245721fb3d0c9da4716a81980ce6fcd933818de88853a8add7160e9` |
+| I2 import → M9.1 | `eee6ec1`, `ad26f5a`, `40b40e3`, `59c0e3e`, `531046b`, `3497ab5` | `a93e5e56fa9a73f46428b86bd6e02dcbff843cba1c29530c3a246cf35d0f0db4` |
 
-Truthful ID for all of those runs: **`canonical-minimal-0.1@2b55cb76a245`**.
+Truthful ID for all of those runs: **`canonical-minimal-0.1@a93e5e56fa9a`**.
 
 The M9 challenger prompt (`CHALLENGER_INSTRUCTIONS`, introduced `531046b`,
 unchanged `3497ab5`) likewise never contained the cited documents; its

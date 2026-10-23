@@ -163,7 +163,8 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                  tool_budget: int = 40,
                  variant: str = "baseline",
                  playbook_name: str | None = None,
-                 playbook_text: str | None = None) -> dict[str, Any]:
+                 playbook_text: str | None = None,
+                 inventory_strategy: str = INVENTORY_STRATEGY) -> dict[str, Any]:
     """Run one canonical review over a local repository revision pair."""
     ws = prepare_local_workspace(Path(repo_root), base, head,
                                  Path(work_root))
@@ -177,7 +178,8 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                        max_usd_per_review=max_usd_per_review,
                        tool_budget=tool_budget, variant=variant,
                        playbook_name=playbook_name,
-                       playbook_text=playbook_text)
+                       playbook_text=playbook_text,
+                       inventory_strategy=inventory_strategy)
 
 
 def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
@@ -192,7 +194,8 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                expected_base: str | None = None,
                expected_head: str | None = None,
                playbook_name: str | None = None,
-               playbook_text: str | None = None) -> dict[str, Any]:
+               playbook_text: str | None = None,
+               inventory_strategy: str = INVENTORY_STRATEGY) -> dict[str, Any]:
     """Run one canonical review over a GitHub PR (base/head from the PR).
 
     When ``expected_base``/``expected_head`` are given (frozen roster SHAs),
@@ -228,7 +231,8 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                        tool_budget=tool_budget,
                        pr_number=pr, variant=variant,
                        playbook_name=playbook_name,
-                       playbook_text=playbook_text)
+                       playbook_text=playbook_text,
+                       inventory_strategy=inventory_strategy)
 
 
 def _collect_provider_termination(model: Any) -> dict[str, str]:
@@ -244,11 +248,19 @@ def _collect_provider_termination(model: Any) -> dict[str, str]:
     return out
 
 
+_GUIDEBOOK_PORT_PATH = (Path(__file__).resolve().parent.parent / "docs"
+                         / "reviewer_methodology" / "guidebook_port.md")
+GUIDEBOOK_PORT_INSTRUCTIONS = _GUIDEBOOK_PORT_PATH.read_text(encoding="utf-8")
+GUIDEBOOK_PORT_ID = instructions_id_for(
+    "guidebook-port-0.1", GUIDEBOOK_PORT_INSTRUCTIONS)
+
+
 def _prompt_provenance(*, instructions: str, instructions_id: str,
                        user_input: str, inventory: str,
-                       playbook_name: str | None,
-                       playbook_text: str | None,
-                       boundary_sha256: str | None) -> dict[str, Any]:
+                       inventory_strategy: str = INVENTORY_STRATEGY,
+                       playbook_name: str | None = None,
+                       playbook_text: str | None = None,
+                       boundary_sha256: str | None = None) -> dict[str, Any]:
     """M9.2 P1 prompt-provenance record: exact rendered bytes + hashes.
 
     Labels are content-derived. When a playbook is declared, the record
@@ -263,7 +275,7 @@ def _prompt_provenance(*, instructions: str, instructions_id: str,
         "instructions": instructions,
         "user_input_first_message": user_input,
         "user_input_sha256": _sha256_text(user_input),
-        "inventory_strategy": INVENTORY_STRATEGY,
+        "inventory_strategy": inventory_strategy,
         "inventory": inventory,
         "inventory_sha256": _sha256_text(inventory),
         "declared_playbook": playbook_name,
@@ -288,7 +300,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                pr_number: int | None = None,
                variant: str = "baseline",
                playbook_name: str | None = None,
-               playbook_text: str | None = None) -> dict[str, Any]:
+               playbook_text: str | None = None,
+               inventory_strategy: str = INVENTORY_STRATEGY) -> dict[str, Any]:
     import os
 
     from codatiel_i2 import providers as providers_mod
@@ -346,8 +359,23 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
         instructions = base_instructions
         instructions_id = instructions_id_for(base_name, instructions)
     instructions_version = instructions_id
-    inventory = _render_inventory(changes, classification, det_candidates,
-                                  variant=variant)
+    # M9.2 P3 arms: A/B use the file-list inventory; C uses the generic
+    # deterministic triage inventory. Strategy recorded in provenance.
+    if inventory_strategy == "triage-0.1":
+        from codatiel_i2 import triage as triage_mod
+        inventory = triage_mod.render_triage_inventory(
+            changes, classification, det_candidates, diff_repo=diff_repo,
+            head_dir=head_dir, base_sha=base_sha, head_sha=head_sha)
+        inventory_strategy_name = triage_mod.TRIAGE_INVENTORY_STRATEGY
+    elif inventory_strategy == INVENTORY_STRATEGY:
+        inventory = _render_inventory(changes, classification, det_candidates,
+                                      variant=variant)
+        inventory_strategy_name = INVENTORY_STRATEGY
+    else:
+        return {"status": "failed", "stage": "inventory_strategy",
+                "error": f"unknown inventory_strategy {inventory_strategy!r}; "
+                         f"expected {INVENTORY_STRATEGY!r} or 'triage-0.1'",
+                "service_version": SERVICE_VERSION}
     user_input = ("Review this change between BASE and HEAD. "
                   f"Repository: {ws.repo}. {inventory}")
     ceiling = max_usd_per_review
@@ -413,7 +441,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 variant=variant, instructions=instructions,
                 instructions_id=instructions_id, inventory=inventory,
                 user_input=user_input, playbook_name=playbook_name,
-                playbook_text=playbook_text)
+                playbook_text=playbook_text,
+                inventory_strategy_name=inventory_strategy_name)
         # For other agent failures, try to preserve partial trace if available
         partial_result = getattr(exc, "run_data", None)
         return _write_failed_run(
@@ -424,7 +453,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
             variant=variant, instructions=instructions,
             instructions_id=instructions_id, inventory=inventory,
             user_input=user_input, playbook_name=playbook_name,
-            playbook_text=playbook_text)
+            playbook_text=playbook_text,
+            inventory_strategy_name=inventory_strategy_name)
 
     tool_evidence = _harvest_tool_evidence(result)
     tool_outputs = _harvest_tool_outputs(result)
@@ -471,6 +501,7 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     provenance = _prompt_provenance(
         instructions=instructions, instructions_id=instructions_id,
         user_input=user_input, inventory=inventory,
+        inventory_strategy=inventory_strategy_name,
         playbook_name=playbook_name, playbook_text=playbook_text,
         boundary_sha256=boundary_sha256)
     metrics = {"service_version": SERVICE_VERSION,
@@ -487,7 +518,7 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
               "max_turns": max_turns,
               "instructions": instructions_version,
               "instructions_id": instructions_id,
-              "inventory_strategy": INVENTORY_STRATEGY,
+              "inventory_strategy": inventory_strategy_name,
               "variant": variant}
     scan_key = runs_mod.scan_key_for(ws.repo, base_sha, head_sha, config)
     run_id = runs_mod.new_run_id()
@@ -1073,7 +1104,8 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                       inventory: str | None = None,
                       user_input: str | None = None,
                       playbook_name: str | None = None,
-                      playbook_text: str | None = None) -> dict[str, Any]:
+                      playbook_text: str | None = None,
+                      inventory_strategy_name: str | None = None) -> dict[str, Any]:
     """Minimal immutable record for runs that die before disposition.
 
     When a partial trace is available (e.g., MaxTurnsExceeded with tool calls
@@ -1099,13 +1131,14 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
     provenance = _prompt_provenance(
         instructions=instructions, instructions_id=instructions_id,
         user_input=user_input, inventory=inventory,
+        inventory_strategy=inventory_strategy_name or INVENTORY_STRATEGY,
         playbook_name=playbook_name, playbook_text=playbook_text,
         boundary_sha256=None)
     config = {"service": SERVICE_VERSION, "model": model_name,
               "max_turns": max_turns,
               "instructions": instr_version,
               "instructions_id": instructions_id,
-              "inventory_strategy": INVENTORY_STRATEGY,
+              "inventory_strategy": inventory_strategy_name or INVENTORY_STRATEGY,
               "variant": variant}
     scan_key = runs_mod.scan_key_for(ws.repo, ws.base_sha, ws.head_sha, config)
     run_id = runs_mod.new_run_id()
