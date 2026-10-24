@@ -287,7 +287,8 @@ def poll_once(cfg: WatcherConfig, state: dict, *,
              review_luna: Callable | None = None,
              review_haiku: Callable | None = None,
              deliver: Callable | None = None,
-             list_repos: Callable | None = None) -> dict:
+             list_repos: Callable | None = None,
+             app: Any = None) -> dict:
     """One poll cycle. Returns a summary; mutates `state` (caller saves).
 
     Injected callables keep this deterministic in tests:
@@ -318,7 +319,7 @@ def poll_once(cfg: WatcherConfig, state: dict, *,
     if list_repos is not None:
         repos, list_error = list_repos()
     else:
-        repos, list_error = resolve_repo_list(cfg, state)
+        repos, list_error = resolve_repo_list(cfg, state, app=app)
     if repos is None:
         summary["errors"].append({"repos": list_error or "no repo list"})
         return summary

@@ -303,7 +303,7 @@ def cmd_watcher(args: Any) -> dict:
             cfg, state, now=time.time(), day=today,
             review_luna=lambda repo, number: review_with("luna", repo, number),
             review_haiku=lambda repo, number: review_with("haiku", repo, number),
-            deliver=deliver)
+            deliver=deliver, app=app)
         summary["heartbeat"] = time.time()
         watcher_mod.save_state(cfg.state_path, state)
         Path(str(cfg.state_path) + ".heartbeat").write_text(
