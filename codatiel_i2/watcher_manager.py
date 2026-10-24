@@ -51,6 +51,22 @@ class ManagerConfig:
 EMAIL_FINDING_CAP = 10
 EMAIL_BODY_BUDGET = 65536
 EMAIL_EXCERPTS_PER_FINDING = 5
+# Free-text fields (silence rationales, failure diagnostics) are capped
+# individually so a zero-finding or failed review can never exceed the
+# body budget on its own.
+EMAIL_FREE_TEXT_CAP = 4096
+
+
+def _cap_free_text(value: object, *, source: str) -> str:
+    """Bound one unbounded text field, loudly. Truncation is explicit
+    (kept/total lengths + artifact pointer), never silent."""
+    text = "" if value is None else str(value)
+    raw = text.encode("utf-8")
+    if len(raw) <= EMAIL_FREE_TEXT_CAP:
+        return text
+    kept = raw[:EMAIL_FREE_TEXT_CAP].decode("utf-8", "ignore")
+    return (kept + f"... [truncated to {EMAIL_FREE_TEXT_CAP} of {len(raw)} "
+            f"bytes; full text in run artifacts ({source})]")
 
 
 def _finding_issue_key(finding: dict) -> object:
@@ -138,7 +154,9 @@ def build_email(identity: dict, run_dir: Path, *, stale: bool = False,
         lines += ["REVIEW FAILED before/at inference: no verdict rendered. "
                   "Absence of findings is meaningless; the failure reason "
                   "below is the only signal.",
-                  f"failure: {(shadow.get('error') or shadow.get('stage') or '?')}",
+                  "failure: " + _cap_free_text(
+                      shadow.get("error") or shadow.get("stage") or "?",
+                      source="shadow_result.json"),
                   ""]
     if second_pass:
         lines += ["Conditional Haiku follow-up to an incomplete/unresolved "
@@ -163,7 +181,8 @@ def build_email(identity: dict, run_dir: Path, *, stale: bool = False,
         lines.append("NO MATERIAL FINDINGS after a completed investigation.")
         sil = (shadow.get("silence") or {}).get("summary") or \
             "(no silence rationale recorded)"
-        lines.append(f"Silence rationale (model-authored, unverified): {sil}")
+        lines.append("Silence rationale (model-authored, unverified): "
+                     + _cap_free_text(sil, source="shadow_result.json"))
     shown = distinct[:EMAIL_FINDING_CAP]
     omitted = distinct[EMAIL_FINDING_CAP:]
     for i, f in enumerate(shown, 1):
@@ -224,6 +243,21 @@ def build_email(identity: dict, run_dir: Path, *, stale: bool = False,
                     f"First omitted IDs: {', '.join(omitted_ids)}\n"
                     "Private shadow artifact. Never post to GitHub.")
         text = text.rstrip("\n") + "\n" + overflow
+    if len(text.encode("utf-8")) > EMAIL_BODY_BUDGET:
+        # Unconditional guarantee: reachable only when the fixed
+        # header/footer themselves exceed the budget (no droppable
+        # findings left). Preserve identity (repo/link/SHAs), status and
+        # the omission notice; cut everything between.
+        head = "\n".join(text.split("\n")[:7])
+        notice = (f"BODY TRUNCATED to {EMAIL_BODY_BUDGET} bytes: fixed header "
+                  "preserved; omitted middle content (findings, rationale, "
+                  "diagnostics) remains in run artifacts (findings.jsonl, "
+                  "shadow_result.json, metrics.json).")
+        text = (head + "\n" + notice
+                + "\nPrivate shadow artifact. Never post to GitHub.")
+        if len(text.encode("utf-8")) > EMAIL_BODY_BUDGET:
+            text = (text.encode("utf-8")[:EMAIL_BODY_BUDGET]
+                    .decode("utf-8", "ignore"))
     return subj, text
 
 

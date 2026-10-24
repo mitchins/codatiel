@@ -201,10 +201,13 @@ def _interfaces_equal(doc_if: dict, code_if: dict) -> bool:
     from codatiel_i2.detectors.docs_code.facts import subject_key as _skey
     if _skey(doc_if.get("symbol", "")) != _skey(code_if.get("symbol", "")):
         return False
-    if not doc_if.get("parameters"):
+    params = doc_if.get("parameters")
+    if params is None or not isinstance(params, list):
+        return False  # unprovable: never established equal
+    if params == []:
         return True  # bare mention: no signature claim to contradict
-    ok, _ = call_compatible(doc_if, code_if)
-    return ok
+    verdict, _ = call_compatible(doc_if, code_if)
+    return verdict is True
 
 
 def validate_interface_contract_mismatch(doc_fact: dict | None, code_fact: dict | None = None,
@@ -232,10 +235,17 @@ def validate_interface_contract_mismatch(doc_fact: dict | None, code_fact: dict 
     from codatiel_i2.detectors.docs_code.facts import subject_key as _skey
     if _skey(doc_if.get("symbol", "")) != _skey(code_if.get("symbol", "")):
         return {**result, "survives": False, "reason": "different_subject"}
-    if not doc_if.get("parameters"):
+    params = doc_if.get("parameters")
+    if params is None or not isinstance(params, list):
+        return {**result, "survives": False, "reason": "ambiguous_call",
+                "detail": "parameter info unavailable: compatibility unprovable"}
+    if params == []:
         return {**result, "survives": False, "reason": "bare_mention"}
-    ok, failure = call_compatible(doc_if, code_if)
-    if ok:
+    verdict, failure = call_compatible(doc_if, code_if)
+    if verdict is None:
+        return {**result, "survives": False, "reason": "ambiguous_call",
+                "detail": f"call compatibility unprovable: {failure}"}
+    if verdict:
         return {**result, "survives": False, "reason": "compatible_call"}
     symbol = doc_if.get("symbol", "?")
     return {**result, "survives": True, "reason": "signature_mismatch",

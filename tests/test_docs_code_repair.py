@@ -27,6 +27,31 @@ def test_dict_get_is_not_an_http_route():
     assert facts_mod.extract_code_interfaces("a.py", lines) == []
 
 
+def _routes(lines):
+    return {(f["interface"]["method"], f["interface"]["path"])
+            for f in facts_mod.extract_code_interfaces("a.py", lines)
+            if f["interface"].get("kind") == "http_route"}
+
+
+def test_config_get_with_slash_is_not_a_served_route():
+    # Receiver discipline: an ordinary call on a non-registrar receiver is
+    # data access, even when the string looks like a path.
+    assert _routes(['config.get("/library")']) == set()
+    assert _routes(['client.get("/api/auth/state")']) == set()
+    assert _routes(['view.get("article_id")']) == set()
+
+
+def test_registrar_receivers_count_as_served():
+    assert _routes(['app.get("/library")']) == {("GET", "/library")}
+    assert _routes(['self.app.post("/add")']) == {("POST", "/add")}
+    assert _routes(['router.delete("/old")']) == {("DELETE", "/old")}
+
+
+def test_decorator_registration_counts_for_any_receiver():
+    assert _routes(['@router.get("/items")']) == {("GET", "/items")}
+    assert _routes(['@app.post("/add")']) == {("POST", "/add")}
+
+
 def test_decorator_routes_require_leading_slash():
     lines = ['@app.get("/library")', '@app.post("revert")']
     got = facts_mod.extract_code_interfaces("a.py", lines)
@@ -134,6 +159,64 @@ def test_unexpected_keyword_is_a_demonstrated_break():
             "parameters": [_p("timeout"), _p("retries", required=False)]}
     ok, failure = cand_mod.call_compatible(doc, code)
     assert not ok and "Timeout" in failure
+
+
+def _sig(params, pos_var=False, kw_var=False):
+    return {"kind": "call_signature", "symbol": "f",
+            "parameters": params, "variadic_pos": pos_var,
+            "variadic_kw": kw_var}
+
+
+def _pp(name, required=True, keyword=False, kwonly=False):
+    return {"name": name, "required": required, "keyword_only": kwonly,
+            "keyword": keyword}
+
+
+def test_star_args_absorbs_positionals():
+    doc = _sig([_pp("a"), _pp("b")])
+    code = _sig([], pos_var=True)
+    ok, _ = cand_mod.call_compatible(doc, code)
+    assert ok
+
+
+def test_kwargs_does_not_absorb_positionals():
+    doc = _sig([_pp("a"), _pp("b")])
+    code = _sig([_pp("x")], kw_var=True)
+    ok, failure = cand_mod.call_compatible(doc, code)
+    assert not ok and "TypeError" in failure
+
+
+def test_star_args_does_not_absorb_unexpected_keyword():
+    doc = _sig([_pp("x", keyword=True), _pp("unexpected", keyword=True)])
+    code = _sig([_pp("x")], pos_var=True)
+    ok, failure = cand_mod.call_compatible(doc, code)
+    assert not ok and "unexpected" in failure
+
+
+def test_kwargs_absorbs_unexpected_keyword():
+    doc = _sig([_pp("a"), _pp("unexpected", keyword=True)])
+    code = _sig([_pp("x")], kw_var=True)
+    ok, _ = cand_mod.call_compatible(doc, code)
+    assert ok
+
+
+def test_duplicate_positional_and_keyword_is_a_break():
+    doc = _sig([_pp("a"), _pp("x", keyword=True)])
+    code = _sig([_pp("x"), _pp("y")], kw_var=True)
+    ok, failure = cand_mod.call_compatible(doc, code)
+    assert not ok and "both positionally and by keyword" in failure
+
+
+def test_unprovable_call_is_ambiguous_never_a_break():
+    doc = {"kind": "call_signature", "symbol": "f", "parameters": None}
+    code = _sig([_pp("x")])
+    verdict, _ = cand_mod.call_compatible(doc, code)
+    assert verdict is None
+    res = validators_mod.validate_interface_contract_mismatch(
+        {"fact_id": "d", "subject": "f", "interface": doc}, {"fact_id": "c",
+         "subject": "f", "interface": code})
+    assert res["survives"] is False and res["reason"] == "ambiguous_call"
+    assert "TypeError" not in res.get("bad_outcome", "")
 
 
 def test_reference_framed_name_is_not_a_contract():
@@ -374,3 +457,29 @@ def test_zero_finding_email_is_legitimate_silence(tmp_path: Path):
     _subj, body = M.build_email(ident, Path(run_dir))
     assert "NO MATERIAL FINDINGS" in body
     assert "--- finding " not in body
+
+
+def test_oversized_silence_rationale_stays_within_budget(tmp_path: Path):
+    from codatiel_i2 import watcher_manager as M
+    run_dir, ident = _write_run(tmp_path, "bigrat", [], status="complete")
+    shadow = json.loads((run_dir / "shadow_result.json").read_text())
+    shadow["silence"] = {"summary": "yadda " * 40000}  # ~240KB
+    (run_dir / "shadow_result.json").write_text(json.dumps(shadow))
+    _subj, body = M.build_email(ident, Path(run_dir))
+    assert len(body.encode()) <= M.EMAIL_BODY_BUDGET
+    assert "NO MATERIAL FINDINGS" in body  # status preserved
+    assert "repo: o/r  PR: #1" in body  # identity preserved
+    assert "truncated to" in body and "shadow_result.json" in body
+
+
+def test_oversized_failure_diagnostic_stays_within_budget(tmp_path: Path):
+    from codatiel_i2 import watcher_manager as M
+    run_dir, ident = _write_run(tmp_path, "bigfail", [], status="failed")
+    shadow = json.loads((run_dir / "shadow_result.json").read_text())
+    shadow["error"] = "boom\n" * 30000  # ~150KB
+    (run_dir / "shadow_result.json").write_text(json.dumps(shadow))
+    _subj, body = M.build_email(ident, Path(run_dir))
+    assert len(body.encode()) <= M.EMAIL_BODY_BUDGET
+    assert "REVIEW FAILED" in body  # status preserved
+    assert "repo: o/r  PR: #1" in body  # identity preserved
+    assert "truncated to" in body

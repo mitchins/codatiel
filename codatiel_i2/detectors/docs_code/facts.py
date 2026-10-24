@@ -706,9 +706,20 @@ def extract_doc_sets(path: str, lines: list[str]) -> list[dict]:
 
 # ------------------------------------------------------------------ interface
 
+# Receivers that register routes. An ordinary method CALL is only route
+# evidence on one of these; anything else (config, entry, client, view,
+# providers, ...) is data access, never a served endpoint. Ambiguous
+# receivers must not count as evidence that a route is served: a phantom
+# surface entry would hide a genuinely missing documented route.
+_ROUTE_REGISTRARS = frozenset({"app", "router", "api"})
+
 _ROUTE_PATTERNS = [
-    (re.compile(r"@app\.(get|post|put|delete|patch)\(\s*[\"']([^\"']+)[\"']"), "http_route"),
-    (re.compile(r"\.(get|post|put|delete|patch)\(\s*['\"]([^'\"]+)['\"]"), "http_route"),
+    # @app.get("/x") / @router.post("/y"): decorator registration syntax
+    # is itself evidence of a route; any receiver qualifies.
+    (re.compile(r"@([A-Za-z_][A-Za-z0-9_]*)\.(get|post|put|delete|patch)\(\s*[\"']([^\"']+)[\"']"), "http_route"),
+    # app.get("/x"): an ordinary call needs a registrar receiver.
+    # config.get("/library") and entry.get("job_id") are not endpoints.
+    (re.compile(r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.(get|post|put|delete|patch)\(\s*['\"]([^'\"]+)['\"]"), "http_route"),
     (re.compile(r"HandleFunc\(\s*\"([^\"]+)\""), "http_route"),
     (re.compile(r"\.route\(\s*\"([^\"]+)\""), "http_route"),
 ]
@@ -746,14 +757,15 @@ def _parse_params(lang_hint: str, params: str) -> list[dict]:
     if current.strip():
         parts.append((current, current_eq0))
     keyword_only = False
-    variadic = False
     for part, eq0 in parts:
         part = part.strip()
         if part == "*":
             keyword_only = True
             continue
         if part.startswith("**") or re.match(r"\*[A-Za-z_]", part):
-            variadic = True
+            # Variadic splats (*args, **kwargs) are a property of the whole
+            # signature, recorded at the interface level by _variadic_kinds,
+            # never as a named parameter.
             continue
         name_match = re.match(r"([A-Za-z_][A-Za-z0-9_]*)", part)
         if not name_match:
@@ -764,20 +776,57 @@ def _parse_params(lang_hint: str, params: str) -> list[dict]:
         required = ("=" not in part and "?" not in part and "opts" not in part.lower()
                     and "options" not in part.lower())
         out.append({"name": name, "required": required,
-                    "keyword_only": keyword_only, "keyword": eq0,
-                    "variadic": False})
-    for entry in out:
-        entry["variadic"] = variadic
+                    "keyword_only": keyword_only, "keyword": eq0})
     return out
+
+
+def _variadic_kinds(params: str) -> tuple[bool, bool]:
+    """(pos_variadic, kw_variadic) for one raw parameter string.
+
+    ``*args`` absorbs extra POSITIONALS; ``**kwargs`` absorbs extra
+    KEYWORDS; neither does the other's job. A bare ``*`` is only the
+    keyword-only marker and absorbs nothing.
+    """
+    depth = 0
+    current = ""
+    parts = []
+    for char in params:
+        if char in "{[(":
+            depth += 1
+        elif char in "}])":
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += char
+    parts.append(current)
+    pos = kw = False
+    for part in parts:
+        stripped = part.strip()
+        if re.match(r"\*\*\s*[A-Za-z_]", stripped):
+            kw = True
+        elif re.match(r"\*\s*[A-Za-z_]", stripped):
+            pos = True
+    return pos, kw
 
 
 def extract_code_interfaces(path: str, lines: list[str]) -> list[dict]:
     facts = []
     text = "\n".join(lines)
-    for pattern, kind in _ROUTE_PATTERNS:
+    for pi, (pattern, kind) in enumerate(_ROUTE_PATTERNS):
         for match in pattern.finditer(text):
             groups = match.groups()
-            method, route = (groups[0].upper(), groups[1]) if len(groups) == 2 else ("*", groups[0])
+            if len(groups) == 3:
+                receiver, method, route = groups[0], groups[1].upper(), groups[2]
+                if pi == 1 and receiver.split(".")[-1] not in _ROUTE_REGISTRARS:
+                    # Ordinary call on a non-registrar receiver:
+                    # data access, not a served endpoint.
+                    continue
+            elif len(groups) == 2:
+                method, route = groups[0].upper(), groups[1]
+            else:
+                method, route = "*", groups[0]
             # Route discipline: a served path starts with '/'. Bare tokens
             # (dict .get("job_id"), config lookups) are not routes, even when
             # the receiver looks like an HTTP verb.
@@ -791,10 +840,12 @@ def extract_code_interfaces(path: str, lines: list[str]) -> list[dict]:
         match = _SIG_DEF.match(line)
         if match:
             symbol, params = match.group(1), match.group(2)
+            pos_var, kw_var = _variadic_kinds(params)
             facts.append(_fact("interface", "implemented_interface", path, i, i, {
                 "subject": symbol,
                 "interface": {"kind": "call_signature", "symbol": symbol,
-                              "parameters": _parse_params(path, params)},
+                              "parameters": _parse_params(path, params),
+                              "variadic_pos": pos_var, "variadic_kw": kw_var},
             }))
     return facts
 
@@ -826,10 +877,12 @@ def extract_doc_interfaces(path: str, lines: list[str]) -> list[dict]:
             }))
         for match in re.finditer(r"`([A-Za-z_][A-Za-z0-9_]*)\(([^`]*)\)`", line):
             symbol, params = match.group(1), match.group(2)
+            pos_var, kw_var = _variadic_kinds(params)
             facts.append(_fact("interface", "documented_interface", path, i, i, {
                 "subject": symbol,
                 "interface": {"kind": "call_signature", "symbol": symbol,
-                              "parameters": _parse_params(path, params)},
+                              "parameters": _parse_params(path, params),
+                              "variadic_pos": pos_var, "variadic_kw": kw_var},
             }))
     return facts
 

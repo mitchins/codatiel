@@ -46,6 +46,7 @@ REJECTION_REASONS = (
     "reference_not_contract",
     "non_contract_shape",
     "bare_mention",
+    "ambiguous_call",
     "non_exhaustive_documentation",
     "unsupported_syntax",
     "insufficient_evidence",
@@ -144,32 +145,52 @@ def form_allowed_candidate(doc_fact: dict, code_fact: dict) -> dict:
             "implemented_undocumented": sorted(code_set - doc_set)}
 
 
-def call_compatible(doc_if: dict, code_if: dict) -> tuple[bool, str]:
+def call_compatible(doc_if: dict, code_if: dict) -> tuple[bool | None, str]:
     """Python call semantics: positionals fill by ORDER (names irrelevant),
     keywords must match case-sensitively, required slots must be filled.
 
-    A case-only parameter-name difference on a positionally-passed argument
-    (documented ``create_app(Settings.load(...))`` vs ``def create_app(settings``)
-    is a WORKING call, not a contradiction. Returns (compatible, failure).
+    ``*args`` absorbs extra POSITIONALS only; ``**kwargs`` absorbs extra
+    KEYWORDS only; neither does the other's job. A case-only parameter-name
+    difference on a positionally-passed argument (documented
+    ``create_app(Settings.load(...))`` vs ``def create_app(settings``) is a
+    WORKING call, not a contradiction.
+
+    Returns (True, "") when the documented call works, (False, failure)
+    when it demonstrably raises TypeError, and (None, reason) when
+    compatibility cannot be established: ambiguity is never a verified
+    break.
     """
-    doc_params = doc_if.get("parameters", [])
-    code_params = code_if.get("parameters", [])
-    variadic = any(p.get("variadic") for p in code_params)
+    doc_params = doc_if.get("parameters")
+    code_params = code_if.get("parameters")
+    if not isinstance(doc_params, list) or not isinstance(code_params, list):
+        return None, "parameter info unavailable: compatibility unprovable"
+    # Interface-level flags; fall back to the legacy combined per-param
+    # flag (lenient on both axes) for shapes that predate the split.
+    legacy = any(p.get("variadic") for p in code_params)
+    pos_var = code_if.get("variadic_pos", legacy)
+    kw_var = code_if.get("variadic_kw", legacy)
     code_by_name = {p["name"]: p for p in code_params}
     positional_code = [p for p in code_params if not p.get("keyword_only")]
     doc_pos = [p for p in doc_params if not p.get("keyword")]
     doc_kw = [p for p in doc_params if p.get("keyword")]
     symbol = code_if.get("symbol") or doc_if.get("symbol") or "?"
+    kw_names = {p["name"] for p in doc_kw}
+    # Same argument twice: f(1, x=2) against def f(x, ...) is a TypeError
+    # no splat can rescue (kwargs cannot refill a filled slot).
+    positional_names = [p["name"] for p in positional_code[:len(doc_pos)]]
+    duplicated = sorted({k for k in kw_names if k in positional_names})
+    if duplicated:
+        return False, (f"documented call passes {duplicated} both "
+                       f"positionally and by keyword: TypeError")
     unexpected = [p["name"] for p in doc_kw if p["name"] not in code_by_name]
-    if unexpected and not variadic:
+    if unexpected and not kw_var:
         accepts = sorted(code_by_name) or ["(nothing)"]
         return False, (f"documented keyword(s) {unexpected} are not accepted "
                        f"by {symbol} (accepts: {accepts}): TypeError")
-    if len(doc_pos) > len(positional_code) and not variadic:
+    if len(doc_pos) > len(positional_code) and not pos_var:
         return False, (f"documented call supplies {len(doc_pos)} positional "
                        f"argument(s) but {symbol} accepts "
                        f"{len(positional_code)}: TypeError")
-    kw_names = {p["name"] for p in doc_kw}
     missing: list[str] = []
     for i, cp in enumerate(positional_code):
         if not cp.get("required"):
@@ -248,13 +269,20 @@ def form_interface_candidate(doc_fact: dict, code_fact: dict) -> dict:
     from codatiel_i2.detectors.docs_code.facts import subject_key as _skey
     if _skey(doc_if.get("symbol", "")) != _skey(code_if.get("symbol", "")):
         return {"candidate": False, "reason": "different_subject"}
-    if not doc_if.get("parameters"):
+    params = doc_if.get("parameters")
+    if params is None or not isinstance(params, list):
+        # Parameter info unavailable: compatibility is unprovable, and an
+        # unprovable call is never a verified break.
+        return {"candidate": False, "reason": "ambiguous_call"}
+    if params == []:
         # A parameterless mention (```load()``` in prose) carries no
         # signature claim to contradict; pairing it with an unrelated
         # same-named function manufactures issues.
         return {"candidate": False, "reason": "bare_mention"}
-    ok, failure = call_compatible(doc_if, code_if)
-    if ok:
+    verdict, failure = call_compatible(doc_if, code_if)
+    if verdict is None:
+        return {"candidate": False, "reason": "ambiguous_call"}
+    if verdict:
         return {"candidate": False, "reason": "compatible_call"}
     return {"candidate": True, "reason": "signature_mismatch",
             "validator": "docs_code.interface_contract_mismatch.v1",
