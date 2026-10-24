@@ -127,9 +127,16 @@ def scan_pair(*, base_dir: Path, head_dir: Path, base_sha: str, head_sha: str,
     head_pool = _head_tree(head_dir)
     head_names, head_aliases, scanned_files, _head_rel = facts_mod.enumerate_code_names(head_dir)
     base_names, _base_aliases, _base_scanned, _base_rel = facts_mod.enumerate_code_names(base_dir)
+    implemented_routes, _routes_scanned = facts_mod.enumerate_code_routes(head_dir)
     surfaces = {"head_pool": head_pool, "head_names": head_names,
                 "head_aliases": head_aliases, "scanned_files": scanned_files,
-                "base_names": base_names}
+                "base_names": base_names,
+                "implemented_routes": implemented_routes,
+                "route_count": len(implemented_routes),
+                "dynamic_reads": facts_mod.pool_has_dynamic_reads(head_pool)}
+    # Issue-identity dedup state: the same defect reached through different
+    # pairs or different evidence must verify once and report once.
+    state: dict = {"seen": set(), "duplicates": 0}
     for row in changes:
         path = row.get("path", "")
         if not _is_doc_or_code(path):
@@ -139,13 +146,14 @@ def scan_pair(*, base_dir: Path, head_dir: Path, base_sha: str, head_sha: str,
         pair = _examine_changed_file(
             base_dir, head_dir, base_sha, head_sha, path, changed_is_docs,
             detector, evidence, facts, candidates, proofs, findings, verifications,
-            surfaces=surfaces)
+            surfaces=surfaces, state=state)
         examined += 1 if pair else 0
         if pair:
             retrieved_pairs.append(pair)
 
     coverage = {"docs_code": {"applicable_relationships": examined, "checked": examined,
-                             "unsupported": 0}}
+                              "unsupported": 0,
+                              "duplicates_suppressed": state["duplicates"]}}
     return {"findings": findings, "facts": facts, "candidates": candidates,
             "proofs": proofs, "evidence": evidence,
             "verifications": verifications, "coverage": coverage,
@@ -154,7 +162,12 @@ def scan_pair(*, base_dir: Path, head_dir: Path, base_sha: str, head_sha: str,
 
 def _read_all(base_dir: Path, head_dir: Path, base_sha: str, head_sha: str,
               path: str, evidence: list[dict]) -> dict[str, list[str] | None]:
-    """Read base+head bytes of one path. Missing side -> None (added/removed)."""
+    """Read base+head bytes of one path. Missing side -> None (added/removed).
+
+    Evidence is deduplicated by ID: re-reading a file reuses the existing
+    row so fact/candidate identity (which binds evidence IDs) stays
+    stable across pairs.
+    """
     out: dict[str, list[str] | None] = {}
     for revision, root in (("base", base_dir), ("head", head_dir)):
         try:
@@ -162,7 +175,9 @@ def _read_all(base_dir: Path, head_dir: Path, base_sha: str, head_sha: str,
                                       revision=revision)  # type: ignore[arg-type]
             env = result["evidence"]
             if env["kind"] == "source_excerpt":
-                evidence.append(env)
+                if not any(e.get("evidence_id") == env.get("evidence_id")
+                           for e in evidence):
+                    evidence.append(env)
                 out[revision] = env["excerpt"].splitlines()
             else:
                 out[revision] = []
@@ -202,7 +217,8 @@ def _head_tree(head_dir: Path) -> dict[str, str]:
 
 def _examine_changed_file(base_dir, head_dir, base_sha, head_sha, path, changed_is_docs,
                            detector, evidence, facts, candidates, proofs, findings,
-                           verifications, surfaces: dict | None = None) -> list[str] | None:
+                           verifications, surfaces: dict | None = None,
+                           state: dict | None = None) -> list[str] | None:
     """Examine one changed file against its best counterpart.
 
     Returns [changed, counterpart] when a pair was examined, else None.
@@ -245,7 +261,7 @@ def _examine_changed_file(base_dir, head_dir, base_sha, head_sha, path, changed_
     _run_class_pipelines(base_dir, head_dir, base_sha, head_sha, path, counterpart,
                          sides, cp_sides, anchor, cp_anchor, changed_is_docs,
                          detector, evidence, facts, candidates, proofs, findings,
-                         verifications, surfaces=surfaces)
+                         verifications, surfaces=surfaces, state=state)
     for row in candidates[before:]:
         row["retrieval_weak"] = weak_retrieval
     return [path, counterpart]
@@ -254,12 +270,19 @@ def _examine_changed_file(base_dir, head_dir, base_sha, head_sha, path, changed_
 def _run_class_pipelines(base_dir, head_dir, base_sha, head_sha, path, counterpart,
                          sides, cp_sides, anchor, cp_anchor, changed_is_docs,
                          detector, evidence, facts, candidates, proofs, findings,
-                         verifications, surfaces: dict | None = None) -> None:
+                         verifications, surfaces: dict | None = None,
+                         state: dict | None = None) -> None:
     code_path, doc_path = (counterpart, path) if changed_is_docs else (path, counterpart)
     code_sides = cp_sides if changed_is_docs else sides
     doc_sides = sides if changed_is_docs else cp_sides
     if code_sides["head"] is None or doc_sides["head"] is None:
         return
+    if surfaces is not None and "implemented_routes" not in surfaces:
+        # Fallback for direct callers without a precomputed surface.
+        routes, _n = facts_mod.enumerate_code_routes(head_dir)
+        surfaces = {**surfaces, "implemented_routes": routes,
+                    "route_count": len(routes),
+                    "dynamic_reads": facts_mod.dynamic_env_reads_in(head_dir)}
     base_code = code_sides["base"] or []
     head_code = code_sides["head"] or []
     base_doc = doc_sides["base"] if doc_sides["base"] is not None else []
@@ -269,23 +292,24 @@ def _run_class_pipelines(base_dir, head_dir, base_sha, head_sha, path, counterpa
     _run_literal(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                  anchor, cp_anchor, evidence, facts, candidates, proofs,
                  findings, verifications, detector,
-                 base_sha=base_sha, head_sha=head_sha)
+                 base_sha=base_sha, head_sha=head_sha, state=state)
     # ---- named ----
     direction = "docs_changed" if changed_is_docs else "code_changed"
     _run_named(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                head_dir, base_dir, anchor, cp_anchor, evidence, facts, candidates, proofs,
                findings, verifications, detector, direction=direction,
-               base_sha=base_sha, head_sha=head_sha, surfaces=surfaces)
+               base_sha=base_sha, head_sha=head_sha, surfaces=surfaces, state=state)
     # ---- allowed ----
     _run_allowed(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                  anchor, cp_anchor, evidence, facts, candidates, proofs,
                  findings, verifications, detector,
-                 base_sha=base_sha, head_sha=head_sha)
+                 base_sha=base_sha, head_sha=head_sha, state=state)
     # ---- interface ----
     _run_interface(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                    anchor, cp_anchor, evidence, facts, candidates, proofs,
                    findings, verifications, detector,
-                   base_sha=base_sha, head_sha=head_sha)
+                   base_sha=base_sha, head_sha=head_sha, surfaces=surfaces,
+                   state=state)
 
 
 def _ev_for(path: str, revision: str, evidence: list[dict]) -> list[str]:
@@ -296,7 +320,20 @@ def _ev_for(path: str, revision: str, evidence: list[dict]) -> list[str]:
 
 def _emit(detector, proof_class, invariant, anchor, cp_anchor, fact_list,
           proof_result, evidence, facts, candidates, proofs, findings, verifications,
-          reject_reason: str = "", proof_record: dict | None = None) -> None:
+          reject_reason: str = "", proof_record: dict | None = None,
+          state: dict | None = None,
+          evidence_paths: set[str] | None = None) -> str:
+    # Issue-identity dedup BEFORE verification: the same defect reached
+    # through another pair or other evidence verifies once and reports
+    # once. Rejected duplicates leave no row; the first occurrence carries
+    # the audit trail.
+    key = cand_mod.issue_key(proof_class, fact_list)
+    if state is not None:
+        seen = state.setdefault("seen", set())
+        if key in seen:
+            state["duplicates"] = state.get("duplicates", 0) + 1
+            return "duplicate"
+        seen.add(key)
     candidate_id = "cand_" + short_id(
         proof_class, anchor.get("path", ""), str(anchor.get("line_start", "")),
         ",".join(a.get("path", "") for a in [cp_anchor]),
@@ -304,14 +341,21 @@ def _emit(detector, proof_class, invariant, anchor, cp_anchor, fact_list,
     for fact in fact_list:
         facts.append(fact)
     # Link only evidence for the files this candidate reasons about.
-    involved = {anchor.get("path", "")}
-    involved.update(a.get("path", "") for a in [cp_anchor])
-    involved.update(f.get("path", "") for f in fact_list)
+    # For absence/route claims the counterpart file's bytes are not
+    # supporting evidence: link only the claiming file's excerpt, never
+    # unrelated whole-file preambles.
+    if evidence_paths is not None:
+        involved = set(evidence_paths)
+    else:
+        involved = {anchor.get("path", "")}
+        involved.update(a.get("path", "") for a in [cp_anchor])
+        involved.update(f.get("path", "") for f in fact_list)
     linked = [e for e in evidence if e.get("path") in involved]
     candidates.append({"candidate_id": candidate_id, "proof_class": proof_class,
                        "changed_anchor": anchor,
                        "counterpart_anchors": [cp_anchor],
                        "invariant": invariant,
+                       "issue_key": key,
                        "candidate": proof_result.get("survives"),
                        "reason": proof_result.get("reason", reject_reason),
                        "validator": proof_result.get("validator", "")})
@@ -331,13 +375,16 @@ def _emit(detector, proof_class, invariant, anchor, cp_anchor, fact_list,
                           "status": verification.status,
                           "proof_level": verification.proof_level})
     for finding in detector.findings(candidate, bundle, verification):
+        finding["issue_key"] = key
         findings.append(finding)
+    return "emitted"
 
 
 def _run_literal(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                  anchor, cp_anchor, evidence, facts, candidates, proofs,
                  findings, verifications, detector,
-                 base_sha: str = "", head_sha: str = "") -> None:
+                 base_sha: str = "", head_sha: str = "",
+                 state: dict | None = None) -> None:
     doc_facts = {rev: facts_mod.bind_facts(facts_mod.extract_doc_literals(p, lines), p, rev,
                                           base_sha if rev == "base" else head_sha, evidence)
                  for rev, (p, lines) in (("base", (doc_path, base_doc)), ("head", (doc_path, head_doc)))}
@@ -354,7 +401,7 @@ def _run_literal(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                       {"survives": False, "reason": formed["reason"],
                        "validator": "docs_code.literal_value_mismatch.v1", "version": "v1"},
                       evidence, facts, candidates, proofs, findings, verifications,
-                      reject_reason=formed["reason"])
+                      reject_reason=formed["reason"], state=state)
                 continue
             base_doc_match = _match_fact(doc_facts["base"], doc_fact)
             base_code_match = _match_fact(code_facts["base"], code_fact)
@@ -370,7 +417,7 @@ def _run_literal(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                   f"documented {doc_fact.get('subject_display')} == runtime default",
                   anchor, cp_anchor, [doc_fact, code_fact, base_doc_match, base_code_match],
                   result, evidence, facts, candidates, proofs, findings, verifications,
-                  proof_record=record)
+                  proof_record=record, state=state)
 
 
 def _proof_record(validator_id: str, version: str, role_facts: dict[str, dict],
@@ -396,7 +443,8 @@ def _match_fact(facts_list: list[dict], target: dict) -> dict | None:
 def _run_named(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                head_dir, base_dir, anchor, cp_anchor, evidence, facts, candidates, proofs,
                findings, verifications, detector, direction="code_changed",
-               base_sha: str = "", head_sha: str = "", surfaces: dict | None = None) -> None:
+               base_sha: str = "", head_sha: str = "", surfaces: dict | None = None,
+               state: dict | None = None) -> None:
     head_doc_facts = facts_mod.bind_facts(
         facts_mod.extract_doc_names(doc_path, head_doc), doc_path, "head", head_sha, evidence)
     if not head_doc_facts:
@@ -406,12 +454,14 @@ def _run_named(code_path, doc_path, base_code, head_code, base_doc, head_doc,
         head_aliases = surfaces["head_aliases"]
         scanned_files = surfaces["scanned_files"]
         base_names = surfaces["base_names"]
+        dynamic_reads = surfaces.get("dynamic_reads", False)
     else:
         head_names, head_aliases, scanned_files, _rel = facts_mod.enumerate_code_names(head_dir)
         # Baseline provision is repo-wide, like the head surface: "X existed
         # in the consistent baseline" is a repository property, not a
         # single-file one. (Replay recomputes the same way.)
         base_names, _base_aliases, _base_scanned, _base_rel = facts_mod.enumerate_code_names(base_dir)
+        dynamic_reads = facts_mod.dynamic_env_reads_in(head_dir)
     for doc_fact in head_doc_facts:
         formed = cand_mod.form_named_candidate(
             doc_fact, [{"name": n} for n in head_names if n == doc_fact["name"]])
@@ -422,27 +472,30 @@ def _run_named(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                   {"survives": False, "reason": formed["reason"],
                    "validator": "docs_code.named_contract_missing.v1", "version": "v1"},
                   evidence, facts, candidates, proofs, findings, verifications,
-                  reject_reason=formed["reason"])
+                  reject_reason=formed["reason"], state=state,
+                  evidence_paths={doc_path})
             continue
         result = validators_mod.validate_named_contract_missing(
             doc_fact, head_names, base_names, head_aliases, direction=direction,
-            surface_enumerated=scanned_files > 0)
+            surface_enumerated=scanned_files > 0, dynamic_reads=dynamic_reads)
         record = _proof_record(
             "docs_code.named_contract_missing.v1", "v1", {"doc_fact": doc_fact},
             {"direction": direction, "head_names": sorted(head_names),
              "base_names": sorted(base_names), "head_aliases": sorted(head_aliases),
-             "surface_enumerated": scanned_files > 0})
+             "surface_enumerated": scanned_files > 0,
+             "dynamic_reads": dynamic_reads})
         _emit(detector, "named_contract",
               f"documented contract {doc_fact.get('name')} is provided",
               anchor, cp_anchor, [doc_fact],
               result, evidence, facts, candidates, proofs, findings, verifications,
-              proof_record=record)
+              proof_record=record, state=state, evidence_paths={doc_path})
 
 
 def _run_allowed(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                  anchor, cp_anchor, evidence, facts, candidates, proofs,
                  findings, verifications, detector,
-                 base_sha: str = "", head_sha: str = "") -> None:
+                 base_sha: str = "", head_sha: str = "",
+                 state: dict | None = None) -> None:
     doc_facts = facts_mod.bind_facts(
         facts_mod.extract_doc_sets(doc_path, head_doc), doc_path, "head", head_sha, evidence)
     code_facts = facts_mod.bind_facts(
@@ -462,7 +515,7 @@ def _run_allowed(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                       {"survives": False, "reason": formed["reason"],
                        "validator": "docs_code.allowed_values_mismatch.v1", "version": "v1"},
                       evidence, facts, candidates, proofs, findings, verifications,
-                      reject_reason=formed["reason"])
+                      reject_reason=formed["reason"], state=state)
                 continue
             result = validators_mod.validate_allowed_values_mismatch(doc_fact, code_fact)
             record = _proof_record(
@@ -472,61 +525,43 @@ def _run_allowed(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                   f"documented {doc_fact.get('subject_display')} values match implementation",
                   anchor, cp_anchor, [doc_fact, code_fact],
                   result, evidence, facts, candidates, proofs, findings, verifications,
-                  proof_record=record)
-
-
-def _closest_route(doc_fact: dict, code_routes: list[dict]) -> dict | None:
-    """Representative code route for the detail string: same method wins."""
-    if not code_routes:
-        return None
-    method = doc_fact.get("interface", {}).get("method")
-    for fact in code_routes:
-        if fact.get("interface", {}).get("method") == method:
-            return fact
-    return code_routes[0]
+                  proof_record=record, state=state)
 
 
 def _run_interface(code_path, doc_path, base_code, head_code, base_doc, head_doc,
                    anchor, cp_anchor, evidence, facts, candidates, proofs,
                    findings, verifications, detector,
-                   base_sha: str = "", head_sha: str = "") -> None:
+                   base_sha: str = "", head_sha: str = "",
+                   surfaces: dict | None = None,
+                   state: dict | None = None) -> None:
     doc_facts = facts_mod.bind_facts(
         facts_mod.extract_doc_interfaces(doc_path, head_doc), doc_path, "head", head_sha, evidence)
     code_facts = facts_mod.bind_facts(
         facts_mod.extract_code_interfaces(code_path, head_code), code_path, "head", head_sha, evidence)
-    code_routes = [f for f in code_facts
-                   if f.get("interface", {}).get("kind") == "http_route"]
+    # Route serving is a REPO-WIDE property: a documented route served by any
+    # file in the checkout is not a miss. Judging it against one counterpart
+    # file manufactured misses for routes served elsewhere (and re-emitted
+    # the same route once per examined pair). One candidate per documented
+    # route; the single-file comparison is gone.
+    routes = (surfaces or {}).get("implemented_routes") or set()
+    route_count = (surfaces or {}).get("route_count", len(routes))
     for doc_fact in doc_facts:
         doc_if = doc_fact.get("interface", {})
         if doc_if.get("kind") == "http_route":
-            # Set semantics: the documented path must be served by SOME
-            # implemented route. One candidate per documented route.
-            implemented = {(c["interface"].get("method"), c["interface"].get("path"))
-                           for c in code_routes}
-            paths = {c["interface"].get("path") for c in code_routes}
-            if (doc_if.get("method"), doc_if.get("path")) in implemented or (
-                    doc_if.get("method") in (None, "*") and doc_if.get("path") in paths):
-                _emit(detector, "interface",
-                      f"documented interface {doc_fact.get('subject')} matches implementation",
-                      anchor, cp_anchor, [doc_fact],
-                      {"survives": False, "reason": "matched_interface",
-                       "validator": "docs_code.interface_contract_mismatch.v1", "version": "v1"},
-                      evidence, facts, candidates, proofs, findings, verifications,
-                      reject_reason="matched_interface")
-                continue
-            closest = _closest_route(doc_fact, code_routes)
             result = validators_mod.validate_interface_contract_mismatch(
-                doc_fact, closest,
-                implemented_paths=paths)
+                doc_fact, None, implemented_routes=routes,
+                route_count=route_count)
             record = _proof_record(
                 "docs_code.interface_contract_mismatch.v1", "v1",
-                {"doc_fact": doc_fact, **({"code_fact": closest} if closest else {})},
-                {"implemented_paths": sorted(paths)})
+                {"doc_fact": doc_fact},
+                {"implemented_routes": sorted(routes),
+                 "route_count": route_count})
             _emit(detector, "interface",
                   f"documented interface {doc_fact.get('subject')} matches implementation",
-                  anchor, cp_anchor, [doc_fact] + ([closest] if closest else []),
+                  anchor, cp_anchor, [doc_fact],
                   result, evidence, facts, candidates, proofs, findings, verifications,
-                  proof_record=record)
+                  proof_record=record, state=state,
+                  evidence_paths={doc_path})
             continue
         for code_fact in code_facts:
             if code_fact.get("interface", {}).get("kind") != "call_signature":
@@ -541,7 +576,7 @@ def _run_interface(code_path, doc_path, base_code, head_code, base_doc, head_doc
                       {"survives": False, "reason": formed["reason"],
                        "validator": "docs_code.interface_contract_mismatch.v1", "version": "v1"},
                       evidence, facts, candidates, proofs, findings, verifications,
-                      reject_reason=formed["reason"])
+                      reject_reason=formed["reason"], state=state)
                 continue
             result = validators_mod.validate_interface_contract_mismatch(doc_fact, code_fact)
             record = _proof_record(
@@ -551,4 +586,4 @@ def _run_interface(code_path, doc_path, base_code, head_code, base_doc, head_doc
                   f"documented interface {doc_fact.get('subject')} matches implementation",
                   anchor, cp_anchor, [doc_fact, code_fact],
                   result, evidence, facts, candidates, proofs, findings, verifications,
-                  proof_record=record)
+                  proof_record=record, state=state)

@@ -325,9 +325,24 @@ class UsageRecordingModel(_SDKModel):
     async def get_response(self, *args: Any, **kwargs: Any) -> Any:
         response = await self._model.get_response(*args, **kwargs)
         try:
+            usage = getattr(response, "usage", None)
+            cached = reasoning = None
+            if (getattr(self._model, "provider_usage_details", False)
+                    and usage is not None):
+                # Provider-reported token details only: the adapter marks
+                # them as sourced from the provider payload, never inferred.
+                try:
+                    cached = usage.input_tokens_details.cached_tokens
+                except (AttributeError, TypeError):
+                    cached = None
+                try:
+                    reasoning = usage.output_tokens_details.reasoning_tokens
+                except (AttributeError, TypeError):
+                    reasoning = None
             added = self.ledger.record_response(
-                getattr(response, "response_id", None),
-                getattr(response, "usage", None))
+                getattr(response, "response_id", None), usage,
+                cached_input_tokens=cached,
+                reasoning_output_tokens=reasoning)
             if added:
                 unknown_ids = getattr(self._model, "_unknown_usage_response_ids", ())
                 if getattr(response, "response_id", None) in (unknown_ids or ()):
@@ -407,6 +422,126 @@ def gemma_model(*, model: str, base_url: str | None = None,
     key = api_key or os.environ.get("GEMMA_API_KEY") or "local"
     client = AsyncOpenAI(base_url=base, api_key=key)
     return OpenAIChatCompletionsModel(model=model, openai_client=client)
+
+
+def deepseek_model(*, model: str = "deepseek-flash",
+                   base_url: str | None = None,
+                   api_key: str | None = None) -> Any:
+    """Build the DeepSeek Flash backend (M10 primary: thinking enabled).
+
+    M10 primary configuration (recorded 2026-10-23, before any evaluation
+    run): thinking ENABLED (explicit ``extra_body`` toggle, provider
+    default), default effort. Rationale: provider default (no tuning);
+    the installed SDK replays ``reasoning_content`` for deepseek models,
+    which thinking mode with tools requires (else HTTP 400); the M9.2
+    escalation hypothesis is reasoning-side, making the thinking variant
+    the theoretically interesting challenger; parity with Haiku's adaptive
+    thinking. If thinking mode proves incompatible, fall back to
+    non-thinking and record the switch as a compatibility finding.
+
+    ``provider_usage_details`` marks SDK Usage token details as
+    provider-reported: DeepSeek returns ``prompt_tokens_details``
+    (cached tokens) and ``completion_tokens_details`` (reasoning tokens)
+    in chat-completion usage (verified by raw probe in M10 smoke test), so
+    the spend ledger may record them as reported — never as inferred.
+    ``reasoning_content`` text is counted via reasoning tokens, never
+    stored: it is deliberation, not review evidence.
+    """
+    import os
+    ensure_local_tracing()
+    require_sdk()
+    from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+    try:
+        from openai import AsyncOpenAI
+    except Exception as exc:
+        raise RuntimeError("openai package required for the DeepSeek backend") from exc
+    base = (base_url or os.environ.get("DEEPSEEK_BASE_URL")
+            or "https://api.deepseek.com").rstrip("/")
+    key = api_key or os.environ.get("DEEPSEEK_API_KEY")
+    if not key:
+        raise RuntimeError("DEEPSEEK_API_KEY is not set")
+    client = AsyncOpenAI(base_url=base, api_key=key)
+
+    class DeepSeekModel(OpenAIChatCompletionsModel):
+        provider_usage_details = True
+
+    return DeepSeekModel(model=model, openai_client=client)
+
+
+def deepseek_model_settings() -> Any:
+    """ModelSettings for DeepSeek: explicit thinking toggle + output bound.
+
+    Thinking enabled explicitly (not relied on as a silent default);
+    ``max_tokens=8192`` bounds output tokens per request (parity with the
+    Haiku adapter). No temperature/top_p: thinking mode ignores them.
+    """
+    agents = require_sdk()
+    from agents.model_settings import ModelSettings
+    return ModelSettings(max_tokens=8192,
+                         extra_body={"thinking": {"type": "enabled"}})
+
+
+def glm_model(*, model: str = "glm-5.3-flash",
+              base_url: str | None = None,
+              api_key: str | None = None) -> Any:
+    """Build the GLM flash backend (M10 primary: forced thinking, preserved).
+
+    M10-GLM primary configuration (recorded 2026-10-23, before any GLM
+    evaluation run): thinking ENABLED + ``clear_thinking: false``
+    (Preserved Thinking, the provider's recommendation for coding/agent
+    scenarios), reasoning_effort unset (provider default). Rationale:
+    thinking is forced-on for glm-5.3-flash (cannot be disabled per
+    provider docs); preserved thinking requires the complete unmodified
+    reasoning_content back with tool results, so the adapter enables the
+    SDK's reasoning replay for glm models (same mechanism the SDK uses
+    for deepseek). ``reasoning_content`` text is counted via reasoning
+    tokens, never stored.
+    """
+    import os
+    ensure_local_tracing()
+    require_sdk()
+    from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+    try:
+        from openai import AsyncOpenAI
+    except Exception as exc:
+        raise RuntimeError("openai package required for the GLM backend") from exc
+    # Default: Z.AI Coding Plan subscription endpoint (OpenAI Chat
+    # Completions format). The general pay-as-you-go endpoint
+    # (https://api.z.ai/api/paas/v4) does NOT consume plan quota.
+    base = (base_url or os.environ.get("ZAI_BASE_URL")
+            or "https://api.z.ai/api/coding/paas/v4").rstrip("/")
+    key = api_key or os.environ.get("ZAI_API_KEY")
+    if not key:
+        raise RuntimeError("ZAI_API_KEY is not set")
+    client = AsyncOpenAI(base_url=base, api_key=key)
+
+    def _replay_glm(context: Any) -> bool:
+        return "glm" in str(getattr(context, "model", "") or "").lower()
+
+    class GLMModel(OpenAIChatCompletionsModel):
+        # Raw probe 2026-10-23 (coding endpoint, fresh key): usage
+        # carries prompt_tokens_details.cached_tokens and
+        # completion_tokens_details.reasoning_tokens — recorded as
+        # provider-reported, never inferred.
+        provider_usage_details = True
+
+    return GLMModel(model=model, openai_client=client,
+                    should_replay_reasoning_content=_replay_glm)
+
+
+def glm_model_settings() -> Any:
+    """ModelSettings for GLM: preserved thinking + output bound.
+
+    ``max_tokens=8192`` bounds output tokens per request (parity with the
+    Haiku/DeepSeek adapters). No temperature/top_p; reasoning_effort
+    unset (provider default).
+    """
+    agents = require_sdk()
+    from agents.model_settings import ModelSettings
+    return ModelSettings(
+        max_tokens=8192,
+        extra_body={"thinking": {"type": "enabled",
+                                 "clear_thinking": False}})
 
 
 class HaikuModel(_SDKModel):
@@ -774,8 +909,18 @@ def run_review(*, instructions: str, user_input: str, tools: list[Any],
         active_model = UsageRecordingModel(model, usage_ledger)
     agent = agents.Agent(name="codatiel-i2", instructions=instructions,
                          tools=tools, model=active_model, model_settings=model_settings)
-    return asyncio.run(
+    result = asyncio.run(
         agents.Runner.run(agent, user_input, max_turns=max_turns))
+    # M9.2 P1: capture the exact instructions object the SDK received, at
+    # the SDK boundary, so the run record can prove its stored hash matches
+    # what was actually passed to Agent — not just what the service claims.
+    try:
+        import hashlib as _hashlib
+        result.sdk_boundary_instructions_sha256 = _hashlib.sha256(
+            str(agent.instructions).encode("utf-8")).hexdigest()
+    except Exception:
+        pass
+    return result
 
 
 def luna_model_id() -> str:
