@@ -13,11 +13,18 @@ private digest per processed revision. GitHub is read-only.
 
 ## First run (on the Docker host)
 
+Account-wide GitHub App (one-time, owner in github.com UI):
+private app on the owner account, read-only Contents / Metadata /
+Pull requests, installed on the account with All repositories.
+Record the numeric App ID; place the .pem on the Docker host
+(e.g. /home/mitch/*.private-key.pem, chmod 600) — never paste the key
+into chat or the env file.
+
 ```sh
 cp docker/.env.example docker/codatiel-v010.env
 chmod 600 docker/codatiel-v010.env
-# fill GH_TOKEN, CODATIEL_WATCH_REPOS, _TO, _SENDER, OPENAI/ANTHROPIC,
-# SMTP2GO_API_KEY
+# fill GITHUB_APP_ID (+ sender/recipient/model keys; SMTP2GO key already
+# staged). CODATIEL_WATCH_REPOS stays empty = installation-wide discovery.
 docker compose -f docker/docker-compose.yml --env-file docker/codatiel-v010.env build
 # smoke: one poll, no loop
 docker compose -f docker/docker-compose.yml run --rm watcher watcher run-once

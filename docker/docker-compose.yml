@@ -26,10 +26,16 @@ services:
       - codatiel-runs:/data/runs
       - codatiel-work:/data/work
       - codatiel-feedback:/data/feedback
+      # Owner-placed PEM, read-only. Key bytes never enter env, image or logs.
+      - type: bind
+        source: ${PEM_PATH:-/home/mitch/mitchins-codatiel-shadow.2026-10-23.private-key.pem}
+        target: /run/secrets/github-app-key.pem
+        read_only: true
     environment:
       CODATIEL_WATCH_STATE: /data/state/watcher_state.json
       CODATIEL_WATCH_RUNS: /data/runs
       CODATIEL_WATCH_WORK: /data/work
+      GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app-key.pem
     command: ["watcher", "daemon"]
     logging:
       driver: json-file
