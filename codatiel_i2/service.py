@@ -459,7 +459,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 instructions_id=instructions_id, inventory=inventory,
                 user_input=user_input, playbook_name=playbook_name,
                 playbook_text=playbook_text,
-                inventory_strategy_name=inventory_strategy_name)
+                inventory_strategy_name=inventory_strategy_name,
+                pr_number=pr_number)
         # For other agent failures, try to preserve partial trace if available
         partial_result = getattr(exc, "run_data", None)
         return _write_failed_run(
@@ -471,7 +472,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
             instructions_id=instructions_id, inventory=inventory,
             user_input=user_input, playbook_name=playbook_name,
             playbook_text=playbook_text,
-            inventory_strategy_name=inventory_strategy_name)
+            inventory_strategy_name=inventory_strategy_name,
+            pr_number=pr_number)
 
     tool_evidence = _harvest_tool_evidence(result)
     tool_outputs = _harvest_tool_outputs(result)
@@ -1135,7 +1137,8 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                       user_input: str | None = None,
                       playbook_name: str | None = None,
                       playbook_text: str | None = None,
-                      inventory_strategy_name: str | None = None) -> dict[str, Any]:
+                      inventory_strategy_name: str | None = None,
+                      pr_number: int | None = None) -> dict[str, Any]:
     """Minimal immutable record for runs that die before disposition.
 
     When a partial trace is available (e.g., MaxTurnsExceeded with tool calls
@@ -1210,11 +1213,14 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
     termination_by_response = _collect_provider_termination(model_obj)
     _finalize_spend_ledger(active, run_dir)
 
+    pr_url = (f"https://github.com/{ws.repo}/pull/{pr_number}"
+              if pr_number else None)
     write_json(run_dir / "run.json",
                {"schema_version": _RUN_SCHEMA,
                 "run_id": run_id, "scan_key": scan_key, "config": config,
                 "repo": ws.repo, "base_sha": ws.base_sha,
                 "head_sha": ws.head_sha,
+                "pr_number": pr_number, "pr_url": pr_url,
                 "created_at": time_mod.utc_now_iso(),
                 "workspace": ws.to_dict(), "status": status,
                 "stage": stage, "error": error})

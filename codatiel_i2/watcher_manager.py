@@ -34,8 +34,8 @@ REVIEW_TIMEOUT_S = 1200
 class ManagerConfig:
     repos: list[str] | None = None
     exclude: list[str] = field(default_factory=list)
-    debounce_s: int = 120
     per_poll_cap: int = 3
+    max_queued: int = 100
     max_queued: int = 100
     spend_total_cap_usd: float = 5.0
     spend_daily_cap_usd: float = 2.0
@@ -229,6 +229,8 @@ class Manager:
             if rows is None:
                 out["errors"].append({"repo": repo, "error": err})
                 continue
+            if err:
+                out["errors"].append({"repo": repo, "warning": err})
             for raw in rows:
                 vpr, reason = E.validate_pr_metadata(repo, raw)
                 if vpr is None:
@@ -288,12 +290,14 @@ class Manager:
         # Drain previously queued pairs first (oldest), revalidating at
         # dispatch; then admit newly eligible pairs into remaining cap.
         # Total queued work stays bounded: never queue beyond max_queued.
-        MAX_QUEUED = 100
         backlog = self.store.queued_pairs(self.cfg.per_poll_cap)
         todo: list[tuple[str, int, str, str]] = [
             (b["repo"], b["pr"], b["base"], b["head"]) for b in backlog]
         for repo, vpr in pairs:
-            if len(todo) >= MAX_QUEUED:
+            if len(todo) >= self.cfg.max_queued:
+                out["errors"].append(
+                    {"queue": f"bound reached ({self.cfg.max_queued}); "
+                              "remainder stays eligible"})
                 break
             self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
                                   vpr.head_sha, "queued")
@@ -308,6 +312,60 @@ class Manager:
             rec = self.dispatch(repo, number, base, head, today)
             out["dispatched"].append(rec)
             admitted += 1
+            try:
+                self.check_in()
+            except Exception:
+                out["errors"].append({"lease": "heartbeat lost"})
+                return out
+        # Redelivery sweep: complete-but-undelivered pairs retry the same
+        # bytes (never re-inference). Ambiguous receipts stay parked for
+        # explicit replay-delivery only.
+        for row in self.store.cx.execute(
+                "SELECT repo, pr, base, head, run_dir FROM pairs "
+                "WHERE status='complete' AND spend_unknown=0").fetchall():
+            if self._stop or admitted >= self.cfg.per_poll_cap + 3:
+                break
+            repo2, number2, base2, head2, rd = row
+            dl = self.store.cx.execute(
+                "SELECT status FROM deliveries WHERE run_dir=? "
+                "ORDER BY updated_ts DESC LIMIT 1", (rd,)).fetchone()
+            if dl and dl[0] in ("delivered", "ambiguous"):
+                continue
+            live, reason = self.revalidate(repo2, number2, base2, head2)
+            if live is None:
+                if not reason.startswith("fetch:"):
+                    self.store.set_status(repo2, number2, base2, head2,
+                                          "suppressed",
+                                          note=f"sweep: {reason}")
+                continue
+            try:
+                subj, body = build_email(
+                    {"repo": live.repo, "number": live.number,
+                     "url": live.url, "base": live.base_sha,
+                     "head": live.head_sha}, Path(rd))
+            except Exception as exc:
+                self.store.set_status(repo2, number2, base2, head2,
+                                      "suppressed",
+                                      note=f"sweep identity invalid: {exc}")
+                continue
+            import hashlib as _hl
+            sha = _hl.sha256(body.encode()).hexdigest()
+            if self.sender is None:
+                continue
+            try:
+                receipt = self.sender(rd, subj, body)
+            except Exception as exc:
+                self.store.record_delivery(rd, sha, subj, "failed",
+                                           {"error": f"{type(exc).__name__}: {exc}"})
+                continue
+            from codatiel_i2 import watcher as _W
+            result = _W.classify_receipt(receipt)
+            self.store.record_delivery(rd, sha, subj, result, receipt)
+            out["emails"].append({"pr": f"{repo2}#{number2}",
+                                  "result": result, "redelivery": True})
+            if result == "delivered":
+                self.store.set_status(repo2, number2, base2, head2,
+                                      "delivered")
         return out
 
     # -- budget ---------------------------------------------------------
@@ -381,7 +439,11 @@ class Manager:
         self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
                               vpr.head_sha, "running",
                               reserved_usd=PER_REVIEW_RESERVE_USD)
-        out = self.run_review("luna", vpr, PER_REVIEW_RESERVE_USD)
+        try:
+            out = self.run_review("luna", vpr, PER_REVIEW_RESERVE_USD)
+        except Exception as exc:
+            out = {"status": "failed", "stage": "spawn",
+                   "error": f"{type(exc).__name__}: {exc}"}
         self.account_run(vpr, out, day, second_pass=False)
         email_res = self.maybe_email(vpr, out, day, second_pass=False)
         rec.update(email_res)
@@ -391,12 +453,23 @@ class Manager:
             live2, reason2 = self.revalidate(vpr.repo, vpr.number,
                                              vpr.base_sha, vpr.head_sha)
             if live2 is None:
-                rec["follow_up_suppressed"] = reason2
+                if reason2.startswith("fetch:"):
+                    rec["follow_up_retry"] = reason2
+                else:
+                    rec["follow_up_suppressed"] = reason2
             else:
+                cur = self.store.get_pair(vpr.repo, vpr.number, vpr.base_sha,
+                                          vpr.head_sha) or {}
+                kept = float(cur.get("reserved_usd") or 0.0)
                 self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
                                       vpr.head_sha, "running",
-                                      reserved_usd=PER_REVIEW_RESERVE_USD)
-                out2 = self.run_review("haiku", vpr, PER_REVIEW_RESERVE_USD)
+                                      reserved_usd=kept + PER_REVIEW_RESERVE_USD)
+                try:
+                    out2 = self.run_review("haiku", vpr,
+                                           PER_REVIEW_RESERVE_USD)
+                except Exception as exc:
+                    out2 = {"status": "failed", "stage": "spawn",
+                            "error": f"{type(exc).__name__}: {exc}"}
                 self.account_run(vpr, out2, day, second_pass=True)
                 email2 = self.maybe_email(vpr, out2, day, second_pass=True)
                 rec["follow_up"] = email2
@@ -411,6 +484,8 @@ class Manager:
                     "error": "shutdown requested"}
         cmd = ["codatiel-i2", "review", "--repo", vpr.repo,
                "--pr", str(vpr.number), "--model", backend,
+               "--expected-base", vpr.base_sha,
+               "--expected-head", vpr.head_sha,
                "--runs-root", str(self.cfg.runs_root / backend / "A"),
                "--work-root", str(self.cfg.work_root / backend / "A"),
                "--max-turns", "12", "--max-spend-usd", str(ceiling)]
@@ -443,9 +518,34 @@ class Manager:
                     "error": "review payload not an object"}
         return payload
 
+    PRE_INFERENCE_STAGES = ("pr_metadata", "sha_mismatch", "workspace",
+                              "inventory_strategy", "spend_ledger", "model",
+                              "budget_refused", "spawn")
+
     def account_run(self, vpr: ValidatedPR, out: dict, day: str,
                     second_pass: bool) -> None:
         run_dir = out.get("run_dir")
+        stage = str(out.get("stage") or "")
+        prev = self.store.get_pair(vpr.repo, vpr.number, vpr.base_sha,
+                                   vpr.head_sha) or {}
+        prev_usd = prev.get("usd") or 0.0
+        prev_unknown = bool(prev.get("spend_unknown"))
+        if stage in self.PRE_INFERENCE_STAGES and not run_dir:
+            # Certain zero: the child never reached inference. Release the
+            # reservation; spawn failures stay eligible (transient),
+            # policy refusals suppress (operator backfill only).
+            if stage == "spawn":
+                self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
+                                      vpr.head_sha, "eligible",
+                                      reserved_usd=0.0,
+                                      note=f"spawn failed, will retry: "
+                                           f"{out.get('error', '')[:200]}")
+            else:
+                self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
+                                      vpr.head_sha, "suppressed",
+                                      reserved_usd=0.0,
+                                      note=f"pre-inference stop: {stage}")
+            return
         usd: float | None = None
         unknown = True
         if run_dir:
@@ -458,9 +558,17 @@ class Manager:
                 usd = float(raw_usd) if raw_usd is not None else 0.0
             except Exception:
                 usd, unknown = None, True
+        total_usd = prev_usd + (usd or 0.0)
+        total_unknown = (prev_unknown or unknown) and True
+        if not unknown and usd is not None:
+            # Known pass spend is debited immediately, even when an older
+            # pass on the same pair is still bounded-but-unknown.
+            self.store.spend_add(day, usd)
         if unknown or usd is None:
-            # Conservatively bounded: the pre-dispatch reservation stands.
-            # Operator `reconcile` replaces it with provider actuals.
+            # Conservatively bounded: the dispatch-time reservation stands
+            # (dispatch already accumulates $1 per pass). Operator
+            # `reconcile` replaces reserves with provider actuals.
+            kept = float(prev.get("reserved_usd") or 0.0)
             self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
                                   vpr.head_sha,
                                   "failed" if out.get("status") == "failed"
@@ -468,9 +576,15 @@ class Manager:
                                   run_dir=run_dir or "",
                                   model=out.get("model", ""),
                                   second_pass=int(second_pass),
-                                  spend_unknown=1,
-                                  note="accounting unknown; $1.00 reserved")
+                                  usd=total_usd, spend_unknown=1,
+                                  reserved_usd=kept,
+                                  note="accounting unknown; spend bounded "
+                                       "by reservation")
             return
+        kept = float(prev.get("reserved_usd") or 0.0)
+        # Each pass releases its own $1 on known accounting; other passes'
+        # bounds are untouched.
+        kept = max(0.0, kept - PER_REVIEW_RESERVE_USD)
         self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
                               vpr.head_sha,
                               "failed" if out.get("status") == "failed"
@@ -478,8 +592,8 @@ class Manager:
                               run_dir=run_dir or "",
                               model=out.get("model", ""),
                               second_pass=int(second_pass),
-                              usd=usd, spend_unknown=0, reserved_usd=0.0)
-        self.store.spend_add(day, usd)
+                              usd=total_usd, spend_unknown=1 if total_unknown
+                              else 0, reserved_usd=kept)
 
     def maybe_email(self, vpr: ValidatedPR, out: dict, day: str,
                     second_pass: bool) -> dict:
@@ -493,6 +607,11 @@ class Manager:
         live, reason = self.revalidate(vpr.repo, vpr.number, vpr.base_sha,
                                        vpr.head_sha)
         if live is None:
+            if reason.startswith("fetch:"):
+                # Transient failure after paid work: do NOT suppress the
+                # result. Leave delivery pending; the redelivery sweep
+                # retries the same bytes next cycle.
+                return {"emailed": False, "delivery": "revalidate-retry"}
             self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
                                   vpr.head_sha, "suppressed",
                                   note=f"pre-email: {reason}")
@@ -517,7 +636,7 @@ class Manager:
             record = S.deliver_shadow(
                 run_dir, to=self.cfg.recipients, sender=self.cfg.sender,
                 subject=subj, text_body=body,
-                transport=(lambda t, s, b: self.sender(t, s, b))
+                transport=(lambda t, s, b: self.sender(run_dir, s, b))
                 if self.sender else None)
             receipt = record.get("transport_receipt", {})
         except Exception as exc:
@@ -527,6 +646,11 @@ class Manager:
         from codatiel_i2 import watcher as W
         result = W.classify_receipt(receipt)
         self.store.record_delivery(run_dir, sha, subj, result, receipt)
+        if result in ("failed", "partial"):
+            # Same-bytes retry happens via the redelivery sweep, never by
+            # re-running inference. Ambiguous receipts are never
+            # auto-retried (explicit replay-delivery only).
+            return {"emailed": False, "delivery": result}
         if result == "delivered":
             self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
                                   vpr.head_sha, "delivered")

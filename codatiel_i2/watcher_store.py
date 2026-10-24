@@ -142,12 +142,28 @@ class Store:
         return at
 
     def activate(self) -> str:
-        if self.meta_get("activated_at"):
-            raise StoreError("already activated at "
-                             f"{self.meta_get('activated_at')}; production "
-                             "paths cannot silently reset the boundary")
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        self.meta_set("activated_at", now)
+        try:
+            self.cx.execute("BEGIN IMMEDIATE;")
+            row = self.cx.execute(
+                "SELECT value FROM meta WHERE key='activated_at'").fetchone()
+            if row and row[0]:
+                raise StoreError(
+                    "already activated at "
+                    f"{row[0]}; production paths cannot silently reset "
+                    "the boundary")
+            self.cx.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES"
+                "('activated_at', ?)", (now,))
+            self.cx.execute("COMMIT;")
+        except StoreError:
+            raise
+        except Exception as exc:
+            try:
+                self.cx.execute("ROLLBACK;")
+            except Exception:
+                pass
+            raise StoreError(f"activation failed: {exc}")
         return now
 
     # -- spend ----------------------------------------------------------

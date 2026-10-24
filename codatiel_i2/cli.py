@@ -58,6 +58,10 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--max-spend-usd", type=float, default=None,
                         help="per-review ceiling (default: profile or "
                              "CODATIEL_I2_SPEND_CEILING_USD or 5.0)")
+    review.add_argument("--expected-base", default="",
+                        help="refuse PR review unless live base matches")
+    review.add_argument("--expected-head", default="",
+                        help="refuse PR review unless live head matches")
 
     deliver = sub.add_parser("deliver-shadow", help="Deliver a run's shadow digest.")
     deliver.add_argument("--run-dir", required=True)
@@ -75,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
                                         "resume-repo", "reconcile"],
                          help="run-once: single poll; daemon: loop until "
                               "SIGTERM; status: state summary; backfill: "
-                              "run-once with debounce=0; replay-delivery: "
+                              "run-once; replay-delivery: "
                               "resend one run's digest without new inference")
     watcher.add_argument("--repos", default="",
                          help="comma-separated owner/name allowlist "
@@ -91,14 +95,18 @@ def build_parser() -> argparse.ArgumentParser:
                          help="default: CODATIEL_WATCH_RUNS")
     watcher.add_argument("--work-root", default="",
                          help="default: CODATIEL_WATCH_WORK")
-    watcher.add_argument("--debounce", type=int, default=-1,
-                         help="debounce seconds (-1: env/default 120)")
     watcher.add_argument("--interval", type=int, default=-1,
                          help="daemon poll seconds (-1: env/default 300)")
     watcher.add_argument("--spend-cap", type=float, default=-1.0,
                          help="total pilot cap USD (-1: env/default 5.0)")
     watcher.add_argument("--run-dir", default="",
-                         help="replay-delivery target run dir")
+                         help="replay-delivery/reconcile target run dir")
+    watcher.add_argument("--pr", default="",
+                         help="directed backfill PR number (single --repos entry)")
+    watcher.add_argument("--actual-usd", type=float, default=None,
+                         help="reconcile: provider-confirmed actual USD")
+    watcher.add_argument("--note", default="",
+                         help="reconcile: evidence note (required)")
     return parser
 
 
@@ -278,14 +286,33 @@ def cmd_watcher(args: Any) -> dict:
             run_dir, to=cfg.recipients, sender=cfg.sender,
             subject=subject, text_body=body)["transport_receipt"]
 
-    mgr = mgr_mod.Manager(cfg, store, sender=sender)
     if auth_mode == "app":
         try:
             os.environ["GH_TOKEN"] = app.token()
         except Exception as exc:
             return {"status": "failed", "stage": "auth", "error": str(exc)}
+
+        def _app_repos() -> tuple[list[str] | None, str]:
+            try:
+                from codatiel_i2.github import app_auth as _am
+                token = app.token()
+                os.environ["GH_TOKEN"] = token
+                names = _am.active_repo_names(
+                    _am.list_installation_repos(token))
+                return names, ""
+            except Exception as exc:
+                return None, f"{type(exc).__name__}: {exc}"
+        lister = _app_repos
+    else:
+        lister = None
     if (store.spend_get("seed_usd") or 0.0) == 0.0:
         store.spend_set("seed_usd", cfg.spend_seed_usd)
+    mgr = mgr_mod.Manager(cfg, store, sender=sender, list_repos=lister)
+    try:
+        mgr.check_in()
+    except store_mod.StoreError as exc:
+        return {"status": "failed", "stage": "lease",
+                "error": str(exc)}
     recovery = mgr.recover()
     import signal as _signal
     stop = {"flag": False}
@@ -326,11 +353,19 @@ def cmd_watcher(args: Any) -> dict:
             encoding="utf-8")
         if op != "daemon":
             summary["status"] = "ok"
+            try:
+                store.release_lease(mgr.instance_id)
+            except Exception:
+                pass
             store.close()
             return summary
         if stop["flag"]:
             summary["status"] = "ok"
             summary["stopped"] = True
+            try:
+                store.release_lease(mgr.instance_id)
+            except Exception:
+                pass
             store.close()
             return summary
         _time.sleep(interval)
@@ -387,6 +422,25 @@ def cmd_watcher_replay(args: Any) -> dict:
         return {"status": "duplicate-suppressed", "subject": subj,
                 "body_sha256": sha,
                 "email_id": (existing.get("receipt") or {}).get("email_id")}
+    # Adopt on-disk receipts (crash orphans): a delivered delivery.json
+    # suppresses the resend and is adopted into the store.
+    disk_path = run_dir / "delivery.json"
+    if disk_path.exists():
+        try:
+            disk = json.loads(disk_path.read_text(encoding="utf-8"))
+            from codatiel_i2 import watcher as _wm
+            if (_wm.classify_receipt(disk.get("transport_receipt"))
+                    == "delivered"
+                    and disk.get("body_sha256") == sha):
+                store.record_delivery(str(run_dir), sha, subj, "delivered",
+                                      disk.get("transport_receipt") or {})
+                store.close()
+                return {"status": "duplicate-suppressed", "subject": subj,
+                        "body_sha256": sha, "adopted_from_disk": True,
+                        "email_id": (disk.get("transport_receipt") or {}
+                                     ).get("email_id")}
+        except Exception:
+            pass
     from codatiel_i2 import service as service_mod
 
     def _send(t: list[str], s_: str, b: str) -> dict:
@@ -442,8 +496,8 @@ def cmd_watcher_reconcile(args: Any) -> dict:
         store.close()
         return {"status": "failed", "stage": "config",
                 "error": "pair accounting is already known; nothing to do"}
-    import datetime as _dt
-    day = _dt.date.today().isoformat()
+    import time as _t
+    day = _t.strftime("%Y-%m-%d", _t.gmtime())
     store.set_status(repo, pr, base, head, store.get_pair(
         repo, pr, base, head)["status"], usd=float(args.actual_usd),
                      spend_unknown=0, reserved_usd=0.0,
@@ -507,6 +561,11 @@ def cmd_watcher_backfill(args: Any) -> dict:
     except _S.StoreError as exc:
         store.close()
         return {"status": "failed", "stage": "lease", "error": str(exc)}
+    import time as _t2
+    if mgr.availability(_t2.strftime("%Y-%m-%d", _t2.gmtime())) <= 0:
+        store.close()
+        return {"status": "paused", "stage": "budget",
+                "error": "spend caps exhausted; backfill refused"}
     raw, err = _E.fetch_pr(repos[0], number)
     if raw is None:
         store.close()
@@ -701,6 +760,9 @@ def cmd_review(args) -> dict:
                               "model_settings": model_settings,
                               "rate": rate, "rate_status": rate_status,
                               "max_usd_per_review": ceiling}
+    if getattr(args, "expected_base", "") or getattr(args, "expected_head", ""):
+        kwargs["expected_base"] = getattr(args, "expected_base", "") or None
+        kwargs["expected_head"] = getattr(args, "expected_head", "") or None
     if args.repo_root and args.base and args.head:
         return service_mod.review_local(
             args.repo_root, args.base, args.head, **kwargs)

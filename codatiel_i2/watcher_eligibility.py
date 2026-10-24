@@ -76,11 +76,18 @@ PR_FIELDS = ("number,title,headRefOid,baseRefOid,headRefName,baseRefName,"
 
 
 def discover_open_prs(repo: str, limit: int = 100) -> tuple[list[dict] | None, str | None]:
-    """Read-only paginated open-PR discovery. Failures fail closed."""
+    """Read-only open-PR discovery. Failures fail closed.
+
+    Installed gh has no per-page flag for `pr list`, so one bounded
+    request (default 100) is used. Hitting the bound exactly is reported
+    as a warning (possible truncation) rather than silently accepted;
+    the rows are still processed. A non-empty warning string accompanies
+    possibly-truncated results.
+    """
     try:
         proc = subprocess.run(
             ["gh", "pr", "list", "--repo", repo, "--state", "open",
-             "--limit", str(limit), "--paginate", "--json", PR_FIELDS],
+             "--limit", str(limit), "--json", PR_FIELDS],
             capture_output=True, text=True, timeout=120)
     except Exception as exc:
         return None, f"{type(exc).__name__}: {exc}"
@@ -92,7 +99,9 @@ def discover_open_prs(repo: str, limit: int = 100) -> tuple[list[dict] | None, s
         return None, f"parse error: {exc}"
     if not isinstance(rows, list):
         return None, "unexpected response shape"
-    return rows, None
+    if len(rows) >= limit:
+        return rows, f"warning: {repo} hit the {limit}-PR inventory bound"
+    return rows, ""
 
 
 def json_loads(text: str) -> Any:
@@ -119,9 +128,25 @@ def fetch_pr(repo: str, number: int) -> tuple[dict | None, str | None]:
             "" if isinstance(row, dict) else "unexpected response shape")
 
 
+def _parse_ts(value: str) -> Any:
+    try:
+        import datetime as _dt
+        return _dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
 def check_eligible(pr: ValidatedPR, activated_at: str) -> tuple[bool, str]:
-    """Activation + lifecycle predicate. First sighting is never sufficient."""
-    if not (pr.created_at > activated_at):
+    """Activation + lifecycle predicate. First sighting is never sufficient.
+
+    Timestamps compare as parsed instants (fractional-second safe), not
+    raw strings; unparseable values fail closed.
+    """
+    created = _parse_ts(pr.created_at)
+    activated = _parse_ts(activated_at)
+    if created is None or activated is None:
+        return False, "unparseable timestamps"
+    if not (created > activated):
         return False, "historical (createdAt <= activated_at)"
     if pr.is_draft:
         return False, "draft"
