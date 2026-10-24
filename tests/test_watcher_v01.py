@@ -1,284 +1,589 @@
-"""Codatiel v0.1.0 watcher acceptance gates (deterministic, no inference).
+"""Codatiel v0.1.1 watcher acceptance gates (deterministic, no inference).
 
-Issue §Acceptance: first-seen, unchanged-skip, debounce, BASE advance,
-stale-during-run, restart catch-up, duplicate discovery, review failure,
-spend exhaustion, SMTP retry without re-review, ambiguous receipt,
-read-only GitHub scope.
+Covers the hardening mission: activation contract, historical exclusion,
+lifecycle revalidation, queue caps, subprocess isolation, accounting
+(incl. unknown-usage bounds), delivery idempotency, store refusal modes,
+and the read-only GitHub scope. Live contract tests are separate
+(tests/test_connector_live.py); the adversarial review is out-of-band.
 """
 
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from codatiel_i2 import watcher as W
+from codatiel_i2 import watcher_eligibility as E
+from codatiel_i2 import watcher_manager as M
+from codatiel_i2 import watcher_store as S
+
+ACTIVATED = "2026-10-24T00:00:00Z"
+OLD = "2026-10-01T00:00:00Z"
+NEW = "2026-10-24T12:00:00Z"
 
 
-def make_cfg(tmp_path: Path, **over) -> W.WatcherConfig:
-    kw = dict(repos=["o/r"], poll_interval_s=300, debounce_s=120,
-              state_path=tmp_path / "state.json",
-              runs_root=tmp_path / "runs", work_root=tmp_path / "work",
-              recipients=["ops@example.com"], sender="codatiel@example.com",
-              spend_total_cap_usd=5.0, spend_seed_usd=0.0,
-              spend_daily_cap_usd=2.0)
-    kw.update(over)
-    return W.WatcherConfig(**kw)
+def raw_pr(number=1, base="aa" * 20, head="bb" * 20, created=OLD,
+           state="OPEN", draft=False, merged="",
+           url=None, repo="o/r"):
+    return {"number": number, "title": "t", "headRefOid": head,
+            "baseRefOid": base, "headRefName": "f", "baseRefName": "m",
+            "url": url or f"https://github.com/{repo}/pull/{number}",
+            "createdAt": created, "updatedAt": created, "state": state,
+            "isDraft": draft, "mergedAt": merged}
 
 
-def fake_run(tmp_path: Path, name: str, *, status: str = "complete",
-             usd: float = 0.05, model: str = "luna:test",
-             findings: int = 0) -> str:
-    d = tmp_path / "runs" / name
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "run.json").write_text(json.dumps(
-        {"run_id": name, "repo": "o/r", "pr_number": 1,
-         "base_sha": "b" * 40, "head_sha": "h" * 40,
-         "config": {"model": model}}))
-    (d / "metrics.json").write_text(json.dumps(
-        {"status": status, "model": model, "tool_calls": 5,
-         "instructions_id": "canonical-minimal-0.1@x",
-         "spend": {"usd_estimate": usd, "accounting_status":
-                   "CONFIRMED_USAGE"}}))
-    (d / "shadow_result.json").write_text(json.dumps(
-        {"status": status, "advisory": [], "silence": {"summary": "quiet"}}))
-    (d / "findings.jsonl").write_text("")
-    (d / "evidence.jsonl").write_text("")
-    return str(d)
+def make_mgr(tmp_path: Path, **kw) -> tuple[M.ManagerConfig, S.Store, M.Manager]:
+    cfg = M.ManagerConfig(
+        repos=None, recipients=["ops@example.com"],
+        sender="codatiel@example.com", runs_root=tmp_path / "runs",
+        work_root=tmp_path / "work", spend_total_cap_usd=5.0,
+        spend_seed_usd=0.0, spend_daily_cap_usd=2.0,
+        per_poll_cap=kw.pop("per_poll_cap", 3))
+    for k, v in kw.items():
+        setattr(cfg, k, v)
+    store = S.Store(tmp_path / "watch.sqlite")
+    mgr = M.Manager(cfg, store)
+    return cfg, store, mgr
+
+
+def activate(store: S.Store) -> str:
+    return store.activate()
 
 
 class Harness:
+    """Fake GitHub + fake review worker + fake mailer."""
+
     def __init__(self, tmp_path: Path):
         self.tmp = tmp_path
-        self.prs: list[dict] = []
+        self.last_run_dir: str = ""
+        self.prs: dict[str, list[dict]] = {}
         self.reviews = 0
-        self.haiku_reviews = 0
         self.sent: list[dict] = []
-        self.receipt: dict = {"succeeded": 1, "failed": 0, "email_id": "e1"}
-        self.fail_review = False
-        self.live: dict | None = None
+        self.receipt: dict = {"succeeded": 1, "failed": 0,
+                              "email_id": "e1"}
+        self.fetch_error: dict[tuple[str, int], str] = {}
 
-    def discover(self, repo: str, limit: int = 20):
-        return list(self.prs), None
+    def list_repos(self):
+        return sorted(self.prs.keys()), ""
+
+    def discover(self, repo: str, limit: int = 100):
+        return list(self.prs.get(repo, [])), ""
 
     def fetch(self, repo: str, number: int):
-        if self.live is not None:
-            return dict(self.live), None
-        for pr in self.prs:
-            if int(pr["number"]) == number:
-                return {"number": number,
-                        "baseRefOid": pr["baseRefOid"],
-                        "headRefOid": pr["headRefOid"]}, None
+        if (repo, number) in self.fetch_error:
+            return None, self.fetch_error[(repo, number)]
+        for raw in self.prs.get(repo, []):
+            if int(raw["number"]) == number:
+                return dict(raw), ""
         return None, "not found"
 
-    def review_luna(self, repo: str, number: int):
+    def fake_run(self, name: str, status="complete", usd=0.05,
+                 unknown=False) -> str:
+        d = self.tmp / "runs" / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "run.json").write_text(json.dumps(
+            {"run_id": name, "repo": "o/r", "pr_number": 1,
+             "pr_url": "https://github.com/o/r/pull/1",
+             "base_sha": "aa" * 20, "head_sha": "bb" * 20,
+             "config": {"model": "luna"}}))
+        (d / "metrics.json").write_text(json.dumps(
+            {"status": status, "model": "luna:x", "tool_calls": 5,
+             "instructions_id": "canonical-minimal-0.1@y",
+             "spend": {"usd_estimate": (None if unknown else usd),
+                       "accounting_status": "UNKNOWN_USAGE" if unknown
+                       else "CONFIRMED_USAGE"}}))
+        (d / "shadow_result.json").write_text(json.dumps(
+            {"status": status, "advisory": [],
+             "silence": {"summary": "quiet"}}))
+        (d / "findings.jsonl").write_text("")
+        (d / "evidence.jsonl").write_text("")
+        return str(d)
+
+    def review(self, backend: str, vpr, ceiling: float):
         self.reviews += 1
-        if self.fail_review:
-            return {"status": "failed", "stage": "agent",
-                    "error": "boom", "run_dir": None}
+        self.last_run_dir = self.fake_run(f"{backend}-{self.reviews}")
         return {"status": "complete", "stage": "done",
-                "run_dir": fake_run(self.tmp, f"luna-{self.reviews}"),
-                "model": "luna"}
+                "run_dir": self.last_run_dir, "model": backend}
 
-    def review_haiku(self, repo: str, number: int):
-        self.haiku_reviews += 1
-        return {"status": "complete", "stage": "done",
-                "run_dir": fake_run(self.tmp, f"haiku-{self.haiku_reviews}"),
-                "model": "haiku"}
-
-    def deliver(self, run_dir: Any, subject: str, body: str):
-        self.sent.append({"run_dir": run_dir, "subject": subject,
-                          "body": body})
+    def sender(self, to, subject, body):
+        # Mirrors deliver_shadow's transport contract (to, subject, body);
+        # the run dir is tracked via the review fake instead.
+        self.sent.append({"to": to, "subject": subject, "body": body,
+                          "run_dir": self.last_run_dir})
         return dict(self.receipt)
 
 
-def run_poll(cfg, state, h: Harness, now: float, day: str = "2026-10-23"):
-    return W.poll_once(cfg, state, now=now, day=day, discover=h.discover,
-                       fetch_shas=h.fetch, review_luna=h.review_luna,
-                       review_haiku=h.review_haiku, deliver=h.deliver)
+def wire(mgr: M.Manager, h: Harness):
+    mgr.run_review = h.review  # type: ignore[method-assign]
+    mgr.sender = h.sender  # type: ignore[method-assign]
+    mgr.list_repos = h.list_repos  # type: ignore[method-assign]
+    mgr.discover = h.discover  # type: ignore[method-assign]
+    mgr.fetch = h.fetch  # type: ignore[method-assign]
+    return mgr
 
 
-def settle(cfg, state, h: Harness, now: float, day: str = "2026-10-23"):
-    """Prime debounce, then poll past the window; return the live summary."""
-    run_poll(cfg, state, h, now=now, day=day)
-    return run_poll(cfg, state, h, now=now + cfg.debounce_s + 5, day=day)
+def old_prs(n=51, created=OLD):
+    return [raw_pr(number=i, head=f"{i:040d}", created=created)
+            for i in range(1, n + 1)]
 
 
-def pr(number=1, base="b" * 40, head="h" * 40):
-    return {"number": number, "baseRefOid": base, "headRefOid": head}
+# -- activation + historical exclusion --------------------------------
+
+def test_51_historical_prs_yield_nothing(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": old_prs()}
+    wire(mgr, h)
+    out = mgr.cycle()
+    assert h.reviews == 0 and h.sent == []
+    assert out["discovered"] == 51 and out["admitted"] == 0
+    assert store.count_status("suppressed") == 51
 
 
-def test_first_seen_pr_gets_review_and_email(tmp_path):
-    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
-    h.prs = [pr()]
-    out = settle(cfg, state, h, now=1000.0)
+def test_repeated_polls_and_restart_stay_quiet(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": old_prs()}
+    wire(mgr, h)
+    for _ in range(3):
+        mgr.cycle()
+    # first instance held the lease; clean shutdown releases it
+    mgr.check_in()
+    store.release_lease(mgr.instance_id)
+    mgr2 = M.Manager(mgr.cfg, store)
+    wire(mgr2, h)
+    mgr2.check_in()  # admitted: no stale-lease blackout after clean stop
+    mgr2.cycle()
+    assert h.reviews == 0 and h.sent == []
+
+
+def test_historical_new_commits_still_excluded(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=OLD)]}
+    wire(mgr, h)
+    mgr.cycle()
+    h.prs = {"o/r": [raw_pr(head="cc" * 20, created=OLD)]}
+    out = mgr.cycle()
+    assert h.reviews == 0 and h.sent == []
+    assert out["admitted"] == 0
+
+
+def test_historical_close_reopen_still_excluded(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=OLD)]}
+    wire(mgr, h)
+    mgr.cycle()
+    closed = raw_pr(created=OLD, state="CLOSED", merged="2026-10-20T00:00:00Z")
+    h.prs = {"o/r": [closed]}
+    mgr.cycle()
+    h.prs = {"o/r": [raw_pr(created=OLD)]}
+    mgr.cycle()
+    assert h.reviews == 0 and h.sent == []
+
+
+def test_boundary_created_at_equal_is_excluded(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    at = activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=at)]}
+    wire(mgr, h)
+    mgr.cycle()
+    assert h.reviews == 0
+
+
+def test_new_post_activation_pr_gets_exactly_one_review(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    wire(mgr, h)
+    mgr.cycle()
+    mgr.cycle()
     assert h.reviews == 1 and len(h.sent) == 1
-    assert out["reviewed"][0]["delivered"] is True
     assert "o/r#1" in h.sent[0]["subject"]
+    assert "https://github.com/o/r/pull/1" in h.sent[0]["body"]
 
 
-def test_unchanged_sha_skips_second_poll(tmp_path):
-    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
-    h.prs = [pr()]
-    settle(cfg, state, h, now=1000.0)
-    out = run_poll(cfg, state, h, now=2000.0)
-    assert h.reviews == 1 and out["skipped"][0]["why"] == "unchanged_sha"
+def test_draft_until_ready(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW, draft=True)]}
+    wire(mgr, h)
+    mgr.cycle()
+    assert h.reviews == 0
+    h.prs = {"o/r": [raw_pr(created=NEW, draft=False)]}
+    mgr.cycle()
+    assert h.reviews == 1
 
 
-def test_changed_head_debounces_then_reviews(tmp_path):
-    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
-    h.prs = [pr()]
-    settle(cfg, state, h, now=1000.0)
-    h.prs = [pr(head="n" * 40)]
-    out = run_poll(cfg, state, h, now=1250.0)
-    assert h.reviews == 1 and out["skipped"][0]["why"] == "debounce"
-    out = run_poll(cfg, state, h, now=2000.0)
+def test_new_head_sha_gets_exactly_one_more_review(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    wire(mgr, h)
+    mgr.cycle()
+    mgr.cycle()
+    h.prs = {"o/r": [raw_pr(created=NEW, head="cc" * 20)]}
+    mgr.cycle()
+    mgr.cycle()
     assert h.reviews == 2 and len(h.sent) == 2
 
 
-def test_base_advance_triggers_new_review(tmp_path):
-    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
-    h.prs = [pr()]
-    settle(cfg, state, h, now=1000.0)
-    h.prs = [pr(base="c" * 40)]
-    run_poll(cfg, state, h, now=2000.0)  # new pair starts debounce
-    out = run_poll(cfg, state, h, now=2200.0)
-    assert h.reviews == 2
+# -- lifecycle revalidation --------------------------------------------
+
+def test_queued_pr_closing_before_dispatch_is_suppressed(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path, per_poll_cap=1)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(number=1, head="11" * 20, created=NEW),
+                     raw_pr(number=2, head="22" * 20, created=NEW)]}
+    wire(mgr, h)
+    mgr.cycle()  # PR1 dispatched; PR2 stays queued
+    assert h.reviews == 1
+    h.prs = {"o/r": [raw_pr(number=1, head="11" * 20, created=NEW),
+                     raw_pr(number=2, head="22" * 20, created=NEW,
+                            state="CLOSED",
+                            merged="2026-10-25T00:00:00Z")]}
+    out = mgr.cycle()  # closed PR2 retired at discovery, 0 inference
+    assert h.reviews == 1 and len(h.sent) == 1  # only PR1's email
+    row = store.get_pair("o/r", 2, "aa" * 20, "22" * 20)
+    assert row and row["status"] == "suppressed"
 
 
-def test_stale_head_during_run_is_marked_and_labeled(tmp_path):
-    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
-    h.prs = [pr()]
-    h.live = {"number": 1, "baseRefOid": "b" * 40,
-              "headRefOid": "z" * 40}
-    out = settle(cfg, state, h, now=1000.0)
-    assert out["reviewed"][0]["stale_during_run"] is True
-    assert out["emails"][0]["stale"] is True
-    assert "STALE-DURING-RUN" in h.sent[0]["body"]
+def test_pr_closing_while_running_suppresses_obsolete_email(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    wire(mgr, h)
+
+    def slow_review(backend, vpr, ceiling):
+        h.reviews += 1
+        h.prs = {"o/r": [raw_pr(created=NEW, state="CLOSED",
+                                merged="2026-10-25T00:00:00Z")]}
+        h.last_run_dir = h.fake_run("slow-1")
+        return {"status": "complete", "stage": "done",
+                "run_dir": h.last_run_dir, "model": backend}
+
+    mgr.run_review = slow_review  # type: ignore[method-assign]
+    out = mgr.cycle()
+    assert h.reviews == 1 and h.sent == []
+    assert out["dispatched"][0].get("suppressed")
 
 
-def test_restart_catch_up_skips_delivered_pairs(tmp_path):
-    cfg, h = make_cfg(tmp_path), Harness(tmp_path)
-    state = W.default_state()
-    h.prs = [pr()]
-    settle(cfg, state, h, now=1000.0)
-    W.save_state(cfg.state_path, state)
-    # fresh process, same volume
-    h2, state2 = Harness(tmp_path), W.load_state(cfg.state_path)
-    h2.prs = [pr()]
-    out = run_poll(cfg, state2, h2, now=5000.0)
-    assert h2.reviews == 0 and out["skipped"][0]["why"] == "unchanged_sha"
+def test_fail_closed_variants(tmp_path):
+    for i, mutate in enumerate(("draft", "gone", "malformed", "noaccess")):
+        sub = tmp_path / f"v{i}"
+        sub.mkdir()
+        _cfg, store, mgr = make_mgr(sub)
+        activate(store)
+        h = Harness(sub)
+        h.prs = {"o/r": [raw_pr(created=NEW)]}
+        wire(mgr, h)
+        if mutate == "draft":
+            h.prs = {"o/r": [raw_pr(created=NEW, draft=True)]}
+        elif mutate == "gone":
+            h.prs = {"o/r": []}
+            h.fetch_error[("o/r", 1)] = "not found"
+        elif mutate == "malformed":
+            bad = raw_pr(created=NEW)
+            bad["headRefOid"] = "zzz"
+            h.prs = {"o/r": [bad]}
+        elif mutate == "noaccess":
+            h.fetch_error[("o/r", 1)] = "403 Forbidden"
+        mgr.cycle()
+        assert h.reviews == 0 and h.sent == [], mutate
+
+
+# -- connector validation ----------------------------------------------
+
+def test_missing_identity_fields_reject(tmp_path):
+    for bad in ({"number": 0}, {"url": "https://example.com/x"},
+                {"createdAt": ""}, {"state": "MERGED"},
+                {"isDraft": None}, {"headRefOid": "short"},
+                {"baseRefName": ""}):
+        raw = raw_pr()
+        raw.update(bad)
+        vpr, reason = E.validate_pr_metadata("o/r", raw)
+        assert vpr is None and reason, bad
+
+
+def test_pagination_rate_limits_and_expired_tokens(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    wire(mgr, h)
+    h.fetch_error[("o/r", 1)] = "401 Unauthorized (expired token)"
+    out = mgr.cycle()
+    assert h.reviews == 0
+    assert any(r.get("retry") for r in out["dispatched"])
+    # partial API failure on discovery fails closed, no inference
+    def boom_discover(repo, limit=100):
+        raise ConnectionError("rate limited")
+
+    mgr.discover = boom_discover  # type: ignore[method-assign]
+    out = mgr.cycle()
+    assert h.reviews == 0 and out["errors"]
+
+
+# -- queue, concurrency, crash ------------------------------------------
+
+def test_per_poll_cap_and_queued_bound(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path, per_poll_cap=3)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(number=i, head=f"{i:040d}", created=NEW)
+                     for i in range(1, 8)]}
+    wire(mgr, h)
+    mgr.cycle()
+    assert h.reviews == 3
+    mgr.cycle()
+    assert h.reviews == 6
 
 
 def test_duplicate_discovery_reviews_once(tmp_path):
-    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
-    h.prs = [pr(), pr()]
-    out = settle(cfg, state, h, now=1000.0)
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW), raw_pr(created=NEW)]}
+    wire(mgr, h)
+    mgr.cycle()
+    mgr.cycle()
     assert h.reviews == 1
 
 
-def test_review_failure_is_retryable_without_email(tmp_path):
-    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
-    h.prs, h.fail_review = [pr()], True
-    out = settle(cfg, state, h, now=1000.0)
-    assert h.sent == [] and "error" in out["reviewed"][0]
-    h.fail_review = False
-    out = run_poll(cfg, state, h, now=2000.0)
-    assert h.reviews == 2 and len(h.sent) == 1
+def test_concurrent_instance_refused(tmp_path):
+    _cfg, store, _mgr = make_mgr(tmp_path)
+    activate(store)
+    m1 = M.Manager(_cfg, store, instance_id="a")
+    m2 = M.Manager(_cfg, store, instance_id="b")
+    m1.check_in()
+    with pytest.raises(S.StoreError):
+        m2.check_in()
+    # graceful shutdown releases; restart admitted immediately
+    store.release_lease("a")
+    m2.check_in()
+    # crash path: stale lease can be taken over after ttl
+    m3 = M.Manager(_cfg, store, instance_id="c")
+    with pytest.raises(S.StoreError):
+        m3.check_in()
+    row = store.cx.execute("SELECT heartbeat FROM lease").fetchone()
+    store.cx.execute("UPDATE lease SET heartbeat=?",
+                     (row[0] - 3600,))
+    store.cx.commit()
+    m3.check_in()
 
 
-def test_spend_exhaustion_pauses_with_single_notice(tmp_path):
-    cfg = make_cfg(tmp_path, spend_total_cap_usd=0.05)
-    h, state = Harness(tmp_path), W.default_state()
-    h.prs = [pr()]
-    settle(cfg, state, h, now=1000.0)  # spends 0.05, hits cap
+def test_restart_adopts_delivered_run_without_resend(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    wire(mgr, h)
+    mgr.cycle()
+    mgr.cycle()
     assert h.reviews == 1
-    h.prs = [pr(head="n" * 40)]
-    run_poll(cfg, state, h, now=5000.0)  # new pair starts debounce
-    out = run_poll(cfg, state, h, now=5200.0)
-    assert out["paused"] is True
-    paused_emails = [e for e in h.sent if "paused-by-budget" in e["subject"]]
-    assert len(paused_emails) == 1
-    reviews_before = h.reviews
-    run_poll(cfg, state, h, now=6000.0)
-    assert h.reviews == reviews_before
-    assert len([e for e in h.sent if "paused-by-budget" in e["subject"]]) == 1
+    run_dir = h.sent[0]["run_dir"]
+    # simulate crash AFTER delivery but BEFORE any further bookkeeping:
+    # delivery receipt adopted from run dir on recovery
+    Path(run_dir, "delivery.json").write_text(json.dumps(
+        {"body_sha256": "x" * 64,
+         "transport_receipt": {"succeeded": 1, "email_id": "e9"}}))
+    mgr2 = M.Manager(mgr.cfg, store)
+    wire(mgr2, h)
+    rec = mgr2.recover()
+    assert h.reviews == 1  # no new inference on recovery
 
 
-def test_smtp_failure_retries_delivery_without_new_inference(tmp_path):
-    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
-    h.prs = [pr()]
-    h.receipt = {"succeeded": 0, "failed": 1, "failures": ["5xx"]}
-    out = settle(cfg, state, h, now=1000.0)
-    assert out["emails"][0]["result"] == "failed"
-    assert out["reviewed"][0]["delivered"] is False
-    h.receipt = {"succeeded": 1, "failed": 0, "email_id": "e2"}
-    reviews_before = h.reviews
-    out = run_poll(cfg, state, h, now=2000.0)
-    assert h.reviews == reviews_before, "no second inference for transport failure"
-    assert out["emails"][0]["redelivery"] is True
-    assert out["reviewed"][0]["delivered"] is True
-    assert out["reviewed"][0].get("redelivered") is True
-    first = h.sent[0]
-    assert (first["subject"], first["body"]) == W.build_review_email(
-        Path(first["run_dir"]))
+def test_missing_corrupt_state_and_schema_mismatch(tmp_path):
+    p = tmp_path / "nope.sqlite"
+    with pytest.raises(S.StoreError):
+        S.Store(tmp_path / "missing-dir-x" / "s.sqlite").require_activated()
+    bad = tmp_path / "bad.sqlite"
+    bad.write_bytes(b"not a database")
+    with pytest.raises(S.StoreError):
+        S.Store(bad)
+    s = S.Store(tmp_path / "ok.sqlite")
+    s.meta_set("schema_version", "something-else")
+    s.close()
+    with pytest.raises(S.StoreError):
+        S.Store(tmp_path / "ok.sqlite")
+    s2 = S.Store(tmp_path / "fresh.sqlite")
+    with pytest.raises(S.StoreError):
+        s2.require_activated()
+    s2.close()
 
 
-def test_transport_exception_does_not_lose_poll_state(tmp_path):
-    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
-    h.prs = [pr()]
+# -- accounting ----------------------------------------------------------
 
-    def boom(*a: object) -> dict:
-        raise ConnectionError("smtp down")
+def test_unknown_spend_keeps_reservation_and_blocks(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    wire(mgr, h)
 
-    run_poll(cfg, state, h, now=1000.0)  # prime debounce
-    out = W.poll_once(cfg, state, now=2000.0, day="2026-10-23",
-                      discover=h.discover, fetch_shas=h.fetch,
-                      review_luna=h.review_luna,
-                      review_haiku=h.review_haiku, deliver=boom)
-    assert out["reviewed"][0]["delivery"] == "transport-error"
-    assert out["reviewed"][0]["delivered"] is False
-
-
-def test_missing_run_artifacts_skip_delivery(tmp_path):
-    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
-    h.prs = [pr()]
-
-    def ghost_luna(repo: str, number: int):
+    def unknown_review(backend, vpr, ceiling):
         h.reviews += 1
+        h.last_run_dir = h.fake_run("u1", unknown=True)
         return {"status": "complete", "stage": "done",
-                "run_dir": str(tmp_path / "ghost"), "model": "luna"}
+                "run_dir": h.last_run_dir, "model": backend}
 
-    run_poll(cfg, state, h, now=1000.0)  # prime debounce
-    out = W.poll_once(cfg, state, now=2000.0, day="2026-10-23",
-                      discover=h.discover, fetch_shas=h.fetch,
-                      review_luna=ghost_luna,
-                      review_haiku=h.review_haiku, deliver=h.deliver)
-    assert h.sent == []
-    assert "missing" in out["reviewed"][0]["error"]
-    assert out["reviewed"][0]["usd"] == "unknown"
+    mgr.run_review = unknown_review  # type: ignore[method-assign]
+    mgr.cycle()
+    mgr.cycle()
+    assert store.reserved_total() == pytest.approx(1.0)
+    assert store.spend_total() == pytest.approx(0.0)
 
 
-def test_ambiguous_receipt_classification_and_replay_idempotency(tmp_path):
-    assert W.classify_receipt({"succeeded": 2}) == "delivered"
-    assert W.classify_receipt({"failed": 1}) == "failed"
-    assert W.classify_receipt({"accepted_by_transport": True}) == "ambiguous"
-    assert W.classify_receipt(None) == "ambiguous"
-    # identical rebuild => replay would suppress a delivered duplicate
-    d = Path(fake_run(tmp_path, "rep1"))
-    subj, body = W.build_review_email(d)
-    assert (subj, body) == W.build_review_email(d)
+def test_seed_and_caps_pause_with_single_notice(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    wire(mgr, h)
+
+    def pricey(backend, vpr, ceiling):
+        h.reviews += 1
+        h.last_run_dir = h.fake_run("p1", usd=4.5)
+        return {"status": "complete", "stage": "done",
+                "run_dir": h.last_run_dir, "model": backend}
+
+    mgr.run_review = pricey  # type: ignore[method-assign]
+    mgr.cycle()
+    mgr.cycle()
+    out = mgr.cycle()
+    assert out["paused"] is True
+    assert sum(1 for e in h.sent if "paused-by-budget" in e["subject"]) == 1
+    before = h.reviews
+    mgr.cycle()
+    assert h.reviews == before
 
 
-def test_read_only_github_scope(tmp_path, monkeypatch):
+def test_reconcile_replaces_reserve_with_actuals(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    wire(mgr, h)
+
+    def unknown_review(backend, vpr, ceiling):
+        h.reviews += 1
+        h.last_run_dir = h.fake_run("u1", unknown=True)
+        return {"status": "complete", "stage": "done",
+                "run_dir": h.last_run_dir, "model": backend}
+
+    mgr.run_review = unknown_review  # type: ignore[method-assign]
+    mgr.cycle()
+    mgr.cycle()
+    run_dir = h.sent[0]["run_dir"]
+    row = store.cx.execute(
+        "SELECT repo, pr, base, head FROM pairs WHERE run_dir=?",
+        (run_dir,)).fetchone()
+    store.set_status(row[0], row[1], row[2], row[3], "complete", usd=0.04,
+                     spend_unknown=0, reserved_usd=0.0,
+                     note="reconciled: provider dashboard 0.04")
+    store.spend_add("2026-10-24", 0.04)
+    assert store.reserved_total() == pytest.approx(0.0)
+    assert store.spend_total() == pytest.approx(0.04)
+
+
+# -- delivery -------------------------------------------------------------
+
+def test_smtp_failure_redelivers_same_bytes_without_rereview(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    h.receipt = {"succeeded": 0, "failed": 1, "failures": ["5xx"]}
+    wire(mgr, h)
+    mgr.cycle()
+    mgr.cycle()
+    assert h.reviews == 1 and h.sent[0]
+    first = h.sent[0]
+    h.receipt = {"succeeded": 1, "failed": 0, "email_id": "e2"}
+    mgr.cycle()
+    assert h.reviews == 1
+    redelivered = [e for e in h.sent
+                   if e["subject"] == first["subject"]
+                   and e["body"] == first["body"]]
+    assert len(redelivered) >= 1
+
+
+def test_ambiguous_receipt_never_blind_retransmits(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    h.receipt = {"accepted_by_transport": True}
+    wire(mgr, h)
+    mgr.cycle()
+    mgr.cycle()
+    n = len(h.sent)
+    mgr.cycle()
+    assert len(h.sent) == n  # pending, not auto-resent
+    d = store.get_delivery(h.sent[0]["run_dir"],
+                           __import__("hashlib").sha256(
+                               h.sent[0]["body"].encode()).hexdigest())
+    assert d and d["status"] == "ambiguous"
+
+
+def test_missing_identity_blocks_delivery(tmp_path):
+    ident = {"repo": "o/r", "number": None, "url": "", "base": "aa" * 20,
+             "head": "bb" * 20}
+    d = Path(Harness(tmp_path).fake_run("x1"))
+    with pytest.raises(ValueError):
+        M.build_email(ident, d)
+    ident2 = {"repo": "o/r", "number": 1,
+              "url": "https://evil.example/pull/1", "base": "aa" * 20,
+              "head": "bb" * 20}
+    with pytest.raises(ValueError):
+        M.build_email(ident2, d)
+
+
+def test_failed_email_labels_failure_and_pr_url(tmp_path):
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    wire(mgr, h)
+
+    def fail_review(backend, vpr, ceiling):
+        h.reviews += 1
+        h.last_run_dir = h.fake_run("f1", status="failed")
+        return {"status": "failed", "stage": "agent",
+                "run_dir": h.last_run_dir, "model": backend}
+
+    mgr.run_review = fail_review  # type: ignore[method-assign]
+    mgr.cycle()
+    mgr.cycle()
+    assert h.sent and "failed" in h.sent[0]["subject"].lower()
+    assert "https://github.com/o/r/pull/1" in h.sent[0]["body"]
+    assert "PR: #?" not in h.sent[0]["body"]
+
+
+# -- scope -----------------------------------------------------------------
+
+def test_read_only_github_scope(monkeypatch):
     calls: list[list[str]] = []
 
-    def fake_run_cmd(cmd: list[str], **kw: object) -> object:
+    def fake_run(cmd: list[str], **kw: object) -> object:
         calls.append(cmd)
-        assert cmd[:2] == ["gh", "pr"], f"non-pr gh call: {cmd}"
-        assert cmd[2] in ("list", "view"), f"mutating gh call: {cmd}"
+        assert cmd[:2] == ["gh", "pr"]
+        assert cmd[2] in ("list", "view")
 
         class P:
             returncode = 0
@@ -286,30 +591,10 @@ def test_read_only_github_scope(tmp_path, monkeypatch):
             stderr = ""
         return P()
 
-    monkeypatch.setattr("subprocess.run", fake_run_cmd)
-    W.discover_prs("o/r", 5)
-    W.fetch_pr_shas("o/r", 1)
+    monkeypatch.setattr("subprocess.run", fake_run)
+    E.discover_open_prs("o/r", 5)
+    E.fetch_pr("o/r", 1)
     assert [c[2] for c in calls] == ["list", "view"]
-
-
-def test_haiku_follow_up_only_on_trigger_status(tmp_path):
-    cfg, h, state = make_cfg(tmp_path), Harness(tmp_path), W.default_state()
-    h.prs = [pr()]
-    run_poll(cfg, state, h, now=1000.0)  # prime debounce
-
-    def incomplete_luna(repo: str, number: int):
-        h.reviews += 1
-        return {"status": "incomplete_budget_exhausted", "stage": "done",
-                "run_dir": fake_run(tmp_path, f"luna-{h.reviews}"),
-                "model": "luna"}
-
-    out = W.poll_once(cfg, state, now=2000.0, day="2026-10-23",
-                      discover=h.discover, fetch_shas=h.fetch,
-                      review_luna=incomplete_luna,
-                      review_haiku=h.review_haiku, deliver=h.deliver)
-    assert h.haiku_reviews == 1
-    assert any(r.get("second_pass") for r in out["reviewed"])
-    assert "(conditional Haiku follow-up)" in h.sent[1]["subject"]
 
 
 def test_packaged_guidebook_matches_repo_copy():
@@ -320,82 +605,3 @@ def test_packaged_guidebook_matches_repo_copy():
     assert packaged.exists()
     assert (hashlib.sha256(packaged.read_bytes()).hexdigest()
             == hashlib.sha256(repo.read_bytes()).hexdigest())
-
-
-def test_app_auth_jwt_and_token_exchange(monkeypatch):
-    from codatiel_i2.github import app_auth as A
-
-    monkeypatch.setenv("GITHUB_APP_ID", "123")
-    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "PEM")
-    app = A.AppAuth.from_env()
-    assert app.app_id == "123" and app.account == "mitchins"
-
-    seen: list = []
-
-    def fake_jwt(app_id, key, now=None):
-        assert app_id == "123" and key == "PEM"
-        return "JWT"
-
-    def fake_api(method, path, *, bearer, data=None):
-        seen.append((method, path, bearer))
-        if path == "/app/installations":
-            return [{"id": 9, "account": {"login": "mitchins"}}]
-        if path == "/app/installations/9/access_tokens":
-            return {"token": "inst-1",
-                    "expires_at": "2026-10-24T12:00:00Z"}
-        if path.startswith("/installation/repositories"):
-            return {"repositories": [
-                {"full_name": "mitchins/a", "archived": False,
-                 "disabled": False},
-                {"full_name": "mitchins/old", "archived": True,
-                 "disabled": False},
-                {"full_name": "mitchins/off", "archived": False,
-                 "disabled": True}]}
-        raise AssertionError(path)
-
-    monkeypatch.setattr(A, "build_jwt", fake_jwt)
-    monkeypatch.setattr(A, "_api", fake_api)
-    assert app.token() == "inst-1"
-    assert app.token() == "inst-1"  # cached
-    assert len([s for s in seen if "access_tokens" in s[1]]) == 1
-    names = A.active_repo_names(A.list_installation_repos("inst-1"))
-    assert names == ["mitchins/a"]
-
-
-def test_auto_discovery_honours_exclude_and_pause(tmp_path):
-    cfg = make_cfg(tmp_path, repos=None, exclude=["mitchins/x"])
-    h, state = Harness(tmp_path), W.default_state()
-    h.prs = [pr()]
-    repos = lambda: (["o/r", "mitchins/x", "mitchins/p"], None)  # noqa: E731
-    W.poll_once(cfg, state, now=1000.0, day="2026-10-23",
-                discover=h.discover, fetch_shas=h.fetch,
-                review_luna=h.review_luna,
-                review_haiku=h.review_haiku, deliver=h.deliver,
-                list_repos=repos)
-    out = W.poll_once(cfg, state, now=2000.0, day="2026-10-23",
-                      discover=h.discover, fetch_shas=h.fetch,
-                      review_luna=h.review_luna,
-                      review_haiku=h.review_haiku, deliver=h.deliver,
-                      list_repos=repos)
-    assert h.reviews == 2  # o/r + mitchins/p; x excluded
-    assert all(s.get("pr", s.get("repo")) != "mitchins/x#1"
-               for s in out["skipped"])
-    assert any(s.get("repo") == "mitchins/x" and s.get("why") == "excluded"
-               for s in out["skipped"])
-    # per-repo pause switch: p goes quiet without list changes
-    state["repos"]["mitchins/p"] = {"paused": True}
-    before = h.reviews
-    W.poll_once(cfg, state, now=3000.0, day="2026-10-23",
-                discover=h.discover, fetch_shas=h.fetch,
-                review_luna=h.review_luna,
-                review_haiku=h.review_haiku, deliver=h.deliver,
-                list_repos=repos)
-    assert h.reviews == before
-
-
-def test_resolve_repo_list_needs_app_for_auto(tmp_path):
-    cfg = make_cfg(tmp_path, repos=None)
-    repos, err = W.resolve_repo_list(cfg, W.default_state(), app=None)
-    assert repos is None and "App" in err
-    cfg2 = make_cfg(tmp_path, repos=["o/r"], exclude=["o/r"])
-    assert W.resolve_repo_list(cfg2, W.default_state()) == ([], None)

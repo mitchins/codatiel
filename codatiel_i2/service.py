@@ -547,9 +547,12 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     # Provider termination reasons (end_turn, tool_use, max_tokens, etc.)
     # are recorded as local metadata from the adapter, not inferred from usage.
     termination_by_response = _collect_provider_termination(model)
+    pr_url = (f"https://github.com/{ws.repo}/pull/{pr_number}"
+              if pr_number else None)
     runs_mod.write_run(
         run_dir=run_dir, scan_key=scan_key, run_id=run_id, repo=ws.repo,
         base_sha=base_sha, head_sha=head_sha, config=config,
+        pr_number=pr_number, pr_url=pr_url,
         workspace=ws.to_dict(), changes=changes,
         classification=classification, coverage=coverage,
         candidates=candidates, evidence=evidence,

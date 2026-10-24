@@ -69,9 +69,10 @@ def build_parser() -> argparse.ArgumentParser:
                          help="smtp2go (ops) or fixture (tests/gates)")
 
     watcher = sub.add_parser("watcher", help="v0.1.0 continuous shadow-review watcher.")
-    watcher.add_argument("op", choices=["run-once", "daemon", "status",
-                                        "backfill", "replay-delivery",
-                                        "pause-repo", "resume-repo"],
+    watcher.add_argument("op", choices=["activate", "run-once", "daemon",
+                                        "status", "backfill",
+                                        "replay-delivery", "pause-repo",
+                                        "resume-repo", "reconcile"],
                          help="run-once: single poll; daemon: loop until "
                               "SIGTERM; status: state summary; backfill: "
                               "run-once with debounce=0; replay-delivery: "
@@ -138,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def watcher_config_from_env(args: Any) -> Any:
     import os
-    from codatiel_i2 import watcher as watcher_mod
+    from codatiel_i2 import watcher_manager as mgr_mod
 
     def pick(flag: str, env: str, default: str = "") -> str:
         return (flag or os.environ.get(env, "") or default).strip()
@@ -155,62 +156,101 @@ def watcher_config_from_env(args: Any) -> Any:
     runs_root = pick(args.runs_root, "CODATIEL_WATCH_RUNS", "runs")
     work_root = pick(args.work_root, "CODATIEL_WATCH_WORK",
                      ".codatiel-i2-work")
-    debounce = int(args.debounce) if args.debounce is not None and args.debounce >= 0 \
-        else int(os.environ.get("CODATIEL_WATCH_DEBOUNCE", "120"))
     interval = int(args.interval) if args.interval is not None and args.interval >= 0 \
         else int(os.environ.get("CODATIEL_WATCH_INTERVAL", "300"))
     cap = float(args.spend_cap) if args.spend_cap is not None and args.spend_cap >= 0 \
         else float(os.environ.get("CODATIEL_WATCH_SPEND_CAP", "5.0"))
     daily = float(os.environ.get("CODATIEL_WATCH_DAILY_CAP", "2.0"))
-    seed = float(os.environ.get("CODATIEL_WATCH_SEED_SPENT", "0.389"))
-    cfg = watcher_mod.WatcherConfig(
-        repos=repos, exclude=exclude, poll_interval_s=interval,
-        debounce_s=debounce, state_path=Path(state),
+    seed = float(os.environ.get("CODATIEL_WATCH_SEED_SPENT", "0.4226"))
+    cfg = mgr_mod.ManagerConfig(
+        repos=repos, exclude=exclude,
         runs_root=Path(runs_root), work_root=Path(work_root),
         recipients=to, sender=sender, spend_total_cap_usd=cap,
-        spend_seed_usd=seed, spend_daily_cap_usd=daily)
-    return cfg
+        spend_seed_usd=seed, spend_daily_cap_usd=daily,
+        per_poll_cap=int(os.environ.get("CODATIEL_WATCH_PER_POLL_CAP",
+                                        "3")))
+    return cfg, state, interval
 
 
 def cmd_watcher(args: Any) -> dict:
-    import datetime as _datetime
     import os
-    from codatiel_i2 import providers as providers_mod
-    from codatiel_i2 import service as service_mod
+    import time as _time
     from codatiel_i2 import watcher as watcher_mod
+    from codatiel_i2 import watcher_manager as mgr_mod
+    from codatiel_i2 import watcher_store as store_mod
 
     op = args.op
+    cfg, state_path, interval = watcher_config_from_env(args)
+    if op == "activate":
+        store = store_mod.Store(
+            Path(state_path).with_suffix(".sqlite"))
+        try:
+            at = store.activate()
+        finally:
+            store.close()
+        return {"status": "ok", "activated_at": at}
     if op == "status":
-        cfg = watcher_config_from_env(args)
-        state = watcher_mod.load_state(cfg.state_path)
+        try:
+            store = store_mod.Store(
+                Path(state_path).with_suffix(".sqlite"))
+        except store_mod.StoreError as exc:
+            return {"status": "failed", "stage": "store",
+                    "error": str(exc)}
         try:
             auth_mode, _ = watcher_mod.resolve_github_auth()
         except RuntimeError as exc:
             auth_mode = f"missing: {exc}"
-        return {"status": "ok", "config_version":
-                watcher_mod.CONFIG_VERSION,
+        try:
+            activated = store.require_activated()
+        except store_mod.StoreError as exc:
+            activated = f"missing: {exc}"
+        return {"status": "ok",
                 "auth": auth_mode,
+                "activated_at": activated,
                 "repos": cfg.repos, "exclude": cfg.exclude,
                 "recipients": cfg.recipients,
-                "spend_total_usd": watcher_mod.spend_total(state),
+                "spend_total_usd": store.spend_total(),
+                "reserved_usd": store.reserved_total(),
                 "spend_cap_usd": cfg.spend_total_cap_usd,
-                "prs_tracked": len(state.get("prs", {})),
-                "paused": state.get("spend", {}).get("paused", False)}
+                "queued": store.count_status("queued"),
+                "running": store.count_status("running"),
+                "delivered": store.count_status("delivered")}
     if op in ("pause-repo", "resume-repo"):
-        cfg = watcher_config_from_env(args)
         if not args.repos:
             return {"status": "failed", "stage": "config",
                     "error": "pass --repos owner/name,..."}
-        state = watcher_mod.load_state(cfg.state_path)
-        for repo in [r.strip() for r in args.repos.split(",") if r.strip()]:
-            entry = state.setdefault("repos", {}).setdefault(repo, {})
-            entry["paused"] = (op == "pause-repo")
-        watcher_mod.save_state(cfg.state_path, state)
+        try:
+            from codatiel_i2 import watcher_store as _sm
+            _st = _sm.Store(Path(state_path).with_suffix(".sqlite"))
+        except Exception as exc:
+            return {"status": "failed", "stage": "store",
+                    "error": str(exc)}
+        try:
+            _st.cx.execute("CREATE TABLE IF NOT EXISTS repos_paused("
+                           "repo TEXT PRIMARY KEY)")
+            _st.cx.commit()
+            for repo in [r.strip() for r in args.repos.split(",")
+                         if r.strip()]:
+                if op == "pause-repo":
+                    _st.cx.execute("INSERT OR IGNORE INTO repos_paused(repo)"
+                                   " VALUES(?)", (repo,))
+                else:
+                    _st.cx.execute("DELETE FROM repos_paused WHERE repo=?",
+                                   (repo,))
+            _st.cx.commit()
+        except Exception as exc:
+            return {"status": "failed", "stage": "store",
+                    "error": str(exc)}
+        finally:
+            _st.close()
         return {"status": "paused" if op == "pause-repo" else "resumed",
                 "repos": args.repos}
+    if op == "reconcile":
+        return cmd_watcher_reconcile(args)
     if op == "replay-delivery":
         return cmd_watcher_replay(args)
-    cfg = watcher_config_from_env(args)
+    if op == "backfill":
+        return cmd_watcher_backfill(args)
     try:
         auth_mode, app = watcher_mod.resolve_github_auth()
     except RuntimeError as exc:
@@ -222,117 +262,94 @@ def cmd_watcher(args: Any) -> dict:
     if not cfg.recipients or not cfg.sender:
         return {"status": "failed", "stage": "config",
                 "error": "recipients and sender required (--to/--sender or env)"}
-    if op == "backfill":
-        cfg.debounce_s = 0
-    backends: dict[str, Any] = {}
-    for name in ("luna", "haiku"):
-        try:
-            resolved = providers_mod.resolve_backend(name)
-            model, settings = providers_mod.build_model(name)
-        except Exception as exc:
-            return {"status": "failed", "stage": "model",
-                    "error": f"cannot build backend {name!r}: "
-                             f"{type(exc).__name__}: {exc}"}
-        backends[name] = (resolved, model, settings)
+    try:
+        store = store_mod.Store(Path(state_path).with_suffix(".sqlite"))
+        store.require_activated()
+    except store_mod.StoreError as exc:
+        return {"status": "failed", "stage": "store", "error": str(exc)}
 
-    def review_with(name: str, repo: str, number: int) -> dict:
-        from codatiel_i2 import watcher as watcher_mod
-        resolved, model, settings = backends[name]
-        state = watcher_mod.load_state(cfg.state_path)
-        day = _datetime.date.today().isoformat()
-        remaining = min(cfg.spend_total_cap_usd - watcher_mod.spend_total(state),
-                        cfg.spend_daily_cap_usd - watcher_mod.spend_today(state, day))
-        ceiling = min(float(resolved.get("max_usd_per_review") or 5.0),
-                      max(remaining, 0.0))
-        if name == "luna":
-            from agents.model_settings import ModelSettings
-            settings = ModelSettings(store=False, max_tokens=3000)
-        try:
-            return service_mod.review_pr(
-                repo, number, model=model,
-                model_name=f"{name}:{resolved['model']}",
-                runs_root=cfg.runs_root / name / "A",
-                work_root=cfg.work_root / name / "A",
-                max_turns=12, model_settings=settings,
-                rate=resolved["rate_usd_per_mtok"],
-                rate_status=resolved["rate_status"],
-                max_usd_per_review=ceiling,
-                variant="baseline", playbook_name=None,
-                playbook_text=None,
-                inventory_strategy="file-list-0.1")
-        except Exception as exc:
-            return {"status": "failed", "stage": "agent",
-                    "error": f"{type(exc).__name__}: {exc}"}
-
-    def deliver(run_dir: Any, subject: str, body: str) -> dict:
+    def sender(run_dir: Any, subject: str, body: str) -> dict:
         if run_dir is None:
             from codatiel_i2.delivery import smtp2go as smtp_mod
             return smtp_mod.send_email(cfg.recipients, cfg.sender,
                                        subject, body)
+        from codatiel_i2 import service as service_mod
         return service_mod.deliver_shadow(
             run_dir, to=cfg.recipients, sender=cfg.sender,
-            subject=subject, text_body=body)
+            subject=subject, text_body=body)["transport_receipt"]
 
+    mgr = mgr_mod.Manager(cfg, store, sender=sender)
+    if auth_mode == "app":
+        try:
+            os.environ["GH_TOKEN"] = app.token()
+        except Exception as exc:
+            return {"status": "failed", "stage": "auth", "error": str(exc)}
+    if (store.spend_get("seed_usd") or 0.0) == 0.0:
+        store.spend_set("seed_usd", cfg.spend_seed_usd)
+    recovery = mgr.recover()
     import signal as _signal
     stop = {"flag": False}
 
     def _handle(signum: int, frame: Any) -> None:
+        mgr.stop()
         stop["flag"] = True
 
     if op == "daemon":
         _signal.signal(_signal.SIGTERM, _handle)
         _signal.signal(_signal.SIGINT, _handle)
     while True:
-        today = _datetime.date.today().isoformat()
+        try:
+            mgr.check_in()
+        except store_mod.StoreError as exc:
+            return {"status": "failed", "stage": "lease",
+                    "error": str(exc), "recovery": recovery}
         if auth_mode == "app":
             try:
                 os.environ["GH_TOKEN"] = app.token()
             except Exception as exc:
-                summary = {"status": "ok", "auth_error": str(exc),
-                           "heartbeat": time.time()}
-                state = watcher_mod.load_state(cfg.state_path)
-                watcher_mod.save_state(cfg.state_path, state)
                 if op != "daemon":
-                    return summary
-                time.sleep(min(cfg.poll_interval_s, 300))
+                    return {"status": "failed", "stage": "auth",
+                            "error": str(exc)}
+                _time.sleep(min(interval, 300))
                 continue
-        state = watcher_mod.load_state(cfg.state_path)
-        if not state.get("spend", {}).get("seed_usd"):
-            state["spend"]["seed_usd"] = cfg.spend_seed_usd
-        summary = watcher_mod.poll_once(
-            cfg, state, now=time.time(), day=today,
-            review_luna=lambda repo, number: review_with("luna", repo, number),
-            review_haiku=lambda repo, number: review_with("haiku", repo, number),
-            deliver=deliver, app=app)
-        summary["heartbeat"] = time.time()
-        watcher_mod.save_state(cfg.state_path, state)
-        Path(str(cfg.state_path) + ".heartbeat").write_text(
-            json.dumps({"ts": summary["heartbeat"],
-                        "spend_total_usd": watcher_mod.spend_total(state),
-                        "summary": {k: v for k, v in summary.items()
-                                    if k != "reviewed"}}),
+        try:
+            summary = mgr.cycle()
+        except store_mod.StoreError as exc:
+            return {"status": "failed", "stage": "store",
+                    "error": str(exc), "recovery": recovery}
+        summary["recovery"] = recovery
+        recovery = {"adopted": 0, "requeued": 0, "delivered_adopted": 0}
+        Path(str(state_path) + ".heartbeat").write_text(
+            json.dumps({"ts": _time.time(),
+                        "spend_total_usd": store.spend_total(),
+                        "summary": summary}, ensure_ascii=False),
             encoding="utf-8")
         if op != "daemon":
             summary["status"] = "ok"
+            store.close()
             return summary
         if stop["flag"]:
             summary["status"] = "ok"
             summary["stopped"] = True
+            store.close()
             return summary
-        time.sleep(cfg.poll_interval_s)
+        _time.sleep(interval)
 
 
 def cmd_watcher_replay(args: Any) -> dict:
     """Resend one run's exact digest bytes without new inference.
 
-    Same run_dir always rebuilds the same subject/body; if the stored
-    delivery record already shows that body as delivered, the resend is
-    suppressed as a duplicate. Prior attempts are preserved.
+    Store-backed: the deliveries table is authoritative. An already
+    delivered (run_dir, body_sha) is suppressed as a duplicate; anything
+    else resends the identical bytes via the manager email path.
     """
+    import hashlib as _hashlib
     import os
-    from codatiel_i2 import service as service_mod
     from codatiel_i2 import watcher as watcher_mod
+    from codatiel_i2 import watcher_manager as mgr_mod
+    from codatiel_i2 import watcher_store as store_mod
 
+    cfg, state_path, _interval = watcher_config_from_env(args)
     run_dir = Path(args.run_dir or "")
     if not run_dir.is_dir():
         return {"status": "failed", "stage": "delivery",
@@ -344,36 +361,173 @@ def cmd_watcher_replay(args: Any) -> dict:
     if not to or not sender:
         return {"status": "failed", "stage": "delivery",
                 "error": "recipients and sender required"}
-    subj, body = watcher_mod.build_review_email(run_dir)
-    prior: dict = {}
-    delivery_path = run_dir / "delivery.json"
-    if delivery_path.exists():
-        try:
-            prior = json.loads(delivery_path.read_text(encoding="utf-8"))
-        except Exception:
-            prior = {}
-    if (prior.get("body_sha256") ==
-            __import__("hashlib").sha256(body.encode()).hexdigest()
-            and watcher_mod.classify_receipt(
-                prior.get("transport_receipt")) == "delivered"):
+    try:
+        run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        metrics = json.loads((run_dir / "metrics.json").read_text(
+            encoding="utf-8"))
+    except Exception as exc:
+        return {"status": "failed", "stage": "delivery",
+                "error": f"unreadable run record: {exc}"}
+    identity = {"repo": run.get("repo"), "number": run.get("pr_number"),
+                "url": run.get("pr_url"), "base": run.get("base_sha"),
+                "head": run.get("head_sha")}
+    try:
+        subj, body = mgr_mod.build_email(identity, run_dir)
+    except ValueError as exc:
+        return {"status": "failed", "stage": "delivery",
+                "error": f"identity invalid, delivery blocked: {exc}"}
+    sha = _hashlib.sha256(body.encode()).hexdigest()
+    try:
+        store = store_mod.Store(Path(state_path).with_suffix(".sqlite"))
+    except store_mod.StoreError as exc:
+        return {"status": "failed", "stage": "store", "error": str(exc)}
+    existing = store.get_delivery(str(run_dir), sha)
+    if existing and existing["status"] == "delivered":
+        store.close()
         return {"status": "duplicate-suppressed", "subject": subj,
-                "body_sha256": prior["body_sha256"],
-                "email_id": (prior.get("transport_receipt") or {}).get("email_id")}
-    record = service_mod.deliver_shadow(run_dir, to=to, sender=sender,
-                                        subject=subj, text_body=body)
-    attempts = list(prior.get("attempts") or [])
-    if prior.get("transport_receipt") is not None:
-        attempts.append(prior["transport_receipt"])
-    if attempts:
-        record["attempts"] = attempts
-        from codatiel_i2.common.jsonio import write_json
-        write_json(run_dir / "delivery.json", record)
-    return {"status": record.get("transport_receipt", {}).get("succeeded")
-            and "delivered" or "failed",
-            "subject": subj, "body_sha256": record.get("body_sha256"),
-            "receipt": record.get("transport_receipt")}
+                "body_sha256": sha,
+                "email_id": (existing.get("receipt") or {}).get("email_id")}
+    from codatiel_i2 import service as service_mod
+
+    def _send(t: list[str], s_: str, b: str) -> dict:
+        return service_mod.deliver_shadow(
+            str(run_dir), to=t, sender=sender, subject=s_,
+            text_body=b)["transport_receipt"]
+
+    try:
+        receipt = _send(to, subj, body)
+    except Exception as exc:
+        store.record_delivery(str(run_dir), sha, subj, "failed",
+                              {"error": f"{type(exc).__name__}: {exc}"})
+        store.close()
+        return {"status": "failed", "stage": "delivery",
+                "error": f"{type(exc).__name__}: {exc}"}
+    result = watcher_mod.classify_receipt(receipt)
+    store.record_delivery(str(run_dir), sha, subj, result, receipt)
+    store.close()
+    return {"status": "delivered" if result == "delivered" else "failed",
+            "subject": subj, "body_sha256": sha, "receipt": receipt}
 
 
+def cmd_watcher_reconcile(args: Any) -> dict:
+    """Replace an unknown-usage reservation with provider-confirmed actuals.
+
+    Requires the run dir and the actual billed USD (from the provider
+    dashboard) plus an evidence note. Releases the $1.00 conservative
+    reservation and debits actuals instead.
+    """
+    from codatiel_i2 import watcher_store as store_mod
+
+    cfg, state_path, _interval = watcher_config_from_env(args)
+    run_dir = (args.run_dir or "").strip()
+    if not run_dir:
+        return {"status": "failed", "stage": "config",
+                "error": "pass --run-dir"}
+    if args.actual_usd is None or not (args.note or "").strip():
+        return {"status": "failed", "stage": "config",
+                "error": "pass --actual-usd and --note (evidence required)"}
+    try:
+        store = store_mod.Store(Path(state_path).with_suffix(".sqlite"))
+    except store_mod.StoreError as exc:
+        return {"status": "failed", "stage": "store", "error": str(exc)}
+    row = store.cx.execute(
+        "SELECT repo, pr, base, head, usd, spend_unknown, reserved_usd "
+        "FROM pairs WHERE run_dir=?", (run_dir,)).fetchone()
+    if not row:
+        store.close()
+        return {"status": "failed", "stage": "config",
+                "error": "no pair recorded for that run dir"}
+    repo, pr, base, head, _usd, unknown, reserved = row
+    if not unknown:
+        store.close()
+        return {"status": "failed", "stage": "config",
+                "error": "pair accounting is already known; nothing to do"}
+    import datetime as _dt
+    day = _dt.date.today().isoformat()
+    store.set_status(repo, pr, base, head, store.get_pair(
+        repo, pr, base, head)["status"], usd=float(args.actual_usd),
+                     spend_unknown=0, reserved_usd=0.0,
+                     note=f"reconciled: {args.note.strip()}")
+    store.spend_add(day, float(args.actual_usd))
+    store.close()
+    return {"status": "ok", "run_dir": run_dir,
+            "actual_usd": float(args.actual_usd)}
+
+
+def cmd_watcher_backfill(args: Any) -> dict:
+    """Directed manual backfill of ONE repo+PR. Outside the polling path.
+
+    Validates eligibility (open, not draft, valid SHAs) but bypasses the
+    activation createdAt gate: the operator explicitly names the pair.
+    Still subject to budget and delivery rules. One review only.
+    """
+    import time as _time
+    from codatiel_i2 import watcher_eligibility as _E
+    from codatiel_i2 import watcher_manager as _M
+    from codatiel_i2 import watcher_store as _S
+
+    cfg, state_path, _interval = watcher_config_from_env(args)
+    repos = [r.strip() for r in (args.repos or "").split(",") if r.strip()]
+    if len(repos) != 1 or not args.pr:
+        return {"status": "failed", "stage": "config",
+                "error": "directed backfill needs exactly --repos R and --pr N"}
+    try:
+        number = int(args.pr)
+    except ValueError:
+        return {"status": "failed", "stage": "config",
+                "error": f"invalid --pr {args.pr!r}"}
+    try:
+        store = _S.Store(Path(state_path).with_suffix(".sqlite"))
+        store.require_activated()
+    except _S.StoreError as exc:
+        return {"status": "failed", "stage": "store", "error": str(exc)}
+    if not cfg.recipients or not cfg.sender:
+        store.close()
+        return {"status": "failed", "stage": "config",
+                "error": "recipients and sender required"}
+    from codatiel_i2 import watcher as _W
+    try:
+        _mode, _app = _W.resolve_github_auth()
+        if _mode == "app":
+            import os as _os
+            _os.environ["GH_TOKEN"] = _app.token()
+    except RuntimeError as exc:
+        store.close()
+        return {"status": "failed", "stage": "auth", "error": str(exc)}
+
+    def _sender(run_dir: Any, subject: str, body: str) -> dict:
+        from codatiel_i2 import service as _S2
+        return _S2.deliver_shadow(
+            run_dir, to=cfg.recipients, sender=cfg.sender,
+            subject=subject, text_body=body)["transport_receipt"]
+
+    mgr = _M.Manager(cfg, store, sender=_sender)
+    try:
+        mgr.check_in()
+    except _S.StoreError as exc:
+        store.close()
+        return {"status": "failed", "stage": "lease", "error": str(exc)}
+    raw, err = _E.fetch_pr(repos[0], number)
+    if raw is None:
+        store.close()
+        return {"status": "failed", "stage": "fetch", "error": err}
+    vpr, reason = _E.validate_pr_metadata(repos[0], raw)
+    if vpr is None:
+        store.close()
+        return {"status": "failed", "stage": "validate",
+                "error": reason}
+    if vpr.is_draft or vpr.merged_at or vpr.state != "OPEN":
+        store.close()
+        return {"status": "failed", "stage": "validate",
+                "error": "not open/ready (manual backfill still requires "
+                         "open, ready, unmerged)"}
+    store.upsert_pair(vpr.repo, vpr.number, vpr.base_sha, vpr.head_sha,
+                      pr_url=vpr.url, pr_created_at=vpr.created_at)
+    store.set_status(vpr.repo, vpr.number, vpr.base_sha, vpr.head_sha,
+                     "eligible", note="manual directed backfill")
+    rec = mgr.dispatch(vpr, mgr.day())
+    store.close()
+    return {"status": "ok", "backfill": rec}
 def cmd_scan(args) -> dict:
     started = time.monotonic()
     runs_root = Path(args.runs_root)
