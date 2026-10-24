@@ -145,6 +145,12 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
+_SQLITE_SUFFIX = ".sqlite"
+
+
+_DEFAULT_WORK_ROOT = ".codatiel-i2-work"
+
+
 def watcher_config_from_env(args: Any) -> Any:
     import os
     from codatiel_i2 import watcher_manager as mgr_mod
@@ -163,7 +169,7 @@ def watcher_config_from_env(args: Any) -> Any:
     state = pick(args.state, "CODATIEL_WATCH_STATE", "watcher_state.json")
     runs_root = pick(args.runs_root, "CODATIEL_WATCH_RUNS", "runs")
     work_root = pick(args.work_root, "CODATIEL_WATCH_WORK",
-                     ".codatiel-i2-work")
+                     _DEFAULT_WORK_ROOT)
     interval = int(args.interval) if args.interval is not None and args.interval >= 0 \
         else int(os.environ.get("CODATIEL_WATCH_INTERVAL", "300"))
     cap = float(args.spend_cap) if args.spend_cap is not None and args.spend_cap >= 0 \
@@ -192,7 +198,7 @@ def cmd_watcher(args: Any) -> dict:
     if op == "activate":
         try:
             store = store_mod.Store(
-                Path(state_path).with_suffix(".sqlite"))
+                Path(state_path).with_suffix(_SQLITE_SUFFIX))
         except store_mod.StoreError as exc:
             return {"status": "failed", "stage": "store",
                     "error": str(exc)}
@@ -207,7 +213,7 @@ def cmd_watcher(args: Any) -> dict:
     if op == "status":
         try:
             store = store_mod.Store(
-                Path(state_path).with_suffix(".sqlite"))
+                Path(state_path).with_suffix(_SQLITE_SUFFIX))
         except store_mod.StoreError as exc:
             return {"status": "failed", "stage": "store",
                     "error": str(exc)}
@@ -236,7 +242,7 @@ def cmd_watcher(args: Any) -> dict:
                     "error": "pass --repos owner/name,..."}
         try:
             from codatiel_i2 import watcher_store as _sm
-            _st = _sm.Store(Path(state_path).with_suffix(".sqlite"))
+            _st = _sm.Store(Path(state_path).with_suffix(_SQLITE_SUFFIX))
         except Exception as exc:
             return {"status": "failed", "stage": "store",
                     "error": str(exc)}
@@ -278,9 +284,27 @@ def cmd_watcher(args: Any) -> dict:
         return {"status": "failed", "stage": "config",
                 "error": "recipients and sender required (--to/--sender or env)"}
     try:
-        store = store_mod.Store(Path(state_path).with_suffix(".sqlite"))
+        store = store_mod.Store(Path(state_path).with_suffix(_SQLITE_SUFFIX))
         store.require_activated()
     except store_mod.StoreError as exc:
+        if op == "daemon":
+            # Awaiting first activation is a normal pre-operational state,
+            # not a crash: hold the loop (and the lease-free heartbeat)
+            # until an operator activates.
+            import signal as _signal
+
+            held = {"flag": False}
+
+            def _hold(signum: int, frame: Any) -> None:
+                held["flag"] = True
+
+            _signal.signal(_signal.SIGTERM, _hold)
+            _signal.signal(_signal.SIGINT, _hold)
+            store.close()
+            while not held["flag"]:
+                _time.sleep(30)
+            return {"status": "ok", "stopped": True,
+                    "note": "stopped before activation"}
         return {"status": "failed", "stage": "store", "error": str(exc)}
 
     def sender(run_dir: Any, subject: str, body: str) -> dict:
@@ -312,7 +336,7 @@ def cmd_watcher(args: Any) -> dict:
         lister = _app_repos
     else:
         lister = None
-    if (store.spend_get("seed_usd") or 0.0) == 0.0:
+    if not (store.spend_get("seed_usd") or 0.0) > 0.0:
         store.spend_set("seed_usd", cfg.spend_seed_usd)
     mgr = mgr_mod.Manager(cfg, store, sender=sender, list_repos=lister)
     try:
@@ -420,7 +444,7 @@ def cmd_watcher_replay(args: Any) -> dict:
                 "error": f"identity invalid, delivery blocked: {exc}"}
     sha = _hashlib.sha256(body.encode()).hexdigest()
     try:
-        store = store_mod.Store(Path(state_path).with_suffix(".sqlite"))
+        store = store_mod.Store(Path(state_path).with_suffix(_SQLITE_SUFFIX))
     except store_mod.StoreError as exc:
         return {"status": "failed", "stage": "store", "error": str(exc)}
     existing = store.get_delivery(str(run_dir), sha)
@@ -488,7 +512,7 @@ def cmd_watcher_reconcile(args: Any) -> dict:
         return {"status": "failed", "stage": "config",
                 "error": "pass --actual-usd and --note (evidence required)"}
     try:
-        store = store_mod.Store(Path(state_path).with_suffix(".sqlite"))
+        store = store_mod.Store(Path(state_path).with_suffix(_SQLITE_SUFFIX))
     except store_mod.StoreError as exc:
         return {"status": "failed", "stage": "store", "error": str(exc)}
     row = store.cx.execute(
@@ -538,7 +562,7 @@ def cmd_watcher_backfill(args: Any) -> dict:
         return {"status": "failed", "stage": "config",
                 "error": f"invalid --pr {args.pr!r}"}
     try:
-        store = _S.Store(Path(state_path).with_suffix(".sqlite"))
+        store = _S.Store(Path(state_path).with_suffix(_SQLITE_SUFFIX))
         store.require_activated()
     except _S.StoreError as exc:
         return {"status": "failed", "stage": "store", "error": str(exc)}

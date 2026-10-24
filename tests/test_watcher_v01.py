@@ -140,8 +140,10 @@ def test_51_historical_prs_yield_nothing(tmp_path):
     h.prs = {"o/r": old_prs()}
     wire(mgr, h)
     out = mgr.cycle()
-    assert h.reviews == 0 and h.sent == []
-    assert out["discovered"] == 51 and out["admitted"] == 0
+    assert h.reviews == 0
+    assert h.sent == []
+    assert out["discovered"] == 51
+    assert out["admitted"] == 0
     assert store.count_status("suppressed") == 51
 
 
@@ -160,7 +162,8 @@ def test_repeated_polls_and_restart_stay_quiet(tmp_path):
     wire(mgr2, h)
     mgr2.check_in()  # admitted: no stale-lease blackout after clean stop
     mgr2.cycle()
-    assert h.reviews == 0 and h.sent == []
+    assert h.reviews == 0
+    assert h.sent == []
 
 
 def test_historical_new_commits_still_excluded(tmp_path):
@@ -172,7 +175,8 @@ def test_historical_new_commits_still_excluded(tmp_path):
     mgr.cycle()
     h.prs = {"o/r": [raw_pr(head="cc" * 20, created=OLD)]}
     out = mgr.cycle()
-    assert h.reviews == 0 and h.sent == []
+    assert h.reviews == 0
+    assert h.sent == []
     assert out["admitted"] == 0
 
 
@@ -188,7 +192,8 @@ def test_historical_close_reopen_still_excluded(tmp_path):
     mgr.cycle()
     h.prs = {"o/r": [raw_pr(created=OLD)]}
     mgr.cycle()
-    assert h.reviews == 0 and h.sent == []
+    assert h.reviews == 0
+    assert h.sent == []
 
 
 def test_boundary_created_at_equal_is_excluded(tmp_path):
@@ -209,7 +214,8 @@ def test_new_post_activation_pr_gets_exactly_one_review(tmp_path):
     wire(mgr, h)
     mgr.cycle()
     mgr.cycle()
-    assert h.reviews == 1 and len(h.sent) == 1
+    assert h.reviews == 1
+    assert len(h.sent) == 1
     assert "o/r#1" in h.sent[0]["subject"]
     assert "https://github.com/o/r/pull/1" in h.sent[0]["body"]
 
@@ -238,7 +244,8 @@ def test_new_head_sha_gets_exactly_one_more_review(tmp_path):
     h.prs = {"o/r": [raw_pr(created=NEW, head="cc" * 20)]}
     mgr.cycle()
     mgr.cycle()
-    assert h.reviews == 2 and len(h.sent) == 2
+    assert h.reviews == 2
+    assert len(h.sent) == 2
 
 
 # -- lifecycle revalidation --------------------------------------------
@@ -257,9 +264,11 @@ def test_queued_pr_closing_before_dispatch_is_suppressed(tmp_path):
                             state="CLOSED",
                             merged="2026-10-25T00:00:00Z")]}
     out = mgr.cycle()  # closed PR2 retired at discovery, 0 inference
-    assert h.reviews == 1 and len(h.sent) == 1  # only PR1's email
+    assert h.reviews == 1
+    assert len(h.sent) == 1  # only PR1's email
     row = store.get_pair("o/r", 2, "aa" * 20, "22" * 20)
-    assert row and row["status"] == "suppressed"
+    assert row
+    assert row["status"] == "suppressed"
 
 
 def test_pr_closing_while_running_suppresses_obsolete_email(tmp_path):
@@ -279,7 +288,8 @@ def test_pr_closing_while_running_suppresses_obsolete_email(tmp_path):
 
     mgr.run_review = slow_review  # type: ignore[method-assign]
     out = mgr.cycle()
-    assert h.reviews == 1 and h.sent == []
+    assert h.reviews == 1
+    assert h.sent == []
     assert out["dispatched"][0].get("suppressed")
 
 
@@ -304,7 +314,8 @@ def test_fail_closed_variants(tmp_path):
         elif mutate == "noaccess":
             h.fetch_error[("o/r", 1)] = "403 Forbidden"
         mgr.cycle()
-        assert h.reviews == 0 and h.sent == [], mutate
+        assert h.reviews == 0
+        assert h.sent == [], mutate
 
 
 # -- connector validation ----------------------------------------------
@@ -317,7 +328,8 @@ def test_missing_identity_fields_reject(tmp_path):
         raw = raw_pr()
         raw.update(bad)
         vpr, reason = E.validate_pr_metadata("o/r", raw)
-        assert vpr is None and reason, bad
+        assert vpr is None
+        assert reason, bad
 
 
 def test_pagination_rate_limits_and_expired_tokens(tmp_path):
@@ -336,7 +348,8 @@ def test_pagination_rate_limits_and_expired_tokens(tmp_path):
 
     mgr.discover = boom_discover  # type: ignore[method-assign]
     out = mgr.cycle()
-    assert h.reviews == 0 and out["errors"]
+    assert h.reviews == 0
+    assert out["errors"]
 
 
 # -- queue, concurrency, crash ------------------------------------------
@@ -512,7 +525,8 @@ def test_smtp_failure_redelivers_same_bytes_without_rereview(tmp_path):
     wire(mgr, h)
     mgr.cycle()
     mgr.cycle()
-    assert h.reviews == 1 and h.sent[0]
+    assert h.reviews == 1
+    assert h.sent[0]
     first = h.sent[0]
     h.receipt = {"succeeded": 1, "failed": 0, "email_id": "e2"}
     mgr.cycle()
@@ -538,7 +552,8 @@ def test_ambiguous_receipt_never_blind_retransmits(tmp_path):
     d = store.get_delivery(h.sent[0]["run_dir"],
                            __import__("hashlib").sha256(
                                h.sent[0]["body"].encode()).hexdigest())
-    assert d and d["status"] == "ambiguous"
+    assert d
+    assert d["status"] == "ambiguous"
 
 
 def test_missing_identity_blocks_delivery(tmp_path):
@@ -570,7 +585,8 @@ def test_failed_email_labels_failure_and_pr_url(tmp_path):
     mgr.run_review = fail_review  # type: ignore[method-assign]
     mgr.cycle()
     mgr.cycle()
-    assert h.sent and "failed" in h.sent[0]["subject"].lower()
+    assert h.sent
+    assert "failed" in h.sent[0]["subject"].lower()
     assert "https://github.com/o/r/pull/1" in h.sent[0]["body"]
     assert "PR: #?" not in h.sent[0]["body"]
 
@@ -631,7 +647,8 @@ def test_spawn_failure_releases_reserve_and_retries(tmp_path):
     mgr.cycle()
     mgr.cycle()
     row = store.get_pair("o/r", 1, "aa" * 20, "bb" * 20)
-    assert row and row["status"] == "eligible"
+    assert row
+    assert row["status"] == "eligible"
     assert store.reserved_total() == pytest.approx(0.0)
 
 
@@ -655,7 +672,9 @@ def test_timeout_keeps_bound_and_marks_failed_unknown(tmp_path):
     row = store.get_pair("o/r", 1, "aa" * 20, "bb" * 20)
     # failed review is emailed (FAILED banner) and delivered; the unknown
     # spend bound persists until reconciled
-    assert row and row["spend_unknown"] == 1 and row["status"] == "delivered"
+    assert row
+    assert row["spend_unknown"] == 1
+    assert row["status"] == "delivered"
 
 
 def test_haiku_pass_accumulates_and_preserves_unknown(tmp_path):
@@ -743,14 +762,16 @@ def test_cli_parser_has_operator_args():
     args = build_parser().parse_args(
         ["watcher", "reconcile", "--run-dir", "x", "--actual-usd", "0.1",
          "--note", "provider dashboard"])
-    assert args.actual_usd == 0.1 and args.note == "provider dashboard"
+    assert args.actual_usd == 0.1
+    assert args.note == "provider dashboard"
     args = build_parser().parse_args(
         ["watcher", "backfill", "--repos", "o/r", "--pr", "7"])
     assert args.pr == "7"
     args = build_parser().parse_args(
         ["review", "--repo", "o/r", "--pr", "1", "--expected-base", "a",
          "--expected-head", "b"])
-    assert args.expected_base == "a" and args.expected_head == "b"
+    assert args.expected_base == "a"
+    assert args.expected_head == "b"
 
 
 def test_fractional_second_boundary():
@@ -841,11 +862,13 @@ def test_cli_activate_status_pause_resume_reconcile(tmp_path, monkeypatch):
         return argparse.Namespace(**d)
 
     out = cmd_watcher(base("activate"))
-    assert out["status"] == "ok" and out["activated_at"]
+    assert out["status"] == "ok"
+    assert out["activated_at"]
     out = cmd_watcher(base("activate"))
     assert out["status"] == "failed"  # boundary cannot reset
     out = cmd_watcher(base("status"))
-    assert out["status"] == "ok" and out["activated_at"]
+    assert out["status"] == "ok"
+    assert out["activated_at"]
     out = cmd_watcher(base("pause-repo", repos="o/r"))
     assert out["status"] == "paused"
     out = cmd_watcher(base("resume-repo", repos="o/r"))

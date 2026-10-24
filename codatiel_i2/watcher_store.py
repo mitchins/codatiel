@@ -27,6 +27,10 @@ from typing import Any
 
 SCHEMA_VERSION = "codatiel_i2.watchstore.v1"
 
+_BEGIN = "BEGIN IMMEDIATE;"
+_COMMIT = "COMMIT;"
+_ROLLBACK = "ROLLBACK;"
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
@@ -121,15 +125,15 @@ class Store:
 
     def meta_set(self, key: str, value: str) -> None:
         try:
-            self.cx.execute("BEGIN IMMEDIATE;")
+            self.cx.execute(_BEGIN)
             self.cx.execute(
                 "INSERT INTO meta(key, value) VALUES(?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, value))
-            self.cx.execute("COMMIT;")
+            self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
-                self.cx.execute("ROLLBACK;")
+                self.cx.execute(_ROLLBACK)
             except Exception:
                 pass
             raise StoreError(f"meta write failed: {exc}")
@@ -144,7 +148,7 @@ class Store:
     def activate(self) -> str:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         try:
-            self.cx.execute("BEGIN IMMEDIATE;")
+            self.cx.execute(_BEGIN)
             row = self.cx.execute(
                 "SELECT value FROM meta WHERE key='activated_at'").fetchone()
             if row and row[0]:
@@ -155,12 +159,12 @@ class Store:
             self.cx.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES"
                 "('activated_at', ?)", (now,))
-            self.cx.execute("COMMIT;")
+            self.cx.execute(_COMMIT)
         except StoreError:
             raise
         except Exception as exc:
             try:
-                self.cx.execute("ROLLBACK;")
+                self.cx.execute(_ROLLBACK)
             except Exception:
                 pass
             raise StoreError(f"activation failed: {exc}")
@@ -174,15 +178,15 @@ class Store:
 
     def spend_set(self, key: str, value: float) -> None:
         try:
-            self.cx.execute("BEGIN IMMEDIATE;")
+            self.cx.execute(_BEGIN)
             self.cx.execute(
                 "INSERT INTO spend(key, value) VALUES(?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, float(value)))
-            self.cx.execute("COMMIT;")
+            self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
-                self.cx.execute("ROLLBACK;")
+                self.cx.execute(_ROLLBACK)
             except Exception:
                 pass
             raise StoreError(f"spend write failed: {exc}")
@@ -196,7 +200,7 @@ class Store:
 
     def spend_add(self, day: str, usd: float) -> None:
         try:
-            self.cx.execute("BEGIN IMMEDIATE;")
+            self.cx.execute(_BEGIN)
             for key, val in (("reviews_usd",
                               (self.spend_get("reviews_usd") or 0.0) + usd),
                              (f"day:{day}",
@@ -205,10 +209,10 @@ class Store:
                     "INSERT INTO spend(key, value) VALUES(?, ?) "
                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     (key, val))
-            self.cx.execute("COMMIT;")
+            self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
-                self.cx.execute("ROLLBACK;")
+                self.cx.execute(_ROLLBACK)
             except Exception:
                 pass
             raise StoreError(f"spend debit failed: {exc}")
@@ -227,7 +231,7 @@ class Store:
         if "" in (repo, base, head) or not pr:
             raise StoreError("refusing to store identity-deficient pair")
         try:
-            self.cx.execute("BEGIN IMMEDIATE;")
+            self.cx.execute(_BEGIN)
             self.cx.execute(
                 """INSERT INTO pairs(repo, pr, base, head, pr_url,
                                      pr_created_at, status, updated_ts)
@@ -237,10 +241,10 @@ class Store:
                      pr_created_at=excluded.pr_created_at,
                      updated_ts=excluded.updated_ts""",
                 (repo, pr, base, head, pr_url, pr_created_at, time.time()))
-            self.cx.execute("COMMIT;")
+            self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
-                self.cx.execute("ROLLBACK;")
+                self.cx.execute(_ROLLBACK)
             except Exception:
                 pass
             raise StoreError(f"pair upsert failed: {exc}")
@@ -261,18 +265,18 @@ class Store:
             vals.append(v)
         vals += [repo, pr, base, head]
         try:
-            self.cx.execute("BEGIN IMMEDIATE;")
+            self.cx.execute(_BEGIN)
             cur = self.cx.execute(
                 f"UPDATE pairs SET {', '.join(sets)} WHERE repo=? AND pr=? "
                 "AND base=? AND head=?", vals)
             if cur.rowcount != 1:
                 raise StoreError("pair row missing for status transition")
-            self.cx.execute("COMMIT;")
+            self.cx.execute(_COMMIT)
         except StoreError:
             raise
         except Exception as exc:
             try:
-                self.cx.execute("ROLLBACK;")
+                self.cx.execute(_ROLLBACK)
             except Exception:
                 pass
             raise StoreError(f"status transition failed: {exc}")
@@ -311,7 +315,7 @@ class Store:
     def record_delivery(self, run_dir: str, body_sha: str, subject: str,
                         status: str, receipt: dict) -> None:
         try:
-            self.cx.execute("BEGIN IMMEDIATE;")
+            self.cx.execute(_BEGIN)
             self.cx.execute(
                 """INSERT INTO deliveries(run_dir, body_sha, subject, status,
                                           receipt, attempts, updated_ts)
@@ -323,10 +327,10 @@ class Store:
                      updated_ts=excluded.updated_ts""",
                 (run_dir, body_sha, subject, status,
                  json.dumps(receipt), time.time()))
-            self.cx.execute("COMMIT;")
+            self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
-                self.cx.execute("ROLLBACK;")
+                self.cx.execute(_ROLLBACK)
             except Exception:
                 pass
             raise StoreError(f"delivery record failed: {exc}")
@@ -354,7 +358,7 @@ class Store:
         """Single-instance arbitration. Raises StoreError if live lease held."""
         now = time.time()
         try:
-            self.cx.execute("BEGIN IMMEDIATE;")
+            self.cx.execute(_BEGIN)
             row = self.cx.execute(
                 "SELECT owner, heartbeat FROM lease WHERE key='w'").fetchone()
             if row and row[0] != owner and now - float(row[1]) < ttl_s:
@@ -365,12 +369,12 @@ class Store:
                 "INSERT INTO lease(key, owner, heartbeat) VALUES('w', ?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET owner=excluded.owner, "
                 "heartbeat=excluded.heartbeat", (owner, now))
-            self.cx.execute("COMMIT;")
+            self.cx.execute(_COMMIT)
         except StoreError:
             raise
         except Exception as exc:
             try:
-                self.cx.execute("ROLLBACK;")
+                self.cx.execute(_ROLLBACK)
             except Exception:
                 pass
             raise StoreError(f"lease acquisition failed: {exc}")

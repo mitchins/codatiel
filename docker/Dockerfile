@@ -14,7 +14,9 @@ RUN apt-get update \
 
 RUN useradd -m -u 1000 codatiel
 WORKDIR /app
-RUN chown codatiel:codatiel /app
+RUN chown codatiel:codatiel /app \
+ && mkdir -p /data/state /data/runs /data/work /data/feedback \
+ && chown -R codatiel:codatiel /data
 COPY pyproject.toml ./
 COPY codatiel_i2 ./codatiel_i2
 RUN pip install --no-cache-dir ".[sdk]" && pip cache purge

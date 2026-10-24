@@ -38,7 +38,8 @@ def test_merged_prs_rejected():
         assert reason, "rejection needs a reason"
     # mergedAt present and state closed on the raw contract
     raw4 = gh_pr("mitchins/codatiel", 4)
-    assert raw4.get("mergedAt") and raw4.get("state") != "OPEN"
+    assert raw4.get("mergedAt")
+    assert raw4.get("state") != "OPEN"
 
 
 def test_historical_open_prs_excluded_but_wellformed():
@@ -46,11 +47,13 @@ def test_historical_open_prs_excluded_but_wellformed():
         raw = gh_pr("mitchins/codatiel", number)
         vpr, reason = E.validate_pr_metadata("mitchins/codatiel", raw)
         assert vpr is not None, f"#{number} should validate: {reason}"
-        assert vpr.state == "OPEN" and not vpr.merged_at
+        assert vpr.state == "OPEN"
+        assert not vpr.merged_at
         assert E.FULL_SHA.match(vpr.base_sha)
         assert E.FULL_SHA.match(vpr.head_sha)
         ok, why = E.check_eligible(vpr, "2026-10-24T00:00:00Z")
-        assert not ok and "historical" in why, (number, why)
+        assert not ok
+        assert "historical" in why, (number, why)
 
 
 def test_field_contract_shape():

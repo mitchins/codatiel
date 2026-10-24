@@ -28,6 +28,9 @@ HAIKU_TRIGGER = ("incomplete_budget_exhausted",
                  "unresolved_unparseable")
 PER_REVIEW_RESERVE_USD = 1.0
 REVIEW_TIMEOUT_S = 1200
+_FETCH_PREFIX = "fetch: "
+_NOT_FOUND = "not found"
+_METRICS_JSON = "metrics.json"
 
 
 @dataclass
@@ -67,7 +70,7 @@ def build_email(identity: dict, run_dir: Path, *, stale: bool = False,
         raise ValueError("invalid base/head SHA: delivery blocked")
     run_dir = Path(run_dir)
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    metrics = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+    metrics = json.loads((run_dir / _METRICS_JSON).read_text(encoding="utf-8"))
     try:
         shadow = json.loads((run_dir / "shadow_result.json").read_text(
             encoding="utf-8"))
@@ -333,7 +336,7 @@ class Manager:
                 continue
             live, reason = self.revalidate(repo2, number2, base2, head2)
             if live is None:
-                if not reason.startswith("fetch:"):
+                if not reason.startswith(_FETCH_PREFIX):
                     self.store.set_status(repo2, number2, base2, head2,
                                           "suppressed",
                                           note=f"sweep: {reason}")
@@ -403,11 +406,11 @@ class Manager:
         try:
             raw, err = self.fetch(repo, number)
         except Exception as exc:
-            return None, f"fetch: {type(exc).__name__}: {exc}"
+            return None, f"{_FETCH_PREFIX}{type(exc).__name__}: {exc}"
         if raw is None:
-            if (err or "") == "not found":
-                return None, "not found"
-            return None, f"fetch: {err or 'failed'}"
+            if (err or "") == _NOT_FOUND:
+                return None, _NOT_FOUND
+            return None, f"{_FETCH_PREFIX}{err or 'failed'}"
         vpr, reason = E.validate_pr_metadata(repo, raw)
         if vpr is None:
             return None, reason
@@ -423,7 +426,7 @@ class Manager:
                                "base": base, "head": head}
         live, reason = self.revalidate(repo, number, base, head)
         if live is None:
-            if reason.startswith("fetch:") or "not found" not in reason:
+            if reason.startswith(_FETCH_PREFIX) or _NOT_FOUND not in reason:
                 # Transient fetch-layer failure: stay eligible, retry next
                 # cycle. No inference, no suppression on a blip.
                 self.store.set_status(repo, number, base, head, "eligible",
@@ -442,7 +445,7 @@ class Manager:
             live2, reason2 = self.revalidate(vpr.repo, vpr.number,
                                              vpr.base_sha, vpr.head_sha)
             if live2 is None:
-                if reason2.startswith("fetch:"):
+                if reason2.startswith(_FETCH_PREFIX):
                     rec["follow_up_retry"] = reason2
                 else:
                     rec["follow_up_suppressed"] = reason2
@@ -469,7 +472,7 @@ class Manager:
             out = {"status": "failed", "stage": "spawn",
                    "error": f"{type(exc).__name__}: {exc}"}
         self.account_run(vpr, out, day, second_pass=second_pass)
-        res = self.maybe_email(vpr, out, day, second_pass=second_pass)
+        res = self.maybe_email(vpr, out, second_pass=second_pass)
         res["status"] = out.get("status")
         if out.get("run_dir"):
             res["run_dir"] = out.get("run_dir")
@@ -550,7 +553,7 @@ class Manager:
         unknown = True
         if run_dir:
             try:
-                m = json.loads((Path(run_dir) / "metrics.json")
+                m = json.loads((Path(run_dir) / _METRICS_JSON)
                                  .read_text(encoding="utf-8"))
                 raw_usd = (m.get("spend") or {}).get("usd_estimate")
                 unknown = (m.get("spend") or {}).get(
@@ -595,7 +598,7 @@ class Manager:
                               usd=total_usd, spend_unknown=1 if total_unknown
                               else 0, reserved_usd=kept)
 
-    def maybe_email(self, vpr: ValidatedPR, out: dict, day: str,
+    def maybe_email(self, vpr: ValidatedPR, out: dict,
                     second_pass: bool) -> dict:
         res: dict[str, Any] = {}
         run_dir = out.get("run_dir")
@@ -607,7 +610,7 @@ class Manager:
         live, reason = self.revalidate(vpr.repo, vpr.number, vpr.base_sha,
                                        vpr.head_sha)
         if live is None:
-            if reason.startswith("fetch:"):
+            if reason.startswith(_FETCH_PREFIX):
                 # Transient failure after paid work: do NOT suppress the
                 # result. Leave delivery pending; the redelivery sweep
                 # retries the same bytes next cycle.
@@ -668,9 +671,9 @@ class Manager:
             "SELECT repo, pr, base, head, run_dir FROM pairs "
             "WHERE status IN ('queued','running')").fetchall()
         for repo, pr, base, head, run_dir in rows:
-            if run_dir and Path(run_dir, "metrics.json").exists():
+            if run_dir and Path(run_dir, _METRICS_JSON).exists():
                 try:
-                    m = json.loads((Path(run_dir) / "metrics.json")
+                    m = json.loads((Path(run_dir) / _METRICS_JSON)
                                      .read_text(encoding="utf-8"))
                     dl_path = Path(run_dir) / "delivery.json"
                     if dl_path.exists():
