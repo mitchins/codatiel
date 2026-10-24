@@ -591,7 +591,8 @@ def cmd_watcher_backfill(args: Any) -> dict:
                       pr_url=vpr.url, pr_created_at=vpr.created_at)
     store.set_status(vpr.repo, vpr.number, vpr.base_sha, vpr.head_sha,
                      "eligible", note="manual directed backfill")
-    rec = mgr.dispatch(vpr, mgr.day())
+    rec = mgr.dispatch(vpr.repo, vpr.number, vpr.base_sha, vpr.head_sha,
+                         mgr.day())
     store.close()
     return {"status": "ok", "backfill": rec}
 def cmd_scan(args) -> dict:
