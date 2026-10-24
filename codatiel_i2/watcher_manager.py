@@ -48,12 +48,33 @@ class ManagerConfig:
     work_root: Path = Path(".codatiel-i2-work")
 
 
+EMAIL_FINDING_CAP = 10
+EMAIL_BODY_BUDGET = 65536
+EMAIL_EXCERPTS_PER_FINDING = 5
+
+
+def _finding_issue_key(finding: dict) -> object:
+    """Underlying issue identity for delivery-time dedup. Detector rows
+    carry the scan-computed issue_key; legacy rows fall back to their
+    finding ID (no collapsing, never a wrong merge)."""
+    key = finding.get("issue_key")
+    if key:
+        return ("issue", key)
+    return ("finding", finding.get("finding_id"))
+
+
 def build_email(identity: dict, run_dir: Path, *, stale: bool = False,
                 second_pass: bool = False) -> tuple[str, str]:
     """Strict digest builder. Invalid identity blocks delivery (raises).
 
     Identity comes from the dispatch context (validated connector data),
     never from model output. Every claim in the body is labelled.
+
+    Output safety bound (not a quality substitute): at most
+    EMAIL_FINDING_CAP distinct findings and EMAIL_BODY_BUDGET bytes.
+    Duplicates collapse by issue identity; anything omitted is counted
+    explicitly with its IDs, never silently truncated. Full detail stays
+    in the run artifacts (findings.jsonl).
     """
     repo = str(identity.get("repo") or "")
     number = identity.get("number")
@@ -125,12 +146,27 @@ def build_email(identity: dict, run_dir: Path, *, stale: bool = False,
     verified = [f for f in findings
                 if f.get("disposition") == "verified_proof"]
     verified.sort(key=lambda f: -(f.get("confidence") or 0))
-    if status == "complete" and not verified:
+    # Delivery-time dedup by underlying issue identity (defense in depth:
+    # the detector already dedupes pre-verification; the email never
+    # repeats an issue no matter which path produced the rows).
+    seen_keys: set[object] = set()
+    distinct: list[dict] = []
+    dupes = 0
+    for f in verified:
+        key = _finding_issue_key(f)
+        if key in seen_keys:
+            dupes += 1
+            continue
+        seen_keys.add(key)
+        distinct.append(f)
+    if status == "complete" and not distinct:
         lines.append("NO MATERIAL FINDINGS after a completed investigation.")
         sil = (shadow.get("silence") or {}).get("summary") or \
             "(no silence rationale recorded)"
         lines.append(f"Silence rationale (model-authored, unverified): {sil}")
-    for i, f in enumerate(verified, 1):
+    shown = distinct[:EMAIL_FINDING_CAP]
+    omitted = distinct[EMAIL_FINDING_CAP:]
+    for i, f in enumerate(shown, 1):
         anchor = f.get("changed_anchor") or {}
         lines.append(f"--- finding {i} (model-authored, UNVERIFIED) ---")
         lines.append(f"outcome: {f.get('bad_outcome', '(untitled)')}")
@@ -141,23 +177,54 @@ def build_email(identity: dict, run_dir: Path, *, stale: bool = False,
         lines.append(f"base behaviour: {f.get('base_state', '?')}")
         lines.append(f"detector: {f.get('detector')}  model confidence: "
                      f"{f.get('confidence')}  finding: {f.get('finding_id')}")
-        for eid in f.get("evidence_ids") or []:
+        eids = f.get("evidence_ids") or []
+        for eid in eids[:EMAIL_EXCERPTS_PER_FINDING]:
             e = ev.get(eid, {})
             excerpt = (e.get("excerpt") or "")[:400].replace("\n", " ")
             lines.append(f"evidence {eid} {e.get('path', '?')}@"
                          f"{str(e.get('head_sha') or e.get('base_sha') or '')[:12]}: "
                          f"{excerpt}")
-    if status != "complete" and status != "failed" and not verified:
+        if len(eids) > EMAIL_EXCERPTS_PER_FINDING:
+            lines.append(f"(+{len(eids) - EMAIL_EXCERPTS_PER_FINDING} further "
+                         "evidence item(s) in run artifacts)")
+    if status != "complete" and status != "failed" and not distinct:
         lines.append("INCOMPLETE INVESTIGATION: absence of findings is not "
                      "evidence of a clean change.")
     lines += ["",
               "Uncertain areas: anything above marked model-authored is a "
               "review candidate, not a confirmed defect.",
-              f"Dismissed candidates: model verified {len(findings)} "
-              f"candidate(s), surfaced {len(verified)}; dismissals are model "
-              "judgements, not proof of cleanliness.",
-              "Private shadow artifact. Never post to GitHub."]
-    return subj, "\n".join(lines)
+              f"Verified rows: {len(verified)} total, {len(distinct)} distinct "
+              f"issue(s), {len(shown)} shown; {dupes} duplicate(s) collapsed "
+              "by issue identity.",
+              "Dismissed candidates: detector-verified rows surfaced above; "
+              "dismissals are detector judgements recorded in run artifacts, "
+              "not proof of cleanliness."]
+    if omitted:
+        omitted_ids = [str(f.get("finding_id", "?")) for f in omitted[:20]]
+        lines.append(f"OMITTED {len(omitted)} additional distinct finding(s) "
+                     f"beyond the {EMAIL_FINDING_CAP}-finding email cap; full "
+                     "detail preserved in run artifacts (findings.jsonl). "
+                     f"First omitted IDs: {', '.join(omitted_ids)}")
+    lines.append("Private shadow artifact. Never post to GitHub.")
+    text = "\n".join(lines)
+    # Whole-finding granularity: drop trailing shown findings until the
+    # body fits the budget, keeping header, counts and overflow notes.
+    # The overflow line below always reports the true omitted count, so a
+    # budget cut is never silent.
+    while (len(text.encode("utf-8")) > EMAIL_BODY_BUDGET and shown):
+        dropped = shown.pop()
+        omitted = [dropped] + omitted
+        marker = "--- finding "
+        cut = text.rfind(marker)
+        text = text[:cut] if cut != -1 else text
+        omitted_ids = [str(f.get("finding_id", "?")) for f in omitted[:20]]
+        overflow = (f"OMITTED {len(omitted)} finding(s): email body budget "
+                    f"({EMAIL_BODY_BUDGET} bytes) reached; full detail "
+                    "preserved in run artifacts (findings.jsonl). "
+                    f"First omitted IDs: {', '.join(omitted_ids)}\n"
+                    "Private shadow artifact. Never post to GitHub.")
+        text = text.rstrip("\n") + "\n" + overflow
+    return subj, text
 
 
 class Manager:

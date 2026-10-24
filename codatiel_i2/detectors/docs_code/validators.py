@@ -88,28 +88,40 @@ def validate_literal_value_mismatch(doc_base: dict | None, code_base: dict | Non
 def validate_named_contract_missing(doc_fact: dict | None, head_names: set[str],
                                     base_names: set[str], head_aliases: set[str],
                                     direction: str = "code_changed",
-                                    surface_enumerated: bool = True) -> dict:
+                                    surface_enumerated: bool = True,
+                                    dynamic_reads: bool = False) -> dict:
     """Documented name absent from the enumerable head surface.
 
     code_changed: the name must have been provided at baseline (a removal
     regression) and no alias may preserve it.
     docs_changed: the claim itself is new; baseline provision is not
     required, but aliases still suppress.
+    dynamic_reads: the checkout reads env through non-literal keys
+    (os.environ.get(name)). Static absence then cannot prove a miss:
+    the name may be provided dynamically. Silence, never a verified miss.
     """
     result = {"validator": "docs_code.named_contract_missing.v1", "version": "v1"}
     if not doc_fact:
         return {**result, "survives": False, "reason": "missing documented fact"}
     name = doc_fact.get("name", "")
-    from codatiel_i2.detectors.docs_code.candidates import NEGATED_CLAIM, _cli_norm
+    from codatiel_i2.detectors.docs_code.candidates import (
+        NEGATED_CLAIM, REFERENCE_CLAIM, _cli_norm)
 
     if NEGATED_CLAIM.search(doc_fact.get("claim", "")):
         return {**result, "survives": False, "reason": "negated_claim"}
+    if not name.startswith("--") and REFERENCE_CLAIM.search(doc_fact.get("claim", "")):
+        return {**result, "survives": False, "reason": "reference_not_contract"}
     if not surface_enumerated:
         # An empty scan proves nothing: absence needs an enumerated surface.
         return {**result, "survives": False, "reason": "ambiguous_absence"}
     norm = _cli_norm(name)
     if any(_cli_norm(n) == norm for n in head_names):
         return {**result, "survives": False, "reason": "present_contract"}
+    if dynamic_reads:
+        return {**result, "survives": False, "reason": "ambiguous_absence",
+                "detail": f"{name!r} absent from the static surface but the "
+                          "checkout reads env through dynamic keys: absence "
+                          "is unprovable"}
     if direction == "code_changed" and not any(_cli_norm(n) == norm for n in base_names):
         return {**result, "survives": False, "reason": "no baseline presence",
                 "detail": f"{name!r} never provided; cannot prove a regression removed it"}
@@ -181,61 +193,104 @@ def _interfaces_equal(doc_if: dict, code_if: dict) -> bool:
             # Path-existence claim: equal iff the documented path is served.
             return doc_if.get("path") == code_if.get("path")
         return (doc_if.get("method"), doc_if.get("path")) == (code_if.get("method"), code_if.get("path"))
+    # Call-signature equality is Python call compatibility: positional
+    # passing ignores names, keywords are case-sensitive, required slots
+    # must be fillable. (Legacy name-shape comparison removed: it flagged
+    # working positional calls such as create_app(Settings.load(...)).)
+    from codatiel_i2.detectors.docs_code.candidates import call_compatible
     from codatiel_i2.detectors.docs_code.facts import subject_key as _skey
-
     if _skey(doc_if.get("symbol", "")) != _skey(code_if.get("symbol", "")):
         return False
-    doc_params = {p["name"]: (p.get("required"), p.get("keyword_only")) for p in doc_if.get("parameters", [])}
-    code_params = {p["name"]: (p.get("required"), p.get("keyword_only")) for p in code_if.get("parameters", [])}
-    if doc_params == code_params:
-        return True
-    # Backward-compatible evolution: same names, code only relaxes
-    # (required -> optional/default), no new required params, same
-    # keyword-only discipline on shared required params.
-    if set(doc_params) != set(code_params):
-        return False
-    for name, (doc_req, doc_kw) in doc_params.items():
-        code_req, code_kw = code_params[name]
-        if code_req and not doc_req:
-            return False
-        if doc_req and code_req and bool(code_kw) != bool(doc_kw):
-            return False
-    return True
+    if not doc_if.get("parameters"):
+        return True  # bare mention: no signature claim to contradict
+    ok, _ = call_compatible(doc_if, code_if)
+    return ok
 
 
-def validate_interface_contract_mismatch(doc_fact: dict | None, code_fact: dict | None,
-                                           implemented_paths: set[str] | None = None) -> dict:
+def validate_interface_contract_mismatch(doc_fact: dict | None, code_fact: dict | None = None,
+                                           implemented_routes=None,
+                                           route_count: int = 0) -> dict:
+    """Route claims are judged against the REPO-WIDE implemented surface,
+    never against one counterpart file's routes: a documented route served
+    anywhere in the checkout is not a miss. Call claims must demonstrate a
+    concrete TypeError under Python call semantics."""
     result = {"validator": "docs_code.interface_contract_mismatch.v1", "version": "v1"}
-    if not doc_fact or not code_fact:
+    if not doc_fact:
         return {**result, "survives": False, "reason": "missing fact"}
-    doc_if, code_if = doc_fact.get("interface", {}), code_fact.get("interface", {})
-    if not doc_if or not code_if:
+    doc_if = doc_fact.get("interface", {})
+    if not doc_if:
         return {**result, "survives": False, "reason": "unsupported_syntax"}
-    if _interfaces_equal(doc_if, code_if):
-        return {**result, "survives": False, "reason": "matched_interface"}
-    if doc_if.get("kind") == "http_route" and implemented_paths is not None:
-        # Set semantics already decided the outcome at the call site; a
-        # leftover equal pair here is a match, anything else mismatches.
-        if doc_if.get("path") in implemented_paths and doc_if.get("method") in (None, "*"):
-            return {**result, "survives": False, "reason": "matched_interface"}
     if doc_if.get("kind") == "http_route":
-        if doc_if.get("method") in (None, "*"):
-            detail = (f"documented path {doc_if.get('path')} is not served "
-                      f"(implemented paths differ)")
-        else:
-            detail = (f"documented {doc_if.get('method')} {doc_if.get('path')} != "
-                      f"implemented {code_if.get('method')} {code_if.get('path')}")
-    else:
-        detail = (f"documented {doc_if.get('symbol')}{doc_if.get('parameters')} != "
-                  f"implemented {code_if.get('symbol')}{code_if.get('parameters')}")
-    return {**result, "survives": True, "reason": "interface_mismatch",
+        return _validate_route_served(doc_fact, implemented_routes,
+                                      route_count, result)
+    if not code_fact:
+        return {**result, "survives": False, "reason": "missing fact"}
+    code_if = code_fact.get("interface", {})
+    if not code_if:
+        return {**result, "survives": False, "reason": "unsupported_syntax"}
+    from codatiel_i2.detectors.docs_code.candidates import call_compatible
+    from codatiel_i2.detectors.docs_code.facts import subject_key as _skey
+    if _skey(doc_if.get("symbol", "")) != _skey(code_if.get("symbol", "")):
+        return {**result, "survives": False, "reason": "different_subject"}
+    if not doc_if.get("parameters"):
+        return {**result, "survives": False, "reason": "bare_mention"}
+    ok, failure = call_compatible(doc_if, code_if)
+    if ok:
+        return {**result, "survives": False, "reason": "compatible_call"}
+    symbol = doc_if.get("symbol", "?")
+    return {**result, "survives": True, "reason": "signature_mismatch",
             "subject": doc_fact.get("subject", ""),
             "base_state": f"documented {doc_if}",
             "head_state": f"implemented {code_if}",
-            "trigger": "caller follows the documented interface",
-            "bad_outcome": "calls fail or misbehave against the implementation",
-            "detail": detail,
+            "trigger": f"caller invokes {symbol} exactly as documented",
+            "bad_outcome": failure,
+            "detail": f"documented {symbol}{doc_if.get('parameters')} vs "
+                      f"implemented {symbol}{code_if.get('parameters')}: {failure}",
             "artifact_fact_ids": [doc_fact["fact_id"], code_fact["fact_id"]]}
+
+
+def _validate_route_served(doc_fact: dict, implemented_routes,
+                           route_count: int, result: dict) -> dict:
+    from codatiel_i2.detectors.docs_code.facts import normalize_route_template
+    doc_if = doc_fact.get("interface", {})
+    method = doc_if.get("method")
+    template = normalize_route_template(doc_if.get("path", ""))
+    if implemented_routes is None:
+        # No repo-wide surface (e.g. a legacy proof record): serving is
+        # unprovable either way, so no verified miss is possible.
+        return {**result, "survives": False, "reason": "ambiguous_absence",
+                "detail": "no repo-wide implemented-route surface available"}
+    routes = {(m, t) for m, t in implemented_routes}
+    for (m2, t2) in routes:
+        if t2 != template:
+            continue
+        if method in (None, "*") or m2 in ("*", method):
+            return {**result, "survives": False, "reason": "matched_interface",
+                    "detail": f"documented {method or '*'} {doc_if.get('path')} "
+                              f"is served ({m2} {t2})"}
+    # Shorthand ambiguity: the documented path is a trailing segment of a
+    # served route (``POST /revert`` for ``POST /api/articles/{}/revert``).
+    # The claim is indeterminate, not a demonstrated miss.
+    if len(template) > 1:
+        for (m2, t2) in routes:
+            if method not in (None, "*") and m2 not in ("*", method):
+                continue
+            if t2 != template and t2.endswith("/" + template.lstrip("/")):
+                return {**result, "survives": False, "reason": "ambiguous_absence",
+                        "detail": f"documented {method or '*'} {doc_if.get('path')} "
+                                  f"is a trailing segment of served {m2} {t2}: "
+                                  "shorthand reference, not a demonstrated miss"}
+    shown = method or "*"
+    return {**result, "survives": True, "reason": "route_mismatch",
+            "subject": doc_fact.get("subject", ""),
+            "base_state": f"documented {doc_if}",
+            "head_state": f"{route_count} implemented routes enumerated repo-wide",
+            "trigger": f"caller requests documented {shown} {doc_if.get('path')}",
+            "bad_outcome": (f"no implemented route serves {shown} "
+                            f"{doc_if.get('path')}"),
+            "detail": (f"documented {shown} {doc_if.get('path')} is not served "
+                       f"by any of the {route_count} implemented routes"),
+            "artifact_fact_ids": [doc_fact["fact_id"]]}
 
 
 register_proof_validator("docs_code.literal_value_mismatch.v1", validate_literal_value_mismatch)
@@ -312,12 +367,21 @@ def replay_proof(record: dict, fact_by_id: dict, *,
         base_names, _aliases, _n, _r = facts_mod.enumerate_code_names(base_checkout)
         return fn(facts["doc_fact"], head_names, base_names, head_aliases,
                   direction=extra.get("direction", "code_changed"),
-                  surface_enumerated=scanned > 0)
+                  surface_enumerated=scanned > 0,
+                  dynamic_reads=facts_mod.dynamic_env_reads_in(head_checkout))
     if validator_id == "docs_code.allowed_values_mismatch.v1":
         return fn(facts["doc_fact"], facts["code_fact"])
     if validator_id == "docs_code.interface_contract_mismatch.v1":
-        implemented = set(extra.get("implemented_paths", []))
+        # v1.1 proof records carry the repo-wide route surface; legacy
+        # records (implemented_paths, single-file comparison) cannot prove
+        # a miss and replay as ambiguous, never as verified.
+        stored = extra.get("implemented_routes")
         code_fact = facts.get("code_fact")
+        if stored is None:
+            return fn(facts["doc_fact"], code_fact,
+                      implemented_routes=None, route_count=0)
+        routes = {(m, t) for m, t in stored}
         return fn(facts["doc_fact"], code_fact,
-                  implemented_paths=implemented if implemented else None)
+                  implemented_routes=routes,
+                  route_count=extra.get("route_count", len(routes)))
     return {**base, "survives": False, "reason": "unknown validator"}
