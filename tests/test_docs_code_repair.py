@@ -200,6 +200,29 @@ def test_kwargs_absorbs_unexpected_keyword():
     assert ok
 
 
+def test_parse_marks_keyword_only_after_star_args():
+    parsed = facts_mod._parse_params("", "x, *args, y")
+    by_name = {p["name"]: p for p in parsed}
+    assert set(by_name) == {"x", "y"}
+    assert by_name["x"]["keyword_only"] is False
+    assert by_name["y"]["keyword_only"] is True
+    assert by_name["y"]["required"] is True
+
+
+def test_missing_keyword_only_after_star_args_is_break():
+    code = _sig([_pp("x"), _pp("y", kwonly=True)], pos_var=True)
+    doc = _sig([_pp("a"), _pp("b")])
+    ok, failure = cand_mod.call_compatible(doc, code)
+    assert not ok and "TypeError" in failure and "y" in failure
+
+
+def test_supplied_keyword_only_after_star_args_is_compatible():
+    code = _sig([_pp("x"), _pp("y", kwonly=True)], pos_var=True)
+    doc = _sig([_pp("a"), _pp("b"), _pp("y", keyword=True)])
+    ok, failure = cand_mod.call_compatible(doc, code)
+    assert ok, failure
+
+
 def test_duplicate_positional_and_keyword_is_a_break():
     doc = _sig([_pp("a"), _pp("x", keyword=True)])
     code = _sig([_pp("x"), _pp("y")], kw_var=True)

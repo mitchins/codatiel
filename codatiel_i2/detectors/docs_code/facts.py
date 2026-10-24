@@ -762,10 +762,17 @@ def _parse_params(lang_hint: str, params: str) -> list[dict]:
         if part == "*":
             keyword_only = True
             continue
-        if part.startswith("**") or re.match(r"\*[A-Za-z_]", part):
-            # Variadic splats (*args, **kwargs) are a property of the whole
-            # signature, recorded at the interface level by _variadic_kinds,
-            # never as a named parameter.
+        if part.startswith("**"):
+            # Keyword variadic (**kwargs) absorbs extra keywords; it does
+            # not change the positional/keyword-only boundary (and must be
+            # last in valid Python).
+            continue
+        if re.match(r"\*\s*[A-Za-z_]", part):
+            # Positional variadic (*args, *args: T): every following
+            # parameter is keyword-only per Python semantics. Record the
+            # splat at the interface level via _variadic_kinds, never as a
+            # named parameter.
+            keyword_only = True
             continue
         name_match = re.match(r"([A-Za-z_][A-Za-z0-9_]*)", part)
         if not name_match:
