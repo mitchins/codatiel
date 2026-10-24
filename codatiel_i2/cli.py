@@ -190,10 +190,17 @@ def cmd_watcher(args: Any) -> dict:
     op = args.op
     cfg, state_path, interval = watcher_config_from_env(args)
     if op == "activate":
-        store = store_mod.Store(
-            Path(state_path).with_suffix(".sqlite"))
+        try:
+            store = store_mod.Store(
+                Path(state_path).with_suffix(".sqlite"))
+        except store_mod.StoreError as exc:
+            return {"status": "failed", "stage": "store",
+                    "error": str(exc)}
         try:
             at = store.activate()
+        except store_mod.StoreError as exc:
+            return {"status": "failed", "stage": "activate",
+                    "error": str(exc)}
         finally:
             store.close()
         return {"status": "ok", "activated_at": at}

@@ -436,19 +436,8 @@ class Manager:
             return rec
         # From here on, the freshly revalidated record is authoritative.
         vpr = live
-        self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
-                              vpr.head_sha, "running",
-                              reserved_usd=PER_REVIEW_RESERVE_USD)
-        try:
-            out = self.run_review("luna", vpr, PER_REVIEW_RESERVE_USD)
-        except Exception as exc:
-            out = {"status": "failed", "stage": "spawn",
-                   "error": f"{type(exc).__name__}: {exc}"}
-        self.account_run(vpr, out, day, second_pass=False)
-        email_res = self.maybe_email(vpr, out, day, second_pass=False)
-        rec.update(email_res)
-        rec["status"] = out.get("status")
-        if (out.get("run_dir") and out.get("status") in HAIKU_TRIGGER
+        rec.update(self._run_one_pass(vpr, "luna", day, second_pass=False))
+        if (rec.get("run_dir") and rec.get("status") in HAIKU_TRIGGER
                 and self.availability(day) >= PER_REVIEW_RESERVE_USD):
             live2, reason2 = self.revalidate(vpr.repo, vpr.number,
                                              vpr.base_sha, vpr.head_sha)
@@ -458,22 +447,33 @@ class Manager:
                 else:
                     rec["follow_up_suppressed"] = reason2
             else:
-                cur = self.store.get_pair(vpr.repo, vpr.number, vpr.base_sha,
-                                          vpr.head_sha) or {}
-                kept = float(cur.get("reserved_usd") or 0.0)
-                self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
-                                      vpr.head_sha, "running",
-                                      reserved_usd=kept + PER_REVIEW_RESERVE_USD)
-                try:
-                    out2 = self.run_review("haiku", vpr,
-                                           PER_REVIEW_RESERVE_USD)
-                except Exception as exc:
-                    out2 = {"status": "failed", "stage": "spawn",
-                            "error": f"{type(exc).__name__}: {exc}"}
-                self.account_run(vpr, out2, day, second_pass=True)
-                email2 = self.maybe_email(vpr, out2, day, second_pass=True)
-                rec["follow_up"] = email2
+                rec["follow_up"] = self._run_one_pass(
+                    live2, "haiku", day, second_pass=True)
         return rec
+
+    def _run_one_pass(self, vpr: ValidatedPR, backend: str, day: str,
+                      second_pass: bool) -> dict:
+        """One bounded review pass: reserve -> run -> account -> email."""
+        if second_pass:
+            cur = self.store.get_pair(vpr.repo, vpr.number, vpr.base_sha,
+                                      vpr.head_sha) or {}
+            reserve = float(cur.get("reserved_usd") or 0.0)
+            reserve += PER_REVIEW_RESERVE_USD
+        else:
+            reserve = PER_REVIEW_RESERVE_USD
+        self.store.set_status(vpr.repo, vpr.number, vpr.base_sha,
+                              vpr.head_sha, "running", reserved_usd=reserve)
+        try:
+            out = self.run_review(backend, vpr, PER_REVIEW_RESERVE_USD)
+        except Exception as exc:
+            out = {"status": "failed", "stage": "spawn",
+                   "error": f"{type(exc).__name__}: {exc}"}
+        self.account_run(vpr, out, day, second_pass=second_pass)
+        res = self.maybe_email(vpr, out, day, second_pass=second_pass)
+        res["status"] = out.get("status")
+        if out.get("run_dir"):
+            res["run_dir"] = out.get("run_dir")
+        return res
 
     def run_review(self, backend: str, vpr: ValidatedPR,
                    ceiling: float) -> dict:

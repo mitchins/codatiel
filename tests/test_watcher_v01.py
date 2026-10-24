@@ -826,3 +826,60 @@ def test_run_once_releases_lease_for_next_process(tmp_path):
     store.release_lease(mgr.instance_id)
     mgr2 = M.Manager(_cfg, store, instance_id="next")
     mgr2.check_in()  # admitted: no stale-lease blackout
+
+
+def test_cli_activate_status_pause_resume_reconcile(tmp_path, monkeypatch):
+    import argparse
+    from codatiel_i2.cli import cmd_watcher
+    state = str(tmp_path / "w.json")
+
+    def base(op, **kw):
+        d = dict(repos="", to="a@b.c", sender="s@d.e", state=state,
+                 runs_root="", work_root="", interval=-1, spend_cap=-1.0,
+                 run_dir="", pr="", actual_usd=None, note="", op=op)
+        d.update(kw)
+        return argparse.Namespace(**d)
+
+    out = cmd_watcher(base("activate"))
+    assert out["status"] == "ok" and out["activated_at"]
+    out = cmd_watcher(base("activate"))
+    assert out["status"] == "failed"  # boundary cannot reset
+    out = cmd_watcher(base("status"))
+    assert out["status"] == "ok" and out["activated_at"]
+    out = cmd_watcher(base("pause-repo", repos="o/r"))
+    assert out["status"] == "paused"
+    out = cmd_watcher(base("resume-repo", repos="o/r"))
+    assert out["status"] == "resumed"
+    # reconcile rejects unknown run dirs and known accounting
+    out = cmd_watcher(base("reconcile", run_dir="/nope",
+                           actual_usd=0.1, note="x"))
+    assert out["status"] == "failed"
+
+
+def test_cli_replay_suppresses_delivered_duplicate(tmp_path):
+    import argparse
+    import hashlib
+    from codatiel_i2.cli import cmd_watcher_replay
+    from codatiel_i2 import watcher_store as S
+    from codatiel_i2 import watcher_manager as M
+    h = Harness(tmp_path)
+    run_dir = h.fake_run("r1", status="complete")
+    run = json.loads((Path(run_dir) / "run.json").read_text())
+    ident = {"repo": run["repo"], "number": run["pr_number"],
+             "url": run["pr_url"], "base": run["base_sha"],
+             "head": run["head_sha"]}
+    _subj, body = M.build_email(ident, Path(run_dir))
+    sha = hashlib.sha256(body.encode()).hexdigest()
+    state = str(tmp_path / "w.json")
+    store = S.Store(Path(state).with_suffix(".sqlite"))
+    store.activate()
+    store.record_delivery(run_dir, sha, "s", "delivered",
+                          {"succeeded": 1, "email_id": "e1"})
+    store.close()
+    args = argparse.Namespace(
+        repos="", to="a@b.c", sender="s@d.e", state=state, runs_root="",
+        work_root="", interval=-1, spend_cap=-1.0, run_dir=run_dir,
+        pr="", actual_usd=None, note="", op="replay-delivery")
+    out = cmd_watcher_replay(args)
+    assert out["status"] == "duplicate-suppressed"
+    assert out.get("email_id") == "e1"
