@@ -39,7 +39,6 @@ class ManagerConfig:
     exclude: list[str] = field(default_factory=list)
     per_poll_cap: int = 3
     max_queued: int = 100
-    max_queued: int = 100
     spend_total_cap_usd: float = 5.0
     spend_daily_cap_usd: float = 2.0
     spend_seed_usd: float = 0.4226
