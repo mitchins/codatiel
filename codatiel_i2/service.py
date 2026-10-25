@@ -474,6 +474,44 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 playbook_text=playbook_text,
                 inventory_strategy_name=inventory_strategy_name,
                 pr_number=pr_number)
+        # R1.1 pricing halts are controlled incomplete states with the same
+        # partial-trace preservation. PricingUnbounded: the ledger holds a
+        # PRICING_PARTIAL request whose true cost is unbounded above, so no
+        # further model call was sent. BudgetCeilingExceeded: the next
+        # request's conservatively estimated cost exceeded the remaining
+        # budget, so it was never sent. Never silence, never complete.
+        # Neither triggers a Haiku follow-up: a follow-up run cannot cure a
+        # pricing-blind ledger (and would halt the same way).
+        is_pricing_unbounded = type(exc).__name__ == "PricingUnbounded"
+        if is_pricing_unbounded:
+            partial_result = getattr(exc, "run_data", None)
+            return _write_failed_run(
+                runs_root, ws, changes, classification, model_name, max_turns,
+                rate or {}, rate_status, ceiling, ledger, stage="pricing_unbounded",
+                error=f"{type(exc).__name__}: {exc}",
+                status="incomplete_pricing_unbounded",
+                ctx=ctx, partial_result=partial_result, model_obj=recorded_model,
+                variant=variant, instructions=instructions,
+                instructions_id=instructions_id, inventory=inventory,
+                user_input=user_input, playbook_name=playbook_name,
+                playbook_text=playbook_text,
+                inventory_strategy_name=inventory_strategy_name,
+                pr_number=pr_number)
+        is_budget_ceiling = type(exc).__name__ == "BudgetCeilingExceeded"
+        if is_budget_ceiling:
+            partial_result = getattr(exc, "run_data", None)
+            return _write_failed_run(
+                runs_root, ws, changes, classification, model_name, max_turns,
+                rate or {}, rate_status, ceiling, ledger, stage="budget_ceiling",
+                error=f"{type(exc).__name__}: {exc}",
+                status="incomplete_budget_ceiling",
+                ctx=ctx, partial_result=partial_result, model_obj=recorded_model,
+                variant=variant, instructions=instructions,
+                instructions_id=instructions_id, inventory=inventory,
+                user_input=user_input, playbook_name=playbook_name,
+                playbook_text=playbook_text,
+                inventory_strategy_name=inventory_strategy_name,
+                pr_number=pr_number)
         # For other agent failures, try to preserve partial trace if available
         partial_result = getattr(exc, "run_data", None)
         return _write_failed_run(

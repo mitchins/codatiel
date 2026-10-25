@@ -22,6 +22,7 @@ from codatiel_i2.core.spend import (
     CACHE_UNSUPPORTED,
     CACHE_USAGE_UNAVAILABLE,
     PRICED,
+    PRICING_PARTIAL,
     PRICING_UNAVAILABLE,
     SpendLedger,
     classify_cache,
@@ -191,20 +192,28 @@ def test_missing_luna_write_is_unavailable_with_bound():
     assert rec["usd_is_confirmed_lower_bound"] is True
 
 
-def test_missing_anthropic_split_is_unavailable_with_bound():
+def test_missing_anthropic_split_is_partial_lower_bound():
+    # SUPERSEDED by R1.1: the R1 bound priced only the known input, which
+    # omits separately billed Anthropic cache lines and was therefore not
+    # a maximum. A missing Anthropic split is PRICING_PARTIAL: the known
+    # input is a lower bound, never a maximum.
     led = _ledger("haiku")
     led.record_response("r1", _ns(requests=1, input_tokens=5000, output_tokens=50),
                         cache_in_input=False)
     rec = led.to_record()
     rows = {r["response_id"]: r for r in rec["request_ledger"]}
     assert rows["r1"]["tier"] == "high"  # prompt size unknown: never cheap
-    assert rows["r1"]["pricing_status"] == PRICING_UNAVAILABLE
-    assert led.confirmed_usd() == pytest.approx(0.0)
-    assert rec["bounded_reserve_usd"] > 0
+    assert rows["r1"]["pricing_status"] == PRICING_PARTIAL
+    assert rows["r1"]["bounded_reserve_usd"] is None
+    lower = (5000 * 0.5 + 50 * 2.5) / 1e6
+    assert led.confirmed_usd() == pytest.approx(lower)
+    assert rec["pricing_partial_ids"] == ["r1"]
+    assert rec["partial_lower_bound_usd"] == pytest.approx(lower)
 
 
 def test_reported_zero_vs_absent_split():
-    # Explicit zeros are measured (PRICED); absent fields are not.
+    # Explicit zeros are measured (PRICED); absent Anthropic fields are
+    # PRICING_PARTIAL lower bounds (R1.1: never a maximum).
     led = _ledger("haiku")
     led.record_response("zero", _ns(requests=1, input_tokens=1000, output_tokens=10),
                         cached_input_tokens=0, cache_write_input_tokens=0,
@@ -215,8 +224,10 @@ def test_reported_zero_vs_absent_split():
     assert rows["zero"]["pricing_status"] == PRICED
     assert rows["zero"]["priced_cost_usd"] == pytest.approx(
         1000 / 1e6 * 0.1 + 10 / 1e6 * 0.5)
-    assert rows["absent"]["pricing_status"] == PRICING_UNAVAILABLE
-    assert led.confirmed_usd() == pytest.approx(rows["zero"]["priced_cost_usd"])
+    assert rows["absent"]["pricing_status"] == PRICING_PARTIAL
+    assert rows["absent"]["bounded_reserve_usd"] is None
+    assert led.confirmed_usd() == pytest.approx(
+        rows["zero"]["priced_cost_usd"] + rows["absent"]["priced_cost_usd"])
 
 
 def test_malformed_cache_fields_become_absent_not_zero():

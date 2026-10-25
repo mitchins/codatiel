@@ -296,6 +296,38 @@ class ScriptedModel(_SDKModel):
                                             "response": {"id": response.response_id}})
 
 
+def _first_arg(kwargs: dict[str, Any], args: tuple[Any, ...],
+               name: str, position: int) -> Any:
+    """Pull one get_response argument by keyword, else by position."""
+    if name in kwargs:
+        return kwargs[name]
+    if len(args) > position:
+        return args[position]
+    return None
+
+
+def estimate_request_tokens(system_instructions: Any, model_input: Any,
+                            tools: Any) -> int:
+    """Stated conservative input-token estimate for an unsent request.
+
+    Serializes the request payload and counts 1 token per
+    PRE_REQUEST_CHARS_PER_TOKEN characters (3). Real review text runs
+    ~4 chars/token, so this deliberately over-counts by >=25% and can
+    never understate context for the pre-request ceiling check. Used
+    only for the refuse/allow decision, never for billing.
+    """
+    import json as _json
+    from codatiel_i2.core.spend import PRE_REQUEST_CHARS_PER_TOKEN
+    try:
+        text = _json.dumps({"system": system_instructions,
+                            "input": model_input, "tools": tools},
+                           default=str)
+    except Exception:
+        text = f"{system_instructions!r}{model_input!r}{tools!r}"
+    chars = len(text)
+    return (chars + PRE_REQUEST_CHARS_PER_TOKEN - 1) // PRE_REQUEST_CHARS_PER_TOKEN
+
+
 class UsageRecordingModel(_SDKModel):
     """Record each completed provider response in a spend ledger.
 
@@ -323,6 +355,32 @@ class UsageRecordingModel(_SDKModel):
         return getattr(self._model, name)
 
     async def get_response(self, *args: Any, **kwargs: Any) -> Any:
+        from codatiel_i2.core.spend import (
+            BudgetCeilingExceeded,
+            PricingUnbounded,
+        )
+        # R1.1: a run holding a PRICING_PARTIAL request has unbounded true
+        # cost — send no further model request. This raises before any
+        # provider call is made, so the halt itself costs nothing.
+        if self.ledger.has_unbounded():
+            raise PricingUnbounded(
+                "run holds a request with unknown cache split "
+                "(PRICING_PARTIAL); true cost is unbounded above, so no "
+                "further model request may be sent")
+        # R1.1 pre-request ceiling check (tiered ledgers only): estimate
+        # this request's cost at the highest tier and category, plus the
+        # stated output allowance. Refuse before sending when it exceeds
+        # the remaining per-review budget.
+        if self.ledger._tier_card() is not None:
+            est_tokens = estimate_request_tokens(
+                _first_arg(kwargs, args, "system_instructions", 0),
+                _first_arg(kwargs, args, "input", 1),
+                _first_arg(kwargs, args, "tools", 3))
+            ok, est_cost, remaining = self.ledger.pre_request_ok(est_tokens)
+            if not ok:
+                raise BudgetCeilingExceeded(
+                    f"next request estimated ${est_cost:.4f} exceeds "
+                    f"remaining budget ${remaining:.4f}; refusing to send")
         response = await self._model.get_response(*args, **kwargs)
         try:
             usage = getattr(response, "usage", None)

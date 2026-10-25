@@ -30,10 +30,23 @@ CACHE_USAGE_UNAVAILABLE = "CACHE_USAGE_UNAVAILABLE"
 # Per-request pricing states (STABILIZE-02 R1 Stage A). A request whose
 # billed split cannot be established from provider-reported fields is
 # never priced at an assumed tier: it is PRICING_UNAVAILABLE with a
-# conservative bounded reservation, or an explicit unknown amount when
-# no bound can be computed.
+# conservative bounded reservation, or PRICING_UNAVAILABLE with no bound
+# when none can be computed.
 PRICED = "PRICED"
 PRICING_UNAVAILABLE = "PRICING_UNAVAILABLE"
+# R1.1: Anthropic bills cache reads and writes separately from
+# ``input_tokens``, so a Haiku request with missing cache figures has no
+# valid upper bound — the known input is only a LOWER bound on true cost.
+# PRICING_PARTIAL marks exactly that: never present it as a maximum.
+PRICING_PARTIAL = "PRICING_PARTIAL"
+
+# Pre-request ceiling check (R1.1): stated conservative token estimate
+# for an unsent request. Real review text runs ~4 chars/token; 3
+# deliberately over-counts so the estimate never understates context.
+PRE_REQUEST_CHARS_PER_TOKEN = 3
+# Output allowance priced alongside every estimate. Matches the enforced
+# per-request output bound (runtime_sdk Haiku/Luna settings max_tokens).
+PRE_REQUEST_OUTPUT_ALLOWANCE_TOKENS = 8192
 
 
 def classify_cache(entry: dict[str, Any] | None,
@@ -63,6 +76,22 @@ def classify_cache(entry: dict[str, Any] | None,
 
 class SpendCeilingExceeded(RuntimeError):
     """Raised when confirmed per-response spend already exceeds the ceiling."""
+
+
+class PricingUnbounded(RuntimeError):
+    """Raised when a run holds a PRICING_PARTIAL request.
+
+    The run's true cost is unbounded above, so no further model request
+    may be sent: the limit can no longer be guaranteed. The run must end
+    incomplete_pricing_unbounded, never complete and never silent."""
+
+
+class BudgetCeilingExceeded(RuntimeError):
+    """Raised by the pre-request check before any provider call is made.
+
+    The next request's conservatively estimated cost exceeds the
+    remaining per-review budget. The run must end
+    incomplete_budget_ceiling without sending the request."""
 
 
 def _as_int(value: Any) -> int | None:
@@ -412,16 +441,27 @@ class SpendLedger:
             # tokens; cache reads and writes are separate billed lines.
             uncached = entry["input_tokens"]
         if read is None or write is None:
-            # The billed split cannot be established: Luna hides unwritten
-            # cache slices inside input_tokens; Anthropic bills unreported
-            # cache lines separately. Price the known input at the highest
-            # input-side rate of the tier as an explicit bounded reservation.
+            if not entry.get("cache_in_input", True):
+                # R1.1: Anthropic bills cache reads and writes separately
+                # from input_tokens, so the known input is only a LOWER
+                # bound on true cost — there is no valid maximum. Price the
+                # known lines at the (never-cheap) tier and mark the entry
+                # PRICING_PARTIAL; the run must halt before its next
+                # request (see has_unbounded).
+                partial = {"tier": tier_name,
+                           "pricing_status": PRICING_PARTIAL,
+                           "cost_usd": (uncached / 1e6 * rate_in
+                                        + output_tokens / 1e6 * rate_out),
+                           "bounded_usd": None}
+                return partial
+            # OpenAI hides unwritten cache slices inside input_tokens, so
+            # the whole prompt is known: pricing it at the highest
+            # input-side rate of the tier IS an upper bound.
             upper_in = rate_in if rate_write is None else max(rate_in,
                                                               rate_write)
-            base = entry["input_tokens"] if entry.get("cache_in_input",
-                                                       True) else uncached
             unavailable["bounded_usd"] = (
-                base / 1e6 * upper_in + output_tokens / 1e6 * rate_out)
+                entry["input_tokens"] / 1e6 * upper_in
+                + output_tokens / 1e6 * rate_out)
             return unavailable
         if read > 0 and rate_hit is None:
             missing_category = True
@@ -446,13 +486,15 @@ class SpendLedger:
         return priced
 
     def confirmed_usd(self) -> float | None:
-        """Confirmed lower-bound cost of known-usage requests, or None when
-        rates are unconfirmed.
+        """Confirmed cost of known-usage requests, or None when rates are
+        unconfirmed.
 
         Tiered rate cards price each request in its own context-size tier
         (see _tier_for). PRICING_UNAVAILABLE requests are excluded from the
-        confirmed total and reported separately as a bounded reservation;
-        see bounded_reserve_usd().
+        total and reported separately as a bounded reservation; see
+        bounded_reserve_usd(). PRICING_PARTIAL requests (Anthropic split
+        unknown) contribute their lower bound; to_record() flags the total
+        accordingly and the run must halt (see has_unbounded).
 
         When the rate provides ``input_cache_hit`` and an entry carries
         provider-reported ``cached_input_tokens``, that slice is priced at
@@ -471,7 +513,10 @@ class SpendLedger:
                 if not entry["usage_known"]:
                     continue
                 priced = self._price_entry_tiered(entry, card)
-                if priced["pricing_status"] == PRICED:
+                # PRICED entries contribute confirmed cost; PRICING_PARTIAL
+                # entries contribute their lower bound (flagged separately
+                # in to_record; never presented as a maximum).
+                if priced["pricing_status"] in (PRICED, PRICING_PARTIAL):
                     total += priced["cost_usd"] or 0.0
             return total
         rate_hit = self._rate_hit()
@@ -504,9 +549,13 @@ class SpendLedger:
     def bounded_reserve_usd(self) -> float | None:
         """Conservative bounded reservation for PRICING_UNAVAILABLE entries.
 
-        Tiered cards only; legacy flat ledgers always return 0.0. None
-        means a request cannot even be bounded (its tier carries no rates
-        at all): the ceiling check then fails closed.
+        Only true upper bounds are summed here. PRICING_PARTIAL entries
+        carry a lower bound (counted in confirmed_usd, never here): their
+        unbounded remainder is handled by halting the run, not by ceiling
+        arithmetic. Tiered cards only; legacy flat ledgers always return
+        0.0. None means an UNAVAILABLE request cannot even be bounded
+        (its tier carries no rates at all): the ceiling check then fails
+        closed.
         """
         card = self._tier_card()
         if card is None:
@@ -516,11 +565,74 @@ class SpendLedger:
             if not entry["usage_known"]:
                 continue
             priced = self._price_entry_tiered(entry, card)
-            if priced["pricing_status"] == PRICING_UNAVAILABLE:
-                if priced["bounded_usd"] is None:
-                    return None
-                total += priced["bounded_usd"]
+            if priced["pricing_status"] != PRICING_UNAVAILABLE:
+                continue
+            if priced["bounded_usd"] is None:
+                return None
+            total += priced["bounded_usd"]
         return total
+
+    def has_unbounded(self) -> bool:
+        """True when a known-usage entry is PRICING_PARTIAL.
+
+        Its true cost is unbounded above: the run must send no further
+        model request (see PricingUnbounded). Tiered cards only; legacy
+        flat ledgers never produce partials.
+        """
+        card = self._tier_card()
+        if card is None:
+            return False
+        for entry in self.entries.values():
+            if not entry["usage_known"]:
+                continue
+            if self._price_entry_tiered(entry, card)["pricing_status"] == PRICING_PARTIAL:
+                return True
+        return False
+
+    def pre_request_ok(self, est_input_tokens: int,
+                       output_allowance_tokens: int = PRE_REQUEST_OUTPUT_ALLOWANCE_TOKENS,
+                       ) -> tuple[bool, float, float]:
+        """Pre-request ceiling check for one unsent request.
+
+        Prices the conservatively estimated input at the highest
+        input-side rate across all tiers, plus the output allowance at
+        the highest output rate, and compares against the remaining
+        budget (ceiling minus confirmed lower bounds minus true bounded
+        reservations). Returns (ok, estimated_cost, remaining). Tiered
+        cards only; callers skip the check for legacy flat ledgers.
+        """
+        card = self._tier_card()
+        assert card is not None
+        top_in: float | None = None
+        top_out: float | None = None
+        for tier_rates in card["tiers"].values():
+            if not isinstance(tier_rates, dict):
+                continue
+            for key in ("input", "input_cache_write"):
+                try:
+                    value = tier_rates.get(key)
+                    number = float(value) if value is not None else None
+                except (TypeError, ValueError):
+                    number = None
+                if number is not None and (top_in is None or number > top_in):
+                    top_in = number
+            try:
+                out_value = tier_rates.get("output")
+                out_number = float(out_value) if out_value is not None else None
+            except (TypeError, ValueError):
+                out_number = None
+            if out_number is not None and (top_out is None or out_number > top_out):
+                top_out = out_number
+        if top_in is None or top_out is None:
+            return False, 0.0, 0.0
+        est = (max(0, est_input_tokens) / 1e6 * top_in
+               + max(0, output_allowance_tokens) / 1e6 * top_out)
+        confirmed = self.confirmed_usd() or 0.0
+        bounded = self.bounded_reserve_usd()
+        remaining = self.ceiling_usd - confirmed - (bounded or 0.0)
+        if bounded is None:
+            return False, est, remaining
+        return est <= remaining, est, remaining
 
     def over_ceiling(self) -> bool:
         """True when confirmed spend plus bounded reservations exceed the
@@ -575,6 +687,8 @@ class SpendLedger:
             usd = None
         card = self._tier_card()
         unavailable_ids: list[str] = []
+        partial_ids: list[str] = []
+        partial_lower = 0.0
         bounded: float | None = 0.0
         ledger_rows: list[dict[str, Any]] = []
         for key in self.order:
@@ -592,6 +706,9 @@ class SpendLedger:
                         bounded = None
                     elif bounded is not None:
                         bounded += priced["bounded_usd"]
+                elif priced["pricing_status"] == PRICING_PARTIAL:
+                    partial_ids.append(entry["response_id"])
+                    partial_lower += priced["cost_usd"] or 0.0
             ledger_rows.append(row)
         if card is None:
             bounded = 0.0
@@ -606,9 +723,13 @@ class SpendLedger:
                   "unknown_response_ids": unknown_ids,
                   "rate_status": self.rate_status,
                   "rate_confirmed": rate_confirmed,
-                  "ceiling_usd": self.ceiling_usd,
-                  "usd_estimate": usd,
-                  "usd_is_confirmed_lower_bound": bool(unknown_requests or unavailable_ids),
+                   "ceiling_usd": self.ceiling_usd,
+                   "usd_estimate": usd,
+                   # usd_estimate is confirmed spend only when every known
+                   # request is PRICED. Unknown, PRICING_UNAVAILABLE, or
+                   # PRICING_PARTIAL entries make it a lower bound; partials
+                   # additionally record their lower-bound share below.
+                   "usd_is_confirmed_lower_bound": bool(unknown_requests or unavailable_ids or partial_ids),
                   "tokens_only": usd is None,
                   "recording_errors": self.recording_errors,
                   "sink_error": self.sink_error,
@@ -623,10 +744,18 @@ class SpendLedger:
             record["pricing_unavailable_requests"] = sum(
                 self.entries[key]["requests"] for key in self.order
                 if self.entries[key]["response_id"] in unavailable_ids)
+            record["pricing_partial_ids"] = partial_ids
+            record["pricing_partial_requests"] = sum(
+                self.entries[key]["requests"] for key in self.order
+                if self.entries[key]["response_id"] in partial_ids)
+            record["partial_lower_bound_usd"] = partial_lower
             record["bounded_reserve_usd"] = bounded
         else:
             record["pricing_unavailable_ids"] = []
             record["pricing_unavailable_requests"] = 0
+            record["pricing_partial_ids"] = []
+            record["pricing_partial_requests"] = 0
+            record["partial_lower_bound_usd"] = 0.0
             record["bounded_reserve_usd"] = 0.0
         record["exceeds_ceiling"] = self.over_ceiling()
         return record
