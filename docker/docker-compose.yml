@@ -15,7 +15,9 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: codatiel-i2:0.1.0
+    # Immutable reference: commit tag of the deployed source. The moving
+    # :0.1.0 tag may trail for continuity but never decides what runs.
+    image: codatiel-i2:c5b190d
     container_name: codatiel-watcher
     restart: unless-stopped
     env_file:
