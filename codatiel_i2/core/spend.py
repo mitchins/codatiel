@@ -27,6 +27,14 @@ CACHE_MISS = "CACHE_MISS"
 CACHE_UNSUPPORTED = "CACHE_UNSUPPORTED"
 CACHE_USAGE_UNAVAILABLE = "CACHE_USAGE_UNAVAILABLE"
 
+# Per-request pricing states (STABILIZE-02 R1 Stage A). A request whose
+# billed split cannot be established from provider-reported fields is
+# never priced at an assumed tier: it is PRICING_UNAVAILABLE with a
+# conservative bounded reservation, or an explicit unknown amount when
+# no bound can be computed.
+PRICED = "PRICED"
+PRICING_UNAVAILABLE = "PRICING_UNAVAILABLE"
+
 
 def classify_cache(entry: dict[str, Any] | None,
                    capable: bool | None) -> str:
@@ -36,16 +44,19 @@ def classify_cache(entry: dict[str, Any] | None,
     provider supports caching on this path, False when it cannot, None
     when unknown). Missing usage is always UNAVAILABLE, never a
     silent zero or an assumed miss.
+
+    An explicit reported zero read is a measured MISS; an absent read
+    is UNAVAILABLE even when writes are reported — a write proves cache
+    activity, never a zero read.
     """
     if not entry or not entry.get("usage_known"):
         return CACHE_USAGE_UNAVAILABLE
     if capable is False:
         return CACHE_UNSUPPORTED
-    read = entry.get("cached_input_tokens") or 0
-    write = entry.get("cache_write_input_tokens") or 0
-    if read > 0:
+    read = entry.get("cached_input_tokens")
+    if read is not None and read > 0:
         return CACHE_HIT
-    if write > 0 or capable:
+    if read is not None and read == 0:
         return CACHE_MISS
     return CACHE_USAGE_UNAVAILABLE
 
@@ -127,6 +138,7 @@ class SpendLedger:
                                "usage_known": False,
                                "cached_input_tokens": None,
                                "cache_write_input_tokens": None,
+                               "cache_in_input": True,
                                "reasoning_output_tokens": None}
             elif key not in merged and key not in self.entries:
                 merged[key] = {
@@ -137,6 +149,11 @@ class SpendLedger:
                     "usage_known": bool(row.get("usage_known", False)),
                     "cached_input_tokens": row.get("cached_input_tokens"),
                     "cache_write_input_tokens": row.get("cache_write_input_tokens"),
+                    # Provider semantics must survive a crash: without this
+                    # flag a restored Anthropic entry (input excludes cache)
+                    # would be repriced with OpenAI semantics. Ancient rows
+                    # predate the flag; True is the conservative upper bound.
+                    "cache_in_input": row.get("cache_in_input", True),
                     "reasoning_output_tokens": row.get("reasoning_output_tokens"),
                 }
         for key, entry in merged.items():
@@ -269,6 +286,8 @@ class SpendLedger:
 
         A write priced at the input rate is the documented conservative
         upper bound when the provider's write premium is unpriced.
+        (Legacy flat-rate path only. Tiered rate cards must carry an
+        explicit write rate per tier; see _price_entry_tiered.)
         """
         try:
             write = self.rate.get("input_cache_write")
@@ -276,9 +295,164 @@ class SpendLedger:
         except (TypeError, ValueError):
             return rate_in
 
+    # -- Tiered provider pricing (STABILIZE-02 R1 Stage A) ---------------
+    # Active when ``rate`` carries a tiered card: ``pricing_backend`` in
+    # {"luna", "haiku"}, an integer ``tier_threshold_tokens``, an explicit
+    # ``processing_tier`` and a ``tiers`` mapping with per-tier input /
+    # output / cache-hit / cache-write rates. Legacy flat ledgers (no
+    # card) keep the exact historical behaviour below.
+
+    def _tier_card(self) -> dict[str, Any] | None:
+        rate = self.rate
+        if not isinstance(rate, dict):
+            return None
+        tiers = rate.get("tiers")
+        backend = rate.get("pricing_backend")
+        if not isinstance(tiers, dict) or backend not in ("luna", "haiku"):
+            return None
+        try:
+            threshold = int(rate.get("tier_threshold_tokens", -1))
+        except (TypeError, ValueError):
+            return None
+        if threshold < 0 or rate.get("processing_tier") is None:
+            return None
+        return {"backend": backend, "threshold": threshold,
+                "processing_tier": rate.get("processing_tier"),
+                "tiers": tiers, "basis": rate.get("tier_threshold_basis"),
+                "source": rate.get("rate_source")}
+
+    @staticmethod
+    def _tier_rates(tiers: dict[str, Any], name: str) -> dict[str, Any] | None:
+        rates = tiers.get(name)
+        return rates if isinstance(rates, dict) else None
+
+    def _tier_for(self, entry: dict[str, Any],
+                  card: dict[str, Any]) -> tuple[str, dict[str, Any] | None,
+                                                 int | None]:
+        """Select the context-size tier for one known-usage entry.
+
+        Luna's threshold is on total input tokens as reported, which by
+        provider semantics include cache reads and writes (verified live:
+        ``input_tokens`` counts the whole prompt). Haiku's threshold is
+        on the whole prompt — uncached input plus cache reads plus cache
+        writes (per Anthropic's long-context pricing). A Haiku entry with
+        an absent cache split has an unknowable prompt size and is placed
+        in the higher tier: a missing classification never assumes cheap.
+        """
+        threshold = card["threshold"]
+        if card["backend"] == "luna":
+            total = entry["input_tokens"]
+            name = "short" if total <= threshold else "long"
+            return name, self._tier_rates(card["tiers"], name), total
+        read = entry.get("cached_input_tokens")
+        write = entry.get("cache_write_input_tokens")
+        if read is None or write is None:
+            name = "high"
+            return name, self._tier_rates(card["tiers"], name), None
+        total = entry["input_tokens"] + read + write
+        name = "standard" if total <= threshold else "high"
+        return name, self._tier_rates(card["tiers"], name), total
+
+    @staticmethod
+    def _upper_rate(tier_rates: dict[str, Any]) -> float | None:
+        """Highest documented per-token rate in a tier: the conservative
+        upper bound for a slice whose own category rate is unpriced."""
+        best: float | None = None
+        for key in ("input", "output", "input_cache_hit",
+                    "input_cache_write"):
+            try:
+                value = tier_rates.get(key)
+                number = float(value) if value is not None else None
+            except (TypeError, ValueError):
+                number = None
+            if number is not None and (best is None or number > best):
+                best = number
+        return best
+
+    def _price_entry_tiered(self, entry: dict[str, Any],
+                            card: dict[str, Any]) -> dict[str, Any]:
+        """Price one known-usage entry under tiered rules.
+
+        Returns tier, pricing status, confirmed cost (PRICED only) and a
+        conservative bounded reservation (PRICING_UNAVAILABLE only).
+        Unknown or malformed usage never reaches here; absent splits and
+        unpriced categories never produce confirmed spend.
+        """
+        tier_name, tier_rates, _total = self._tier_for(entry, card)
+        priced = {"tier": tier_name, "pricing_status": PRICED,
+                  "cost_usd": 0.0, "bounded_usd": None}
+        unavailable = {"tier": tier_name,
+                       "pricing_status": PRICING_UNAVAILABLE,
+                       "cost_usd": None, "bounded_usd": None}
+        if not tier_rates:
+            return unavailable
+        try:
+            rate_in = float(tier_rates["input"])
+            rate_out = float(tier_rates["output"])
+        except (TypeError, ValueError, KeyError):
+            return unavailable
+        rate_hit = tier_rates.get("input_cache_hit")
+        try:
+            rate_hit = float(rate_hit) if rate_hit is not None else None
+        except (TypeError, ValueError):
+            return unavailable
+        rate_write = tier_rates.get("input_cache_write")
+        try:
+            rate_write = float(rate_write) if rate_write is not None else None
+        except (TypeError, ValueError):
+            return unavailable
+        read = entry.get("cached_input_tokens")
+        write = entry.get("cache_write_input_tokens")
+        output_tokens = entry["output_tokens"]
+        if entry.get("cache_in_input", True):
+            uncached = max(0, entry["input_tokens"]
+                           - (read or 0) - (write or 0))
+        else:
+            # Anthropic semantics: input_tokens counts only uncached
+            # tokens; cache reads and writes are separate billed lines.
+            uncached = entry["input_tokens"]
+        if read is None or write is None:
+            # The billed split cannot be established: Luna hides unwritten
+            # cache slices inside input_tokens; Anthropic bills unreported
+            # cache lines separately. Price the known input at the highest
+            # input-side rate of the tier as an explicit bounded reservation.
+            upper_in = rate_in if rate_write is None else max(rate_in,
+                                                              rate_write)
+            base = entry["input_tokens"] if entry.get("cache_in_input",
+                                                       True) else uncached
+            unavailable["bounded_usd"] = (
+                base / 1e6 * upper_in + output_tokens / 1e6 * rate_out)
+            return unavailable
+        if read > 0 and rate_hit is None:
+            missing_category = True
+        else:
+            missing_category = write > 0 and rate_write is None
+        if missing_category:
+            # §A5: an unpriced category never inherits another rate.
+            # Bound every slice at the tier's highest documented rate and
+            # keep the request out of confirmed spend.
+            upper = self._upper_rate(tier_rates)
+            if upper is None:
+                return unavailable
+            unavailable["bounded_usd"] = (
+                uncached / 1e6 * rate_in + read / 1e6 * upper
+                + write / 1e6 * upper + output_tokens / 1e6 * rate_out)
+            return unavailable
+        priced["cost_usd"] = (
+            uncached / 1e6 * rate_in
+            + read / 1e6 * (rate_hit if rate_hit is not None else rate_in)
+            + write / 1e6 * (rate_write if rate_write is not None else rate_in)
+            + output_tokens / 1e6 * rate_out)
+        return priced
+
     def confirmed_usd(self) -> float | None:
         """Confirmed lower-bound cost of known-usage requests, or None when
         rates are unconfirmed.
+
+        Tiered rate cards price each request in its own context-size tier
+        (see _tier_for). PRICING_UNAVAILABLE requests are excluded from the
+        confirmed total and reported separately as a bounded reservation;
+        see bounded_reserve_usd().
 
         When the rate provides ``input_cache_hit`` and an entry carries
         provider-reported ``cached_input_tokens``, that slice is priced at
@@ -290,6 +464,16 @@ class SpendLedger:
         rate_in, rate_out = self._rate_pair()
         if rate_in is None or rate_out is None:
             return None
+        card = self._tier_card()
+        if card is not None:
+            total = 0.0
+            for entry in self.entries.values():
+                if not entry["usage_known"]:
+                    continue
+                priced = self._price_entry_tiered(entry, card)
+                if priced["pricing_status"] == PRICED:
+                    total += priced["cost_usd"] or 0.0
+            return total
         rate_hit = self._rate_hit()
         rate_write = self._rate_write(rate_in)
         total = 0.0
@@ -316,6 +500,41 @@ class SpendLedger:
                 total += written / 1e6 * rate_write
             total += entry["output_tokens"] / 1e6 * rate_out
         return total
+
+    def bounded_reserve_usd(self) -> float | None:
+        """Conservative bounded reservation for PRICING_UNAVAILABLE entries.
+
+        Tiered cards only; legacy flat ledgers always return 0.0. None
+        means a request cannot even be bounded (its tier carries no rates
+        at all): the ceiling check then fails closed.
+        """
+        card = self._tier_card()
+        if card is None:
+            return 0.0
+        total = 0.0
+        for entry in self.entries.values():
+            if not entry["usage_known"]:
+                continue
+            priced = self._price_entry_tiered(entry, card)
+            if priced["pricing_status"] == PRICING_UNAVAILABLE:
+                if priced["bounded_usd"] is None:
+                    return None
+                total += priced["bounded_usd"]
+        return total
+
+    def over_ceiling(self) -> bool:
+        """True when confirmed spend plus bounded reservations exceed the
+        per-response ceiling. Missing pricing cannot defeat the ceiling:
+        unbounded requests fail closed. Legacy flat ledgers carry no
+        bounds, so this reduces exactly to the historical confirmed-only
+        check for them.
+        """
+        confirmed = self.confirmed_usd()
+        bounded = self.bounded_reserve_usd()
+        if bounded is None:
+            return any(entry["usage_known"]
+                       for entry in self.entries.values())
+        return ((confirmed or 0.0) + bounded) > self.ceiling_usd
 
     def has_confirmed_tokens(self) -> bool:
         return any(entry["usage_known"] and (entry["input_tokens"] or entry["output_tokens"])
@@ -354,6 +573,28 @@ class SpendLedger:
             # A $0.00 with no authoritative zero-cost basis and no confirmed
             # usage is not evidence of zero billed cost: report no estimate.
             usd = None
+        card = self._tier_card()
+        unavailable_ids: list[str] = []
+        bounded: float | None = 0.0
+        ledger_rows: list[dict[str, Any]] = []
+        for key in self.order:
+            entry = self.entries[key]
+            row = dict(entry)
+            if card is not None and entry["usage_known"]:
+                priced = self._price_entry_tiered(entry, card)
+                row["tier"] = priced["tier"]
+                row["pricing_status"] = priced["pricing_status"]
+                row["priced_cost_usd"] = priced["cost_usd"]
+                row["bounded_reserve_usd"] = priced["bounded_usd"]
+                if priced["pricing_status"] == PRICING_UNAVAILABLE:
+                    unavailable_ids.append(entry["response_id"])
+                    if priced["bounded_usd"] is None:
+                        bounded = None
+                    elif bounded is not None:
+                        bounded += priced["bounded_usd"]
+            ledger_rows.append(row)
+        if card is None:
+            bounded = 0.0
         record = {"usage": {"requests": known_requests + unknown_requests,
                             "input_tokens": known_in, "output_tokens": known_out},
                    "known_requests": known_requests,
@@ -367,10 +608,25 @@ class SpendLedger:
                   "rate_confirmed": rate_confirmed,
                   "ceiling_usd": self.ceiling_usd,
                   "usd_estimate": usd,
-                  "usd_is_confirmed_lower_bound": bool(unknown_requests),
+                  "usd_is_confirmed_lower_bound": bool(unknown_requests or unavailable_ids),
                   "tokens_only": usd is None,
                   "recording_errors": self.recording_errors,
                   "sink_error": self.sink_error,
-                  "request_ledger": [dict(self.entries[key]) for key in self.order]}
-        record["exceeds_ceiling"] = usd is not None and usd > self.ceiling_usd
+                  "request_ledger": ledger_rows}
+        if card is not None:
+            record["pricing_backend"] = card["backend"]
+            record["processing_tier"] = card["processing_tier"]
+            record["tier_threshold_tokens"] = card["threshold"]
+            record["tier_threshold_basis"] = card["basis"]
+            record["rate_source"] = card["source"]
+            record["pricing_unavailable_ids"] = unavailable_ids
+            record["pricing_unavailable_requests"] = sum(
+                self.entries[key]["requests"] for key in self.order
+                if self.entries[key]["response_id"] in unavailable_ids)
+            record["bounded_reserve_usd"] = bounded
+        else:
+            record["pricing_unavailable_ids"] = []
+            record["pricing_unavailable_requests"] = 0
+            record["bounded_reserve_usd"] = 0.0
+        record["exceeds_ceiling"] = self.over_ceiling()
         return record

@@ -379,10 +379,13 @@ class UsageRecordingModel(_SDKModel):
                 unknown_ids = getattr(self._model, "_unknown_usage_response_ids", ())
                 if getattr(response, "response_id", None) in (unknown_ids or ()):
                     self.ledger.mark_unknown(getattr(response, "response_id"))
-            confirmed = self.ledger.confirmed_usd()
-            if confirmed is not None and confirmed > self.ledger.ceiling_usd:
+            if self.ledger.over_ceiling():
+                confirmed = self.ledger.confirmed_usd()
+                bounded = self.ledger.bounded_reserve_usd()
                 raise SpendCeilingExceeded(
-                    f"confirmed spend ${confirmed:.4f} exceeds ceiling "
+                    f"spend ${(confirmed or 0.0) + (bounded or 0.0):.4f} "
+                    f"(confirmed ${confirmed}, bounded "
+                    f"${bounded}) exceeds ceiling "
                     f"${self.ledger.ceiling_usd:.2f}; aborting run with partial ledger")
         except SpendCeilingExceeded:
             raise

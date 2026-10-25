@@ -39,14 +39,42 @@
       "role": "review_backend",
       "privacy": "OPENAI_STANDARD_API_NO_TRAINING",
       "store": false,
+      "processing_tier": "standard",
       "rate_usd_per_mtok": {
         "input": 0.1,
         "output": 0.5,
         "input_cache_hit": 0.01,
-        "input_cache_write": 0.125
+        "input_cache_write": 0.125,
+        "input_cache_write_12h": 0.25,
+        "pricing_backend": "luna",
+        "processing_tier": "standard",
+        "tier_threshold_tokens": 272000,
+        "tier_threshold_basis": "total_input_tokens_including_cache",
+        "tier_threshold_note": "Per OpenAI pricing (Short context: <=272K input tokens; Long: >272K) the threshold is on input tokens as reported, and input_tokens by provider semantics includes cache reads and writes (verified live: cached reads counted inside input_tokens). Tier decision therefore uses reported input_tokens directly.",
+        "tiers": {
+          "short": {
+            "label": "short_context_leq_272k_input",
+            "input": 0.1,
+            "output": 0.5,
+            "input_cache_hit": 0.01,
+            "input_cache_write": 0.125
+          },
+          "long": {
+            "label": "long_context_gt_272k_input",
+            "input": 0.2,
+            "output": 0.75,
+            "input_cache_hit": 0.02,
+            "input_cache_write": 0.25
+          }
+        },
+        "rate_source": {
+          "provider": "OpenAI",
+          "docs_url": "https://developers.openai.com/api/docs/pricing",
+          "retrieved": "2026-10-26"
+        }
       },
-      "rate_status": "standard_verified_2026-10-20_official_docs",
-      "rate_cache_note": "cache_hit 0.1x and cache_write 1.25x of verified base input per provider docs; uncached base rates unchanged",
+      "rate_status": "standard_tier_verified_2026-10-26_official_pricing_short_long",
+      "rate_cache_note": "Active retention is the default 30m (write 1.25x); 12h writes (2.5x) are documented for the assertion but never priced. Flex/batch are 50% and fast 2x; priority renamed Fast mode 2026-07-30. Regional/data-residency +10% uplift exists for eligible models but standard endpoints are used.",
       "max_usd_per_review": 5.0,
       "credential_env": "OPENAI_API_KEY",
       "expected_context": 400000
@@ -60,14 +88,42 @@
       "privacy": "ANTHROPIC_COMMERCIAL_NO_TRAINING_DEFAULT",
       "retention": "30d_standard",
       "thinking": "adaptive_default",
+      "processing_tier": "standard",
       "rate_usd_per_mtok": {
         "input": 0.1,
         "output": 0.5,
         "input_cache_hit": 0.01,
-        "input_cache_write": 0.125
+        "input_cache_write": 0.125,
+        "input_cache_write_1h": 0.2,
+        "pricing_backend": "haiku",
+        "processing_tier": "standard",
+        "tier_threshold_tokens": 100000,
+        "tier_threshold_basis": "prompt_total_uncached_plus_cache_read_plus_cache_write",
+        "tier_threshold_note": "Per Anthropic long-context pricing a request's prompt length counts all of its input tokens, including cache reads and cache writes; each request is priced on its own, even when part of its prompt is a cache hit. Entries with an absent cache split price in the high tier.",
+        "tiers": {
+          "standard": {
+            "label": "prompt_leq_100k",
+            "input": 0.1,
+            "output": 0.5,
+            "input_cache_hit": 0.01,
+            "input_cache_write": 0.125
+          },
+          "high": {
+            "label": "prompt_gt_100k",
+            "input": 0.5,
+            "output": 2.5,
+            "input_cache_hit": 0.05,
+            "input_cache_write": 0.625
+          }
+        },
+        "rate_source": {
+          "provider": "Anthropic",
+          "docs_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-10-26"
+        }
       },
-      "rate_status": "standard_tier_verified_2026-10",
-      "rate_cache_note": "cache_hit 0.1x and cache_write (5m TTL) 1.25x of verified base input per provider docs; uncached base rates unchanged",
+      "rate_status": "standard_tier_verified_2026-10-26_official_pricing_std_high",
+      "rate_cache_note": "Active retention is the default 5m TTL (write 1.25x); 1h writes (2x) are documented for the assertion but never priced. Multipliers stack with batch/data-residency modifiers; batch is 50% (not used).",
       "max_usd_per_review": 5.0,
       "credential_env": "ANTHROPIC_API_KEY",
       "expected_context": 200000
