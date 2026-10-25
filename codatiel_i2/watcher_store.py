@@ -77,6 +77,23 @@ CREATE TABLE IF NOT EXISTS lease (
     owner TEXT NOT NULL,
     heartbeat REAL NOT NULL
 );
+-- SETTLE-01: pending review-settle state. One row per PR: the latest
+-- observed head, when it was first seen (never reset by later pushes
+-- within the episode) and when it last changed (restarted by every new
+-- head). Survives daemon restarts; cleared on dispatch, cancellation
+-- (close/merge/pause) or an already-reviewed head.
+CREATE TABLE IF NOT EXISTS pending_settle (
+    repo TEXT NOT NULL,
+    pr INTEGER NOT NULL,
+    base TEXT NOT NULL,
+    head TEXT NOT NULL,
+    first_seen REAL NOT NULL,
+    last_change REAL NOT NULL,
+    override_by TEXT NOT NULL DEFAULT '',
+    override_reason TEXT NOT NULL DEFAULT '',
+    updated_ts REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (repo, pr)
+);
 """
 
 
@@ -352,6 +369,122 @@ class Store:
         except Exception:
             return set()
         return {r[0] for r in rows}
+
+    # -- pending settle ------------------------------------------------
+    def upsert_pending(self, repo: str, pr: int, base: str, head: str, *,
+                       now: float) -> dict:
+        """Record an eligible observation for settle scheduling.
+
+        A new PR starts an episode (first_seen = last_change = now). A new
+        head within an episode restarts the quiet period (last_change)
+        without resetting first_seen, so the maximum deferral is measured
+        from the first eligible observation. An unchanged head only
+        touches the row. Returns the pending row.
+        """
+        if "" in (repo, base, head) or not pr:
+            raise StoreError("refusing to store identity-deficient pending")
+        try:
+            self.cx.execute(_BEGIN)
+            row = self.cx.execute(
+                "SELECT base, head, first_seen, last_change, override_by, "
+                "override_reason FROM pending_settle WHERE repo=? AND pr=?",
+                (repo, pr)).fetchone()
+            if row is None:
+                self.cx.execute(
+                    "INSERT INTO pending_settle(repo, pr, base, head, "
+                    "first_seen, last_change, updated_ts) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?)",
+                    (repo, pr, base, head, now, now, now))
+                first_seen, last_change = now, now
+                override_by, override_reason = "", ""
+            elif (row[0], row[1]) == (base, head):
+                self.cx.execute(
+                    "UPDATE pending_settle SET updated_ts=? "
+                    "WHERE repo=? AND pr=?", (now, repo, pr))
+                first_seen, last_change = row[2], row[3]
+                override_by, override_reason = row[4], row[5]
+            else:
+                self.cx.execute(
+                    "UPDATE pending_settle SET base=?, head=?, "
+                    "last_change=?, updated_ts=? WHERE repo=? AND pr=?",
+                    (base, head, now, now, repo, pr))
+                first_seen, last_change = row[2], now
+                override_by, override_reason = row[4], row[5]
+            self.cx.execute(_COMMIT)
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"pending upsert failed: {exc}")
+        return {"repo": repo, "pr": pr, "base": base, "head": head,
+                "first_seen": first_seen, "last_change": last_change,
+                "override_by": override_by,
+                "override_reason": override_reason}
+
+    def get_pending(self, repo: str, pr: int) -> dict | None:
+        row = self.cx.execute(
+            "SELECT repo, pr, base, head, first_seen, last_change, "
+            "override_by, override_reason FROM pending_settle "
+            "WHERE repo=? AND pr=?", (repo, pr)).fetchone()
+        if not row:
+            return None
+        keys = ("repo", "pr", "base", "head", "first_seen", "last_change",
+                "override_by", "override_reason")
+        return dict(zip(keys, row))
+
+    def list_pending(self) -> list[dict]:
+        rows = self.cx.execute(
+            "SELECT repo, pr, base, head, first_seen, last_change, "
+            "override_by, override_reason FROM pending_settle "
+            "ORDER BY first_seen ASC").fetchall()
+        keys = ("repo", "pr", "base", "head", "first_seen", "last_change",
+                "override_by", "override_reason")
+        return [dict(zip(keys, row)) for row in rows]
+
+    def clear_pending(self, repo: str, pr: int) -> None:
+        self.cx.execute("DELETE FROM pending_settle WHERE repo=? AND pr=?",
+                        (repo, pr))
+        self.cx.commit()
+
+    def set_pending_override(self, repo: str, pr: int, *, by: str,
+                             reason: str, now: float) -> dict:
+        """Flag a pending PR for immediate review. Explicit and logged:
+        who requested it and why are stored on the row. No pending row
+        means nothing is waiting: refuse rather than invent one."""
+        if not by or not reason:
+            raise StoreError("override needs who requested it and why")
+        try:
+            self.cx.execute(_BEGIN)
+            row = self.cx.execute(
+                "SELECT base, head FROM pending_settle WHERE repo=? AND pr=?",
+                (repo, pr)).fetchone()
+            if row is None:
+                raise StoreError(f"no pending settle for {repo}#{pr}")
+            self.cx.execute(
+                "UPDATE pending_settle SET override_by=?, override_reason=?, "
+                "updated_ts=? WHERE repo=? AND pr=?",
+                (by, reason, now, repo, pr))
+            self.cx.execute(_COMMIT)
+        except StoreError:
+            raise
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"pending override failed: {exc}")
+        return self.get_pending(repo, pr) or {}
+
+    def consume_pending_override(self, repo: str, pr: int, *,
+                                 now: float) -> None:
+        """Clear an override once its dispatch has been attempted. The
+        pending episode itself continues on retry; terminal outcomes clear
+        the whole row via clear_pending."""
+        self.cx.execute(
+            "UPDATE pending_settle SET override_by='', override_reason='', "
+            "updated_ts=? WHERE repo=? AND pr=?", (now, repo, pr))
+        self.cx.commit()
 
     # -- lease ----------------------------------------------------------
     def acquire_lease(self, owner: str, ttl_s: float = 600.0) -> None:

@@ -76,11 +76,15 @@ def build_parser() -> argparse.ArgumentParser:
     watcher.add_argument("op", choices=["activate", "run-once", "daemon",
                                         "status", "backfill",
                                         "replay-delivery", "pause-repo",
-                                        "resume-repo", "reconcile"],
+                                        "resume-repo", "reconcile",
+                                        "settle-override"],
                          help="run-once: single poll; daemon: loop until "
                               "SIGTERM; status: state summary; backfill: "
                               "run-once; replay-delivery: "
-                              "resend one run's digest without new inference")
+                              "resend one run's digest without new inference; "
+                              "settle-override: flag one pending PR for "
+                              "immediate review (--repos single, --pr, --by, "
+                              "--reason required)")
     watcher.add_argument("--repos", default="",
                          help="comma-separated owner/name allowlist "
                               "(default: CODATIEL_WATCH_REPOS)")
@@ -107,6 +111,10 @@ def build_parser() -> argparse.ArgumentParser:
                          help="reconcile: provider-confirmed actual USD")
     watcher.add_argument("--note", default="",
                          help="reconcile: evidence note (required)")
+    watcher.add_argument("--by", default="",
+                         help="settle-override: who requested it (required)")
+    watcher.add_argument("--reason", default="",
+                         help="settle-override: why now (required)")
     return parser
 
 
@@ -141,7 +149,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return 0 if payload.get("status") in ("ok", "delivered",
                                               "duplicate-suppressed",
-                                              "paused", "resumed") else 1
+                                              "paused", "resumed",
+                                              "override-set") else 1
     return 1
 
 
@@ -182,7 +191,11 @@ def watcher_config_from_env(args: Any) -> Any:
         recipients=to, sender=sender, spend_total_cap_usd=cap,
         spend_seed_usd=seed, spend_daily_cap_usd=daily,
         per_poll_cap=int(os.environ.get("CODATIEL_WATCH_PER_POLL_CAP",
-                                        "3")))
+                                        "3")),
+        settle_quiet_s=float(os.environ.get("CODATIEL_SETTLE_QUIET_S",
+                                            "900")),
+        settle_max_deferral_s=float(os.environ.get(
+            "CODATIEL_SETTLE_MAX_DEFERRAL_S", "3600")))
     return cfg, state, interval
 
 
@@ -268,6 +281,40 @@ def cmd_watcher(args: Any) -> dict:
                 "repos": args.repos}
     if op == "reconcile":
         return cmd_watcher_reconcile(args)
+    if op == "settle-override":
+        repos = [r.strip() for r in (args.repos or "").split(",")
+                 if r.strip()]
+        if len(repos) != 1 or not args.pr:
+            return {"status": "failed", "stage": "config",
+                    "error": "settle-override needs one --repos entry and --pr"}
+        try:
+            number = int(args.pr)
+        except (TypeError, ValueError):
+            return {"status": "failed", "stage": "config",
+                    "error": "settle-override needs a numeric --pr"}
+        if not args.by or not args.reason:
+            return {"status": "failed", "stage": "config",
+                    "error": "settle-override needs --by and --reason"}
+        try:
+            _st = store_mod.Store(
+                Path(state_path).with_suffix(_SQLITE_SUFFIX))
+        except Exception as exc:
+            return {"status": "failed", "stage": "store",
+                    "error": str(exc)}
+        try:
+            import time as _time2
+            row = _st.set_pending_override(
+                repos[0], number, by=args.by, reason=args.reason,
+                now=_time2.time())
+        except Exception as exc:
+            return {"status": "failed", "stage": "settle-override",
+                    "error": str(exc)}
+        finally:
+            _st.close()
+        return {"status": "override-set",
+                "pr": f"{repos[0]}#{number}",
+                "by": row.get("override_by"),
+                "reason": row.get("override_reason")}
     if op == "replay-delivery":
         return cmd_watcher_replay(args)
     if op == "backfill":

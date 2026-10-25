@@ -42,7 +42,12 @@ def make_mgr(tmp_path: Path, **kw) -> tuple[M.ManagerConfig, S.Store, M.Manager]
         sender="codatiel@example.com", runs_root=tmp_path / "runs",
         work_root=tmp_path / "work", spend_total_cap_usd=5.0,
         spend_seed_usd=0.0, spend_daily_cap_usd=2.0,
-        per_poll_cap=kw.pop("per_poll_cap", 3))
+        per_poll_cap=kw.pop("per_poll_cap", 3),
+        # v0.1.1 acceptance gates pin same-cycle dispatch: settle timing
+        # is covered separately (tests/test_settle_01.py) with explicit
+        # quiet/max-deferral values and a fake clock.
+        settle_quiet_s=kw.pop("settle_quiet_s", 0),
+        settle_max_deferral_s=kw.pop("settle_max_deferral_s", 0))
     for k, v in kw.items():
         setattr(cfg, k, v)
     store = S.Store(tmp_path / "watch.sqlite")

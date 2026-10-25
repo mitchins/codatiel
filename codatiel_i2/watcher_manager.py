@@ -46,6 +46,11 @@ class ManagerConfig:
     sender: str = ""
     runs_root: Path = Path("runs")
     work_root: Path = Path(".codatiel-i2-work")
+    # SETTLE-01: review settled heads, not every push. A new head
+    # restarts the quiet period; the maximum deferral is measured from
+    # the first eligible observation and no new push resets it.
+    settle_quiet_s: float = 900.0
+    settle_max_deferral_s: float = 3600.0
 
 
 EMAIL_FINDING_CAP = 10
@@ -382,13 +387,23 @@ class Manager:
                 cur = self.store.get_pair(vpr.repo, vpr.number,
                                           vpr.base_sha, vpr.head_sha)
                 if cur and cur["status"] in ("queued", "running",
-                                             "complete", "delivered",
-                                             "failed", "suppressed"):
+                                              "complete", "delivered",
+                                              "failed", "suppressed"):
                     continue  # already handled; no duplicates
+                # SETTLE-01: an eligible head waits out the quiet period
+                # instead of dispatching same-cycle. Pending state
+                # persists across daemon restarts (SQLite).
+                self.store.upsert_pending(
+                    vpr.repo, vpr.number, vpr.base_sha, vpr.head_sha,
+                    now=self.now())
                 self.store.set_status(vpr.repo, vpr.number,
                                       vpr.base_sha, vpr.head_sha, "eligible")
                 out["admitted"] += 1
-                pairs.append((repo, vpr))
+        # SETTLE-01: release due pending rows into the dispatch flow.
+        # Pre-dispatch re-confirmation runs here: the head must still be
+        # current and the PR open and unpaused, or the row waits, moves,
+        # or is cancelled instead of dispatching.
+        pairs.extend(self._due_settled_pairs(out))
         admitted = 0
         # Drain previously queued pairs first (oldest), revalidating at
         # dispatch; then admit newly eligible pairs into remaining cap.
@@ -415,6 +430,19 @@ class Manager:
             rec = self.dispatch(repo, number, base, head, today)
             out["dispatched"].append(rec)
             admitted += 1
+            # SETTLE-01: a terminal dispatch outcome ends the pending
+            # episode; anything still eligible or queued keeps settling.
+            # Consumed overrides never linger into the next episode.
+            try:
+                cur = self.store.get_pair(repo, number, base, head) or {}
+                if cur.get("status") not in ("eligible", "queued"):
+                    self.store.clear_pending(repo, number)
+                else:
+                    self.store.consume_pending_override(repo, number,
+                                                        now=self.now())
+            except Exception as exc:
+                out["errors"].append({"settle": f"{type(exc).__name__}: "
+                                                f"{exc}"})
             try:
                 self.check_in()
             except Exception:
@@ -469,7 +497,121 @@ class Manager:
             if result == "delivered":
                 self.store.set_status(repo2, number2, base2, head2,
                                       "delivered")
+        out["settle_pending"] = len(self.store.list_pending())
         return out
+
+    # -- settle ---------------------------------------------------------
+    def _due_settled_pairs(self, out: dict) -> list[tuple[str, Any]]:
+        """Release due pending rows into the dispatch flow.
+
+        Returns (repo, ValidatedPR) pairs whose quiet period has elapsed,
+        whose maximum deferral has fired, or which carry an explicit
+        immediate-review override. Every other row waits, follows a moved
+        head, or is cancelled; nothing dispatches without a fresh
+        pre-dispatch re-confirmation.
+        """
+        now = self.now()
+        due: list[tuple[str, Any]] = []
+        waiting = moved = cancelled = 0
+        for pend in self.store.list_pending():
+            decision, vpr, note = self._settle_decision(pend, now)
+            if decision == "due" and vpr is not None:
+                due.append((pend["repo"], vpr))
+                if pend.get("override_by"):
+                    out.setdefault("settle_overrides", []).append(
+                        {"pr": f"{pend['repo']}#{pend['pr']}",
+                         "by": pend["override_by"],
+                         "reason": pend["override_reason"]})
+            elif decision == "moved":
+                moved += 1
+            elif decision == "cancelled":
+                cancelled += 1
+            else:
+                waiting += 1
+        out["settle_waiting"] = waiting
+        out["settle_moved"] = moved
+        out["settle_cancelled"] = cancelled
+        return due
+
+    def _settle_decision(self, pend: dict, now: float
+                         ) -> tuple[str, Any | None, str]:
+        """One pending row: due / wait / moved / cancelled.
+
+        Pre-dispatch re-confirmation fetches the PR fresh: a closed,
+        merged or vanished PR cancels the row; a moved head follows it
+        (restarting the quiet period, keeping first_seen); a draft or a
+        transient fetch failure waits; anything else dispatches once the
+        quiet period has elapsed, the maximum deferral has fired, or an
+        explicit override demands it.
+        """
+        repo, number = pend["repo"], pend["pr"]
+        if repo in self.store.paused_repos():
+            self.store.clear_pending(repo, number)
+            return "cancelled", None, "repo paused"
+        try:
+            raw, err = self.fetch(repo, number)
+        except Exception as exc:
+            return "wait", None, f"{type(exc).__name__}: {exc}"
+        if raw is None:
+            if (err or "") == _NOT_FOUND:
+                # Vanished from GitHub: cancel like a terminal dispatch
+                # outcome so the row cannot linger unsettled.
+                self.store.clear_pending(repo, number)
+                try:
+                    self.store.set_status(repo, number, pend["base"],
+                                          pend["head"], "suppressed",
+                                          note="settle: pr not found")
+                except Exception:
+                    pass
+                return "cancelled", None, _NOT_FOUND
+            return "wait", None, f"{_FETCH_PREFIX}{err or 'failed'}"
+        vpr, reason = E.validate_pr_metadata(repo, raw)
+        if vpr is None:
+            if "state" in reason or "merged" in reason:
+                self.store.clear_pending(repo, number)
+                return "cancelled", None, reason
+            return "wait", None, reason
+        if (vpr.base_sha, vpr.head_sha) != (pend["base"], pend["head"]):
+            # Follow the moved head: the quiet period restarts, the
+            # maximum deferral does not. Re-evaluate immediately so a
+            # fired deferral still ends starvation on the current head.
+            fresh = self.store.upsert_pending(
+                repo, number, vpr.base_sha, vpr.head_sha, now=now)
+            if vpr.is_draft:
+                return "moved", None, "draft: held until marked ready"
+            cur = self.store.get_pair(repo, number, vpr.base_sha,
+                                      vpr.head_sha) or {}
+            if cur.get("status") in ("queued", "running", "complete",
+                                     "delivered", "failed", "suppressed"):
+                self.store.clear_pending(repo, number)
+                return "cancelled", None, "head already reviewed"
+            decision, live, note = self._settle_decision_fresh(
+                fresh, vpr, now)
+            if decision == "due":
+                return "due", live, note
+            return "moved", None, "head moved; settling restarted"
+        if vpr.is_draft:
+            return "wait", None, "draft: held until marked ready"
+        cur = self.store.get_pair(repo, number, vpr.base_sha,
+                                  vpr.head_sha) or {}
+        if cur.get("status") in ("queued", "running", "complete",
+                                 "delivered", "failed", "suppressed"):
+            self.store.clear_pending(repo, number)
+            return "cancelled", None, "head already reviewed"
+        return self._settle_decision_fresh(pend, vpr, now)
+
+    def _settle_decision_fresh(self, pend: dict, vpr: Any,
+                               now: float) -> tuple[str, Any | None, str]:
+        """Due check for a pending row known to match the live head."""
+        if pend.get("override_by"):
+            return "due", vpr, "immediate-review override"
+        quiet = float(self.cfg.settle_quiet_s)
+        maxdef = float(self.cfg.settle_max_deferral_s)
+        if now - pend["last_change"] >= quiet:
+            return "due", vpr, "quiet period elapsed"
+        if now - pend["first_seen"] >= maxdef:
+            return "due", vpr, "maximum deferral reached"
+        return "wait", None, "settling"
 
     # -- budget ---------------------------------------------------------
     def availability(self, day: str) -> float:
