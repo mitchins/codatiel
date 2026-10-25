@@ -19,6 +19,36 @@ CONFIRMED_USAGE = "CONFIRMED_USAGE"
 UNKNOWN_USAGE = "UNKNOWN_USAGE"
 CONFIRMED_ZERO_USAGE = "CONFIRMED_ZERO_USAGE"
 
+# Per-request cache telemetry states (CACHE-01). Assigned by
+# classify_cache() from provider-reported fields plus the backend's
+# known caching capability — never inferred from totals.
+CACHE_HIT = "CACHE_HIT"
+CACHE_MISS = "CACHE_MISS"
+CACHE_UNSUPPORTED = "CACHE_UNSUPPORTED"
+CACHE_USAGE_UNAVAILABLE = "CACHE_USAGE_UNAVAILABLE"
+
+
+def classify_cache(entry: dict[str, Any] | None,
+                   capable: bool | None) -> str:
+    """Distinguish hit / miss / unsupported / unavailable for one entry.
+
+    ``capable`` is the backend's known caching capability (True when the
+    provider supports caching on this path, False when it cannot, None
+    when unknown). Missing usage is always UNAVAILABLE, never a
+    silent zero or an assumed miss.
+    """
+    if not entry or not entry.get("usage_known"):
+        return CACHE_USAGE_UNAVAILABLE
+    if capable is False:
+        return CACHE_UNSUPPORTED
+    read = entry.get("cached_input_tokens") or 0
+    write = entry.get("cache_write_input_tokens") or 0
+    if read > 0:
+        return CACHE_HIT
+    if write > 0 or capable:
+        return CACHE_MISS
+    return CACHE_USAGE_UNAVAILABLE
+
 
 class SpendCeilingExceeded(RuntimeError):
     """Raised when confirmed per-response spend already exceeds the ceiling."""
@@ -96,6 +126,7 @@ class SpendLedger:
                                "input_tokens": None, "output_tokens": None,
                                "usage_known": False,
                                "cached_input_tokens": None,
+                               "cache_write_input_tokens": None,
                                "reasoning_output_tokens": None}
             elif key not in merged and key not in self.entries:
                 merged[key] = {
@@ -105,6 +136,7 @@ class SpendLedger:
                     "output_tokens": row.get("output_tokens"),
                     "usage_known": bool(row.get("usage_known", False)),
                     "cached_input_tokens": row.get("cached_input_tokens"),
+                    "cache_write_input_tokens": row.get("cache_write_input_tokens"),
                     "reasoning_output_tokens": row.get("reasoning_output_tokens"),
                 }
         for key, entry in merged.items():
@@ -127,6 +159,8 @@ class SpendLedger:
 
     def record_response(self, response_id: Any, usage: Any,
                         cached_input_tokens: Any = None,
+                        cache_write_input_tokens: Any = None,
+                        cache_in_input: Any = None,
                         reasoning_output_tokens: Any = None) -> bool:
         """Record one completed provider response.
 
@@ -135,11 +169,18 @@ class SpendLedger:
         is kept as unknown rather than silently merged. Every new entry is
         appended to the sink immediately when one is attached.
 
-        ``cached_input_tokens`` / ``reasoning_output_tokens`` are recorded
-        only when the caller passes provider-reported token details (backends
-        whose adapter marks usage details as provider-sourced). They default
-        to None (not reported), never to zero: an absent detail must not
-        masquerade as a reported zero.
+        ``cached_input_tokens`` (cache reads) /
+        ``cache_write_input_tokens`` / ``reasoning_output_tokens`` are
+        recorded only when the caller passes provider-reported token details
+        (backends whose adapter marks usage details as provider-sourced).
+        They default to None (not reported), never to zero: an absent
+        detail must not masquerade as a reported zero.
+
+        ``cache_in_input`` records whether the provider's ``input_tokens``
+        already include the cache sub-counts (True: OpenAI family —
+        uncached slice = input − read − write; False: Anthropic —
+        input_tokens counts only uncached tokens). Unknown defaults to
+        True, the conservative upper bound (never undercounts).
         """
         key = str(response_id) if response_id not in (None, "") else None
         if key is not None and key in self.entries:
@@ -152,13 +193,19 @@ class SpendLedger:
         if usage is None or requests is None or input_tokens is None or output_tokens is None:
             entry = {"response_id": key, "requests": 1 if usage is None else max(1, requests or 1),
                      "input_tokens": None, "output_tokens": None, "usage_known": False,
-                     "cached_input_tokens": None, "reasoning_output_tokens": None}
+                     "cached_input_tokens": None, "cache_write_input_tokens": None,
+                     "cache_in_input": True,
+                     "reasoning_output_tokens": None}
         else:
             entry = {"response_id": key, "requests": max(1, requests),
                      "input_tokens": input_tokens, "output_tokens": output_tokens,
                      "usage_known": True,
                      "cached_input_tokens": (None if cached_input_tokens is None
                                              else _as_int(cached_input_tokens)),
+                     "cache_write_input_tokens": (None if cache_write_input_tokens is None
+                                                  else _as_int(cache_write_input_tokens)),
+                     "cache_in_input": (True if cache_in_input is None
+                                        else bool(cache_in_input)),
                      "reasoning_output_tokens": (
                          None if reasoning_output_tokens is None
                          else _as_int(reasoning_output_tokens))}
@@ -178,6 +225,8 @@ class SpendLedger:
         entry["output_tokens"] = None
         entry["usage_known"] = False
         entry["cached_input_tokens"] = None
+        entry["cache_write_input_tokens"] = None
+        entry["cache_in_input"] = True
         entry["reasoning_output_tokens"] = None
         self._append_sink({**entry, "usage_known_correction": True})
 
@@ -215,6 +264,18 @@ class SpendLedger:
         except (TypeError, ValueError):
             return None
 
+    def _rate_write(self, rate_in: float) -> float | None:
+        """Cache-write rate, falling back to the flat input rate.
+
+        A write priced at the input rate is the documented conservative
+        upper bound when the provider's write premium is unpriced.
+        """
+        try:
+            write = self.rate.get("input_cache_write")
+            return float(write) if write is not None else rate_in
+        except (TypeError, ValueError):
+            return rate_in
+
     def confirmed_usd(self) -> float | None:
         """Confirmed lower-bound cost of known-usage requests, or None when
         rates are unconfirmed.
@@ -222,23 +283,37 @@ class SpendLedger:
         When the rate provides ``input_cache_hit`` and an entry carries
         provider-reported ``cached_input_tokens``, that slice is priced at
         the hit rate and the remainder at the miss (``input``) rate.
-        Otherwise the flat ``input`` rate applies — a conservative upper
-        bound when caching is unpriced.
+        Cache writes price at ``input_cache_write`` (else the flat input
+        rate). Otherwise the flat ``input`` rate applies — a conservative
+        upper bound when caching is unpriced.
         """
         rate_in, rate_out = self._rate_pair()
         if rate_in is None or rate_out is None:
             return None
         rate_hit = self._rate_hit()
+        rate_write = self._rate_write(rate_in)
         total = 0.0
         for entry in self.entries.values():
             if not entry["usage_known"]:
                 continue
-            cached = entry.get("cached_input_tokens")
-            if rate_hit is not None and cached is not None:
-                total += ((entry["input_tokens"] - cached) / 1e6 * rate_in
+            cached = entry.get("cached_input_tokens") or 0
+            written = entry.get("cache_write_input_tokens") or 0
+            if entry.get("cache_in_input", True):
+                # OpenAI-family semantics: input_tokens is the whole prompt
+                # INCLUDING cache sub-counts. The uncached slice excludes
+                # both, otherwise writes would be priced twice.
+                uncached = max(0, entry["input_tokens"] - cached - written)
+            else:
+                # Anthropic semantics: input_tokens counts only uncached
+                # tokens; cache reads and writes are separate billed lines.
+                uncached = entry["input_tokens"]
+            if rate_hit is not None and entry.get("cached_input_tokens") is not None:
+                total += (uncached / 1e6 * rate_in
                           + cached / 1e6 * rate_hit)
             else:
                 total += entry["input_tokens"] / 1e6 * rate_in
+            if written:
+                total += written / 1e6 * rate_write
             total += entry["output_tokens"] / 1e6 * rate_out
         return total
 
@@ -263,6 +338,9 @@ class SpendLedger:
         cached_in = sum(entry.get("cached_input_tokens") or 0
                         for entry in self.entries.values()
                         if entry["usage_known"])
+        cache_written = sum(entry.get("cache_write_input_tokens") or 0
+                            for entry in self.entries.values()
+                            if entry["usage_known"])
         reasoning_out = sum(entry.get("reasoning_output_tokens") or 0
                             for entry in self.entries.values()
                             if entry["usage_known"])
@@ -280,8 +358,9 @@ class SpendLedger:
                             "input_tokens": known_in, "output_tokens": known_out},
                    "known_requests": known_requests,
                    "usage_details_reported_responses": detail_responses,
-                   "cached_input_tokens": cached_in,
-                   "reasoning_output_tokens": reasoning_out,
+                    "cached_input_tokens": cached_in,
+                    "cache_write_input_tokens": cache_written,
+                    "reasoning_output_tokens": reasoning_out,
                    "unknown_requests": unknown_requests,
                   "unknown_response_ids": unknown_ids,
                   "rate_status": self.rate_status,

@@ -433,6 +433,19 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 "error": f"durable spend sink unavailable: {ledger.sink_error}",
                 "service_version": SERVICE_VERSION}
     recorded_model = runtime_sdk.UsageRecordingModel(model, ledger)
+    # CACHE-01: stable per-review OpenAI prompt-cache partition for Luna.
+    # The SDK default mints a fresh key per Runner invocation, which
+    # guarantees zero cross-turn cache reuse. The key is metadata only;
+    # instructions, tools and evidence are byte-identical either way.
+    # Other backends are untouched (Haiku uses explicit Anthropic
+    # breakpoints; the custom adapters ignore extra_args).
+    prompt_cache_key = None
+    if str(model_name or "").startswith("luna:"):
+        prompt_cache_key = runtime_sdk.prompt_cache_key_for(
+            repo=ws.repo, base_sha=base_sha, head_sha=head_sha,
+            instructions_id=instructions_id, model_name=model_name)
+        model_settings = runtime_sdk.with_prompt_cache_key(
+            model_settings, prompt_cache_key)
     try:
         result = runtime_sdk.run_review(
             instructions=instructions,
@@ -561,6 +574,7 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
         verifications=verifications, findings=findings, metrics=metrics,
         tool_calls=tool_calls,
         model_calls=[{"model": model_name, "max_turns": max_turns,
+                      "prompt_cache_key": prompt_cache_key,
                       "scripted": bool(getattr(model, "is_scripted", False)),
                       "usage": spend.get("usage", {}),
                       "thinking_blocks_seen": int(getattr(

@@ -41,9 +41,12 @@
       "store": false,
       "rate_usd_per_mtok": {
         "input": 0.1,
-        "output": 0.5
+        "output": 0.5,
+        "input_cache_hit": 0.01,
+        "input_cache_write": 0.125
       },
       "rate_status": "standard_verified_2026-10-20_official_docs",
+      "rate_cache_note": "cache_hit 0.1x and cache_write 1.25x of verified base input per provider docs; uncached base rates unchanged",
       "max_usd_per_review": 5.0,
       "credential_env": "OPENAI_API_KEY",
       "expected_context": 400000
@@ -59,9 +62,12 @@
       "thinking": "adaptive_default",
       "rate_usd_per_mtok": {
         "input": 0.1,
-        "output": 0.5
+        "output": 0.5,
+        "input_cache_hit": 0.01,
+        "input_cache_write": 0.125
       },
       "rate_status": "standard_tier_verified_2026-10",
+      "rate_cache_note": "cache_hit 0.1x and cache_write (5m TTL) 1.25x of verified base input per provider docs; uncached base rates unchanged",
       "max_usd_per_review": 5.0,
       "credential_env": "ANTHROPIC_API_KEY",
       "expected_context": 200000
