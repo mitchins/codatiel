@@ -24,6 +24,9 @@ from codatiel_i2 import watcher_eligibility as E
 from codatiel_i2 import watcher_store as S
 
 HAIKU_TRIGGER = ("incomplete_budget_exhausted",
+                 "incomplete_pricing_unbounded",
+                 "incomplete_budget_ceiling",
+                 "inconclusive",
                  "unresolved_empty_final",
                  "unresolved_unparseable")
 PER_REVIEW_RESERVE_USD = 1.0

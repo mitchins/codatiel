@@ -33,6 +33,7 @@ from codatiel_i2.core.findings import (
     DETECTORS,
     is_verified_proof_kind,
 )
+from codatiel_i2 import final as final_mod
 from codatiel_i2.core.workspace import (
     Workspace,
     fetch_github_pr_metadata,
@@ -164,7 +165,7 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                  variant: str = "baseline",
                  playbook_name: str | None = None,
                  playbook_text: str | None = None,
-                 inventory_strategy: str = INVENTORY_STRATEGY) -> dict[str, Any]:
+                 inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False) -> dict[str, Any]:
     """Run one canonical review over a local repository revision pair."""
     ws = prepare_local_workspace(Path(repo_root), base, head,
                                  Path(work_root))
@@ -179,7 +180,8 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                        tool_budget=tool_budget, variant=variant,
                        playbook_name=playbook_name,
                        playbook_text=playbook_text,
-                       inventory_strategy=inventory_strategy)
+                       inventory_strategy=inventory_strategy,
+                       enable_final=enable_final)
 
 
 def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
@@ -195,7 +197,7 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                expected_head: str | None = None,
                playbook_name: str | None = None,
                playbook_text: str | None = None,
-               inventory_strategy: str = INVENTORY_STRATEGY) -> dict[str, Any]:
+               inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False) -> dict[str, Any]:
     """Run one canonical review over a GitHub PR (base/head from the PR).
 
     When ``expected_base``/``expected_head`` are given (frozen roster SHAs),
@@ -232,7 +234,8 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                        pr_number=pr, variant=variant,
                        playbook_name=playbook_name,
                        playbook_text=playbook_text,
-                       inventory_strategy=inventory_strategy)
+                       inventory_strategy=inventory_strategy,
+                       enable_final=enable_final)
 
 
 def _collect_provider_termination(model: Any) -> dict[str, str]:
@@ -315,7 +318,7 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                variant: str = "baseline",
                playbook_name: str | None = None,
                playbook_text: str | None = None,
-               inventory_strategy: str = INVENTORY_STRATEGY) -> dict[str, Any]:
+               inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False) -> dict[str, Any]:
     import os
 
     from codatiel_i2 import providers as providers_mod
@@ -486,6 +489,59 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
         # instead of replacing it with an abbreviated record.
         is_budget_exhausted = type(exc).__name__ == "MaxTurnsExceeded"
         if is_budget_exhausted:
+            if enable_final:
+                try:
+                    _pr = getattr(exc, "run_data", None)
+                    avail_ev = []
+                    try:
+                        avail_ev = _harvest_tool_evidence(_pr) if _pr is not None else []
+                    except Exception:
+                        avail_ev = []
+                    try:
+                        if 'bundle_evidence' in locals() and bundle_evidence:
+                            avail_ev = avail_ev + list(bundle_evidence)
+                    except Exception:
+                        pass
+                    avail = []
+                    seen=set()
+                    for e in avail_ev:
+                        eid=e.get("evidence_id")
+                        if eid and eid not in seen:
+                            seen.add(eid)
+                            avail.append(eid)
+                    final_user = final_mod.final_prompt(avail)
+                    from codatiel_i2 import runtime_sdk as _rs2
+                    final_res = _rs2.run_review(
+                        instructions=instructions,
+                        user_input=final_user,
+                        tools=[], model=recorded_model, max_turns=1,
+                        model_settings=model_settings, usage_ledger=ledger)
+                    f_parsed, f_errors = _parse_model_output(final_res.final_output)
+                    ok, _ = final_mod.validate_final(f_parsed, avail)
+                    if ok:
+                        f_status = f_parsed.get("status")
+                        final_status = "inconclusive" if f_status == "inconclusive" else "complete"
+                        class _Synth:
+                            def __init__(self, orig, f_parsed):
+                                self.orig = orig
+                                self.f_parsed = f_parsed
+                                self.new_items = getattr(orig, "new_items", []) if orig else []
+                                self.final_output = __import__('json').dumps(f_parsed)
+                        synth = _Synth(_pr, f_parsed)
+                        return _write_failed_run(
+                            runs_root, ws, changes, classification, model_name, max_turns,
+                            rate or {}, rate_status, ceiling, ledger, stage="budget_exhausted_final",
+                            error=f"turn budget exhausted after {max_turns} turns; final disposition: {f_status}",
+                            status=final_status,
+                            ctx=ctx, partial_result=synth, model_obj=recorded_model,
+                            variant=variant, instructions=instructions,
+                            instructions_id=instructions_id, inventory=inventory,
+                            user_input=user_input, playbook_name=playbook_name,
+                            playbook_text=playbook_text,
+                            inventory_strategy_name=inventory_strategy_name,
+                            pr_number=pr_number)
+                except Exception:
+                    pass
             partial_result = getattr(exc, "run_data", None)
             return _write_failed_run(
                 runs_root, ws, changes, classification, model_name, max_turns,
@@ -601,6 +657,53 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
         status = "incomplete_no_tool_use"
     else:
         status = "complete"
+    if enable_final:
+        at_risk = (
+            len([e for e in ctx.tool_log if e]) >= 38
+            or status in ("incomplete_no_tool_use", "unresolved_empty_final", "unresolved_unparseable")
+        )
+        if at_risk:
+            try:
+                avail_ev2 = tool_evidence
+                avail2 = []
+                seen2=set()
+                for e in avail_ev2:
+                    eid=e.get("evidence_id")
+                    if eid and eid not in seen2:
+                        seen2.add(eid)
+                        avail2.append(eid)
+                final_user2 = final_mod.final_prompt(avail2)
+                from codatiel_i2 import runtime_sdk as _rs3
+                final_res2 = _rs3.run_review(
+                    instructions=instructions,
+                    user_input=final_user2,
+                    tools=[], model=recorded_model, max_turns=1,
+                    model_settings=model_settings, usage_ledger=ledger)
+                f2_parsed, f2_errors = _parse_model_output(final_res2.final_output)
+                ok2, _ = final_mod.validate_final(f2_parsed, avail2)
+                if ok2:
+                    f2_status = f2_parsed.get("status")
+                    if f2_status == "inconclusive":
+                        status = "inconclusive"
+                    elif f2_status in ("finding", "silence"):
+                        status = "complete"
+                    parsed, parse_errors = f2_parsed, f2_errors
+                    model_findings, model_rows = _dispose_model_findings(
+                        parsed, ctx, tool_evidence, changed_paths)
+                    detector_rows, observations = _dispose_detector_findings(
+                        det_findings, det_evidence, det_verifications, det_facts, det_proofs,
+                        det_candidates, base_dir, head_dir, changed_paths, base_sha, head_sha)
+                    findings = detector_rows + model_rows
+                    evidence = det_evidence + tool_evidence
+                    final_tag_success = "finalized_under_budget"
+                else:
+                    final_tag_success = None
+            except Exception:
+                final_tag_success = None
+        else:
+            final_tag_success = None
+    else:
+        final_tag_success = None
     provenance = _prompt_provenance(
         instructions=instructions, instructions_id=instructions_id,
         user_input=user_input, inventory=inventory,
@@ -619,6 +722,14 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 "variant": variant}
     if bundle_meta is not None:
         metrics["bundle"] = bundle_meta
+    _ft = None
+    if 'final_tag' in locals() and locals().get('final_tag'):
+        _ft = locals().get('final_tag')
+    elif 'final_tag_success' in locals() and locals().get('final_tag_success'):
+        _ft = locals().get('final_tag_success')
+    if _ft:
+        metrics["final_tag"] = _ft
+        metrics["finalized_under_budget"] = (_ft == "finalized_under_budget")
     config = {"service": SERVICE_VERSION, "model": model_name,
               "max_turns": max_turns,
               "instructions": instructions_version,
@@ -831,7 +942,7 @@ def _parse_model_output(final: Any) -> tuple[dict, list[str]]:
             return {"status": "unresolved", "findings": []}, [f"unparseable: {exc}"]
     if not isinstance(parsed, dict):
         return {"status": "unresolved", "findings": []}, ["final output not an object"]
-    if parsed.get("status") not in ("finding", "silence"):
+    if parsed.get("status") not in ("finding", "silence", "inconclusive"):
         errors.append(f"unknown status {parsed.get('status')!r} treated as unresolved")
         parsed["status"] = "unresolved"
     if not isinstance(parsed.get("findings", []), list):
@@ -1294,6 +1405,9 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                 "error": error,
                   "spend": _spend_record(active, model_name, completed=False),
                "variant": variant}
+    if stage == "budget_exhausted_final":
+        metrics["final_tag"] = "finalized_under_budget"
+        metrics["finalized_under_budget"] = True
     # Preserve investigation progress: tool calls and evidence count
     if tool_calls:
         metrics["tool_calls"] = len(tool_calls)
