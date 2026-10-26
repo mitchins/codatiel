@@ -375,7 +375,24 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     instructions_version = instructions_id
     # M9.2 P3 arms: A/B use the file-list inventory; C uses the generic
     # deterministic triage inventory. Strategy recorded in provenance.
-    if inventory_strategy == "triage-0.1":
+    # CONTEXT-01 Feature A: bundle-0.1 (prepared change bundle). The
+    # bundle replaces the inventory in the first message (stable prefix,
+    # cache-friendly); prompt instructions, tools and budgets are
+    # identical across arms.
+    bundle_meta: dict[str, Any] | None = None
+    if inventory_strategy == "bundle-0.1":
+        from codatiel_i2 import context_bundle as bundle_mod
+        bundle = bundle_mod.build_change_bundle(
+            diff_repo=diff_repo, base_sha=base_sha, head_sha=head_sha,
+            changes=changes, classification=classification,
+            base_dir=base_dir, head_dir=head_dir)
+        inventory = bundle.text
+        inventory_strategy_name = inventory_strategy
+        bundle_meta = {"schema": bundle_mod.BUNDLE_SCHEMA,
+                       "chars": len(bundle.text),
+                       "omitted_files": len(bundle.omitted_files),
+                       "truncated": bundle.truncated}
+    elif inventory_strategy == "triage-0.1":
         from codatiel_i2 import triage as triage_mod
         inventory = triage_mod.render_triage_inventory(
             changes, classification, det_candidates, diff_repo=diff_repo,
@@ -388,7 +405,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     else:
         return {"status": "failed", "stage": "inventory_strategy",
                 "error": f"unknown inventory_strategy {inventory_strategy!r}; "
-                         f"expected {INVENTORY_STRATEGY!r} or 'triage-0.1'",
+                         f"expected {INVENTORY_STRATEGY!r}, 'triage-0.1' or "
+                         "'bundle-0.1'",
                 "service_version": SERVICE_VERSION}
     user_input = ("Review this change between BASE and HEAD. "
                   f"Repository: {ws.repo}. {inventory}")
@@ -584,6 +602,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                  "spend": spend,
                  "wall_seconds": round(time.time() - started, 2),
                 "variant": variant}
+    if bundle_meta is not None:
+        metrics["bundle"] = bundle_meta
     config = {"service": SERVICE_VERSION, "model": model_name,
               "max_turns": max_turns,
               "instructions": instructions_version,
