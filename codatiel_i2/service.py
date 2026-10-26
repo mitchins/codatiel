@@ -375,22 +375,30 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     instructions_version = instructions_id
     # M9.2 P3 arms: A/B use the file-list inventory; C uses the generic
     # deterministic triage inventory. Strategy recorded in provenance.
-    # CONTEXT-01 Feature A: bundle-0.1 (prepared change bundle). The
-    # bundle replaces the inventory in the first message (stable prefix,
-    # cache-friendly); prompt instructions, tools and budgets are
-    # identical across arms.
+    # CONTEXT-01 arms: bundle-0.1 (prepared change bundle, Feature A)
+    # and bundle-cite-0.1 (bundle plus citable changed-line evidence,
+    # Feature B). The bundle replaces the inventory in the first message
+    # (stable prefix, cache-friendly); prompt instructions, tools and
+    # budgets are identical across arms.
+    bundle_evidence: list[dict] = []
     bundle_meta: dict[str, Any] | None = None
-    if inventory_strategy == "bundle-0.1":
+    if inventory_strategy in ("bundle-0.1", "bundle-cite-0.1"):
         from codatiel_i2 import context_bundle as bundle_mod
+        with_ev = inventory_strategy == "bundle-cite-0.1"
         bundle = bundle_mod.build_change_bundle(
             diff_repo=diff_repo, base_sha=base_sha, head_sha=head_sha,
             changes=changes, classification=classification,
-            base_dir=base_dir, head_dir=head_dir)
+            base_dir=base_dir, head_dir=head_dir, with_evidence=with_ev)
         inventory = bundle.text
         inventory_strategy_name = inventory_strategy
+        bundle_evidence = list(bundle.evidence)
         bundle_meta = {"schema": bundle_mod.BUNDLE_SCHEMA,
                        "chars": len(bundle.text),
+                       "evidence_count": len(bundle.evidence),
+                       "evidence_total": bundle.evidence_total,
+                       "evidence_omitted": bundle.evidence_omitted,
                        "omitted_files": len(bundle.omitted_files),
+                       "omitted_runs": bundle.omitted_runs,
                        "truncated": bundle.truncated}
     elif inventory_strategy == "triage-0.1":
         from codatiel_i2 import triage as triage_mod
@@ -405,8 +413,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     else:
         return {"status": "failed", "stage": "inventory_strategy",
                 "error": f"unknown inventory_strategy {inventory_strategy!r}; "
-                         f"expected {INVENTORY_STRATEGY!r}, 'triage-0.1' or "
-                         "'bundle-0.1'",
+                         f"expected {INVENTORY_STRATEGY!r}, 'triage-0.1', "
+                         "'bundle-0.1' or 'bundle-cite-0.1'",
                 "service_version": SERVICE_VERSION}
     user_input = ("Review this change between BASE and HEAD. "
                   f"Repository: {ws.repo}. {inventory}")
@@ -545,6 +553,13 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
             pr_number=pr_number)
 
     tool_evidence = _harvest_tool_evidence(result)
+    # CONTEXT-01 arm C: the bundle's citable line evidence was returned
+    # in this run (first message) and is run-scoped like any tool
+    # evidence; merge it into the citation ledger so M7.1 validation
+    # sees it. Foreign IDs still fail NOT_RETURNED; exact base/head
+    # binding and byte replay are unchanged.
+    if bundle_evidence:
+        tool_evidence = tool_evidence + list(bundle_evidence)
     tool_outputs = _harvest_tool_outputs(result)
     spend = _spend_record(ledger, model_name)
     changed_paths = {c.get("path", "") for c in changes}
@@ -673,6 +688,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     write_json(run_dir / "shadow_result.json", shadow)
     write_jsonl(run_dir / "model_findings_raw.jsonl", model_findings)
     write_jsonl(run_dir / "tool_outputs.jsonl", tool_outputs)
+    if bundle_evidence:
+        write_jsonl(run_dir / "bundle_evidence.jsonl", bundle_evidence)
     return {"status": status, "run_dir": str(run_dir), "run_id": run_id,
             "repo": ws.repo, "base_sha": base_sha, "head_sha": head_sha,
             "tool_calls": len(tool_calls), "findings": len(findings),

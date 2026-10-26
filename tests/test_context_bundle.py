@@ -159,3 +159,79 @@ def test_bundle_cap_produces_complete_omission_list(tmp_path):
     # The omission list is part of the text and names excluded files.
     assert "app.py" in bundle.text.split("## Omissions")[1]
 
+
+# ------------------------------------------------------------- Feature B
+
+def test_line_evidence_binds_added_to_head_removed_to_base(tmp_path):
+    repo = _repo(tmp_path)
+    base_dir, head_dir, diff_repo = _checkouts(repo, tmp_path)
+    changes = _changes(repo)
+    evidence, skipped = CB.bundle_line_evidence(
+        diff_repo=diff_repo, base_sha=repo["base"], head_sha=repo["head"],
+        changes=changes, base_dir=base_dir, head_dir=head_dir)
+    assert skipped == 0
+    assert evidence
+    by_rev = {}
+    for ev in evidence:
+        assert validate_envelope(ev) == []
+        assert ev["base_sha"] == repo["base"] and ev["head_sha"] == repo["head"]
+        by_rev.setdefault(ev["revision"], []).append(ev)
+    # app.py: "-def handler..." removal? No - handler stays. LIMIT area
+    # changed lines are additions; README.md has a removed line ("demo").
+    assert by_rev.get("head"), "added lines must bind to head"
+    added_paths = {ev["path"] for ev in by_rev["head"]}
+    assert "app.py" in added_paths
+    # Verify one added line's bytes against the head checkout.
+    for ev in by_rev["head"]:
+        if ev["path"] == "app.py":
+            lines = (head_dir / "app.py").read_text().split("\n")
+            actual = "\n".join(
+                lines[ev["line_start"] - 1:ev["line_end"]])
+            assert actual == ev["excerpt"]
+            assert "MAX_RETRIES" in actual or "new_handler" in actual
+
+
+def test_removed_lines_bind_to_base_and_replay(tmp_path):
+    repo = _repo(tmp_path)
+    base_dir, head_dir, diff_repo = _checkouts(repo, tmp_path)
+    changes = _changes(repo)
+    evidence, _skipped = CB.bundle_line_evidence(
+        diff_repo=diff_repo, base_sha=repo["base"], head_sha=repo["head"],
+        changes=changes, base_dir=base_dir, head_dir=head_dir)
+    removed = [e for e in evidence if e["revision"] == "base"]
+    assert removed, "README 'demo' removal must mint a base evidence"
+    for ev in removed:
+        lines = (base_dir / ev["path"]).read_text().split("\n")
+        actual = "\n".join(lines[ev["line_start"] - 1:ev["line_end"]])
+        assert actual == ev["excerpt"]
+
+
+def test_line_evidence_respects_per_file_cap(tmp_path):
+    repo = _repo(tmp_path)
+    base_dir, head_dir, diff_repo = _checkouts(repo, tmp_path)
+    changes = _changes(repo)
+    evidence, skipped = CB.bundle_line_evidence(
+        diff_repo=diff_repo, base_sha=repo["base"], head_sha=repo["head"],
+        changes=changes, base_dir=base_dir, head_dir=head_dir,
+        max_runs_per_file=1)
+    assert skipped >= 1  # runs beyond the cap are counted, never minted
+
+
+def test_bundle_cite_includes_evidence_ids(tmp_path):
+    repo = _repo(tmp_path)
+    base_dir, head_dir, diff_repo = _checkouts(repo, tmp_path)
+    from codatiel_i2.core.files import classify_changes
+    changes = _changes(repo)
+    cls = classify_changes(changes)
+    bundle = CB.build_change_bundle(
+        diff_repo=diff_repo, base_sha=repo["base"], head_sha=repo["head"],
+        changes=changes, classification=cls, base_dir=base_dir,
+        head_dir=head_dir, with_evidence=True)
+    assert bundle.evidence
+    for ev in bundle.evidence:
+        assert f"[{ev['evidence_id']}]" in bundle.text
+    plain = CB.build_change_bundle(
+        diff_repo=diff_repo, base_sha=repo["base"], head_sha=repo["head"],
+        changes=changes, classification=cls, base_dir=base_dir,
+        head_dir=head_dir, with_evidence=False)
+    assert "ev_" not in plain.text
