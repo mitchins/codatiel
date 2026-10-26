@@ -325,6 +325,11 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     from codatiel_i2 import runtime_sdk
 
     runtime_sdk.ensure_local_tracing()
+    # FINAL-01: reserve one turn/tool for final disposition
+    if enable_final:
+        # Reserve 1 tool and 1 turn for final; investigation gets 39/11
+        tool_budget = max(1, tool_budget - 1)
+        max_turns = max(1, max_turns - 1)
 
     started = time.time()
     base_sha, head_sha = ws.base_sha, ws.head_sha
@@ -658,10 +663,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     else:
         status = "complete"
     if enable_final:
-        at_risk = (
-            len([e for e in ctx.tool_log if e]) >= 38
-            or status in ("incomplete_no_tool_use", "unresolved_empty_final", "unresolved_unparseable")
-        )
+        # Only finalize if the investigation did not already produce a clean disposition
+        at_risk = status in ("incomplete_no_tool_use", "unresolved_empty_final", "unresolved_unparseable", "incomplete_budget_exhausted")
         if at_risk:
             try:
                 avail_ev2 = tool_evidence
