@@ -140,10 +140,19 @@ def build_email(identity: dict, run_dir: Path, *, stale: bool = False,
     status = metrics.get("status", "?")
     model = metrics.get("model", "?")
     spend = metrics.get("spend", {})
+    # EMAIL-FINAL-01: surface budget finalisation in delivered content.
+    # A tools-disabled final (`final_tag=finalized_under_budget`) must
+    # never render as an unqualified completed investigation.
+    final_tag = metrics.get("final_tag")
+    finalized = bool(metrics.get("finalized_under_budget")
+                     or final_tag == "finalized_under_budget")
+    stage = metrics.get("stage", "?")
     usd = spend.get("usd_estimate")
     cost = f"${usd:.4f}" if usd is not None else "unconfirmed (quota/unknown)"
     subj = (f"[codatiel-shadow] {repo}#{number} "
             f"{base[:8]}..{head[:8]} {status} {run.get('run_id')}")
+    if finalized:
+        subj += " (finalized_under_budget)"
     if second_pass:
         subj += " (conditional Haiku follow-up)"
     lines = [
@@ -158,6 +167,29 @@ def build_email(identity: dict, run_dir: Path, *, stale: bool = False,
         f"run: {run.get('run_id')}",
         "",
     ]
+    # EMAIL-FINAL-01: explicit disposition line. completed-clean,
+    # finalized-under-budget and inconclusive must be visually distinct.
+    if finalized:
+        lines += [
+            f"disposition: FINALISED_UNDER_BUDGET (stage {stage}). "
+            "Investigation exhausted the turn/tool budget and was closed "
+            "by a tools-disabled final turn. Coverage is partial: absence "
+            "of findings below is NOT evidence of a clean change.",
+            "",
+        ]
+    elif status == "complete":
+        lines += [
+            "disposition: completed-clean (full investigation closed within "
+            "budget; no budget finalisation).",
+            "",
+        ]
+    elif status == "inconclusive":
+        lines += [
+            f"disposition: inconclusive (stage {stage}). Investigation did "
+            "not reach a verdict; absence of findings is not evidence of "
+            "a clean change.",
+            "",
+        ]
     if status == "failed":
         lines += ["REVIEW FAILED before/at inference: no verdict rendered. "
                   "Absence of findings is meaningless; the failure reason "
@@ -186,7 +218,17 @@ def build_email(identity: dict, run_dir: Path, *, stale: bool = False,
         seen_keys.add(key)
         distinct.append(f)
     if status == "complete" and not distinct:
-        lines.append("NO MATERIAL FINDINGS after a completed investigation.")
+        if finalized:
+            # EMAIL-FINAL-01: a zero-finding forced final must never claim
+            # an unqualified completed investigation.
+            lines.append("NO VERDICT: investigation exhausted the turn/tool "
+                         "budget and was closed by a tools-disabled final "
+                         "with no citable findings. This is NOT a clean "
+                         "bill of health; coverage is partial by "
+                         "construction (see disposition above and run "
+                         "artifacts: findings.jsonl, metrics.json).")
+        else:
+            lines.append("NO MATERIAL FINDINGS after a completed investigation.")
         sil = (shadow.get("silence") or {}).get("summary") or \
             "(no silence rationale recorded)"
         lines.append("Silence rationale (model-authored, unverified): "
@@ -217,6 +259,9 @@ def build_email(identity: dict, run_dir: Path, *, stale: bool = False,
     if status != "complete" and status != "failed" and not distinct:
         lines.append("INCOMPLETE INVESTIGATION: absence of findings is not "
                      "evidence of a clean change.")
+        if finalized:
+            lines.append("Closed by a tools-disabled final turn "
+                         f"(stage {stage}); see disposition above.")
     lines += ["",
               "Uncertain areas: anything above marked model-authored is a "
               "review candidate, not a confirmed defect.",
