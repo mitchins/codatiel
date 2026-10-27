@@ -124,10 +124,12 @@ def _run_arm(tmp_path: Path, strategy: str, final: dict,
 
 
 def test_bundle_cite_finding_attests(tmp_path):
-    # Pre-compute the deterministic bundle to learn a real evidence ID,
-    # then cite it in the scripted final.
-    repo = _repo(tmp_path / "pre")
-    base_dir, head_dir, diff_repo = _checkouts(repo, tmp_path / "pre" / "wt")
+    # Use a single shared repo for both bundle pre-computation and the run,
+    # so the evidence IDs (which are SHA-bound) match.
+    shared = tmp_path / "shared"
+    shared.mkdir(parents=True)
+    repo = _repo(shared)
+    base_dir, head_dir, diff_repo = _checkouts(repo, shared / "wt")
     changes = _changes(repo)
     cls = classify_changes(changes)
     bundle = CB.build_change_bundle(
@@ -137,7 +139,21 @@ def test_bundle_cite_finding_attests(tmp_path):
     target = next(e for e in bundle.evidence
                   if e["revision"] == "head" and e["path"] == "app.py")
     final = _final(target["evidence_id"])
-    out, repo2 = _run_arm(tmp_path, "bundle-cite-0.1", final)
+    # Run directly on the same repo so SHAs match (evidence IDs are SHA-bound)
+    import json as _js
+    script = []
+    script.append(runtime_sdk.scripted_tool_call(
+        call_id="a", name="read_file",
+        arguments={"path": "a.py", "revision": "head"},
+        response_id="r1"))
+    script.append(runtime_sdk.scripted_final(
+        _js.dumps(final), response_id="r2"))
+    model = runtime_sdk.ScriptedModel(script)
+    out = service_mod.review_local(
+        repo["root"], repo["base"], repo["head"], model=model,
+        model_name="scripted:ctx01", runs_root=shared / "runs",
+        work_root=shared / "work", inventory_strategy="bundle-cite-0.1")
+    repo2 = repo
     assert out["status"] == "complete", out
     run_dir = Path(out["run_dir"])
     findings = [json.loads(x) for x in

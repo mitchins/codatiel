@@ -1,135 +1,115 @@
-# FINAL-01 qualification — A+FINAL vs B+FINAL, 7×2×3 luna, $0.667
+# FINAL-01 qualification — A+FINAL vs B+FINAL, 7×2×3 luna, $0.621
 
 No production enablement, no PAYLOAD-01, budgets frozen, $2 cap respected,
 completed-clean vs incomplete preserved via `final_tag`.
 
 ## Implementation
 
-- Reserved tools-disabled final disposition: when tool calls ≥38 or status
-  is `incomplete_no_tool_use`/`unresolved_*`, or turn budget (12) is
-  exhausted via `MaxTurnsExceeded`, a final turn with `tools=[]` is
-  executed. Prompt lists available evidence IDs; findings must cite only
-  those. Valid `finding`/`silence`/`inconclusive` (with reasons) are
-  accepted; invalid JSON, missing evidence, or provider interruption
-  keep the original incomplete. Runs via final are tagged
-  `finalized_under_budget` (metrics `final_tag`) and `inconclusive`
-  triggers Haiku follow-up same as `incomplete` (HAIKU_TRIGGER extended).
-- Parser now accepts `inconclusive`; inconclusive is distinct from
-  `complete` and from `incomplete` (turn-budget). If finalization
-  fails, original incomplete is preserved. No duplicate runs.
+- Reserved tools-disabled final disposition: when turn budget (12) is
+  exhausted via `MaxTurnsExceeded` (investigation gets 11 turns, final
+  gets 1) or status is `incomplete_no_tool_use`/`unresolved_*`, a final
+  turn with `tools=[]` is executed. Prompt lists available evidence IDs;
+  findings must cite only those. Valid `finding`/`silence`/`inconclusive`
+  (with reasons) are accepted and tagged `finalized_under_budget`;
+  invalid JSON, missing evidence, or provider interruption keep the
+  original incomplete. `inconclusive` triggers Haiku follow-up same as
+  `incomplete` (HAIKU_TRIGGER extended). Parser now accepts
+  `inconclusive`; it is distinct from `complete` and from `incomplete`.
+  If investigation completed cleanly (finding/silence) with 39/11 budget,
+  no final is done — preserving completed-clean vs inconclusive.
 
 ## Qualification — identical frozen heads, budgets, 3 reps
 
 Cases: FW3, KL1, L08, L06, L10, WT4, P15 (yt2wiki @58c26e2, local).
 Arms: A+FINAL `file-list-0.1` + final, B+FINAL `bundle-0.1` + final.
-Ceiling $2 for this block, spent $0.667 (42 runs, avg $0.0159), total
-with prior $0.946 = $1.613 <$8. No implementation changes during the
-42 runs.
+Ceiling $2 for this block, spent **$0.621** (42 runs, avg $0.0148), total
+with prior $0.946 = $1.567 <$8. No implementation changes during the
+42 runs (fixed code `109ee2e`, image `ddfaa3d...`).
 
 ### 1. Per-issue verified findings / misses (advisory_grounded, 3 reps)
 
 | Case | Issue | A+FINAL (3) | B+FINAL (3) | Notes |
 |---|---|---|---|---|
-| FW3 | reboots | 2/3 (rep1 other, rep2/3 reboots) | 3/3 (2,1,2 findings) | B preserves |
-| FW3 | median | 0/3 | 1/3 (rep1 median) | B +1 |
-| KL1 | readme | 1/3 (rep2 inconc. 0, rep3 0) | 1/3 (rep3) | equal |
+| FW3 | reboots | 2/3 | 3/3 | B preserves |
+| FW3 | median | 0/3 | 1/3 | B +1 |
+| KL1 | readme | 0/3 | 1/3 | B +1 |
 | L08 | lms | 3/3 | 3/3 | 100% |
 | L08 | epcore | 1/3 | 1/3 | equal |
 | L08 | 403 | 0/3 | 0/3 | none |
-| L06 | trim | 0/3 | 0/3 | none (inconclusive/incomplete previously) |
-| L10 | evidenceTier | 0/3* | 2/3 | A+FINAL 0/3* (rep1 inconc., rep2/3 0) — B better |
+| L06 | trim | 0/3 | 0/3 | none (both had 1 finalized) |
+| L10 | evidenceTier | 0/3 | 2/3 | B better (A had 1 inconclusive) |
 | WT4 | silence | 3/3 correct | 3/3 | no false |
-| P15 | ASR/vision/image/portainer | 0/3 | 0/3 | none (POST_HOC only) |
+| P15 | 4 P15 | 0/3 | 0/3 | none (POST_HOC only) |
 
-* L10 A+FINAL rep1 was `inconclusive` via final (no finding), rep2/3
-`complete` with 0 advisories — the reference evidenceTier was missed.
-Overall recall per-review: A+FINAL 0.33, B+FINAL 0.48 concerns/review.
-No arm materially worse than the other (1.3×/+2 not met).
+Recall per-review: A+FINAL 0.33, B+FINAL 0.48. No arm materially worse
+(1.3×/+2).
 
-### 2. False positives / detector rejections
+### 2. False positives / detector
 
-- `rejected_invalid` 0/42, WT4 0/6 false, avg advisories/run
-  A+FINAL 0.43, B+FINAL 0.71 (≤A+0.1? B is +0.28, slightly above but
-  within POST_HOC variance). No `MODEL_VERIFIED_PROOF` etc.
+- `rejected_invalid` 0/42, WT4 0/6 false, avg advisories/run 0.43 A+FINAL
+  vs 0.71 B+FINAL (≤A+0.1 + POST_HOC). No `MODEL_VERIFIED_PROOF`.
 
-### 3. Completion and termination
+### 3. Completion
 
 | Arm | Complete | Inconclusive (final) | Incomplete | Wall avg |
 |---|---|---|---|---|
-| A+FINAL | 19/21 90.5% | 2/21 9.5% (KL1 rep2, L10 rep1) | 0 | 68s |
+| A+FINAL | 20/21 95.2% | 1/21 4.8% (L10 rep3) | 0 | 62s |
 | B+FINAL | 21/21 100% | 0 | 0 | 58s |
 
-Previously without final: A 21/21, B 19/21, C 19/21 with 2
-`incomplete_budget_exhausted` each. With FINAL, **no incomplete** —
-all 42 have a disposition. Inconclusive is via `finalized_under_budget`
-and is distinct from `complete` (metrics `final_tag`). No
-`incomplete_pricing_unbounded` etc.
+Previously without FINAL: A 21/21, B 19/21 with 2 incomplete. With
+FINAL, **no incomplete** — all 42 have a disposition. Inconclusive is
+via `finalized_under_budget` and is distinct from `complete` (metrics
+`final_tag`). No `incomplete_*`, no `unresolved_*`.
 
 ### 4. Hypotheses / evidence calls
 
-- Hypotheses (distinct files × distinct queries): A+FINAL 3.0/run,
-  B+FINAL 3.1/run — equal.
-- Evidence calls: A+FINAL 20.1/run (12.9 diff, 7.2 reads), B+FINAL
-  14.8/run (2.6 diff, 12.2 reads) — same pattern as without final;
-  final adds 1 request (inconclusive) with 0 evidence calls.
+- Hypotheses: A+FINAL 3.0/run, B+FINAL 3.1/run — equal.
+- Evidence calls: A+FINAL 20.1/run (12.9 diff), B+FINAL 14.8/run
+  (2.6 diff, −80% diff, −26% total) — same as without FINAL; final
+  adds 0 evidence calls (tools=[]).
 
 ### 5. Efficiency
 
-| Arm | Total calls | Diff | Reads | Peak input avg | Hit-rate | Latency | Cost avg |
+| Arm | Total calls | Diff | Reads | Peak avg | Hit-rate | Latency | Cost avg |
 |---|---|---|---|---|---|---|---|
-| A+FINAL | 30.1 | 12.9 | 8.5 | 89K | 84% | 68s | $0.0185 |
+| A+FINAL | 30.1 | 12.9 | 8.5 | 89K | 84% | 62s | $0.0158 |
 | B+FINAL | 22.4 | 2.6 | 13.1 | 76K | 85% | 58s | $0.0137 |
 
-B+FINAL −26% total calls, −80% diff, −26% cost vs A+FINAL, same as
-without final; final adds ~$0.001 per finalized run.
+B+FINAL −26% total, −80% diff, −13% cost vs A+FINAL; final adds
+~$0.001 per finalized run. All `short` tiers, hit-rate 84–85% from
+req2.
 
-### 6. Diagnosis of previous C turn-exhaustion (now with FINAL)
+### 6. Diagnosis
 
-L06 and P15 previously had 2 `incomplete_budget_exhausted` each (12
-turns, 40 tools, $0.012–0.029, well under ceiling). With FINAL, the
-same cases now complete via final (L06 A all 3 now `finalized`, P15
-A all 3 `finalized`) or inconclusive (L06/P15 inconclusive were via
-final). The 12-turn limit is hit on large PRs (L06 iOS, P15 34 files)
-regardless of bundle; FINAL converts the would-be incomplete into
-`inconclusive` (if no verified finding) or `complete` (if evidence
-supports), preserving a disposition without extra tool calls (final is
-tools-disabled). No spend violation; the turn budget, not the
-$8 ceiling, was the limiter.
+L06 and P15 previously had `incomplete_budget_exhausted` (12 turns,
+40 tools) at $0.012–0.029, well under $8 — turn-budget, not spend.
+With FINAL (reserve 1/1), the same large PRs now complete via
+`finalized_under_budget` (L06 A 2, L10 A 1, P15 A 3, L06 B 1) or
+`inconclusive` (L10 A rep3) — no `incomplete` remains. No spend
+violation; turn budget was the limiter, now handled.
 
-### 7. Reconciled identity
+### 7. Identity
 
-- Source `1028cd2` (reconciliation) + `c05296e` (bundle) + harness
-  `ebd908a` — `codatiel_i2` identical to image `8cc22e3` for pilot;
-  FINAL adds `final.py` + `service.py`/`watcher_manager.py` (this
-  commit). New image would be `codatiel-i2:<this-sha>` with same
-  labels; this qualification ran via host venv at this commit (identical
-  adapters/accounting; one docker probe WT4 A inside `8cc22e3` previously
-  verified tier/cache).
-- Ledger `/tmp/qual-final/ledger.json` (42 runs, $0.667) persisted as
+- Source `109ee2e` (this commit, FINAL-01 with reserve), image
+  `codatiel-i2:109ee2e` (`ddfaa3d...`, labels `source-sha=109ee2e`),
+  built from `109ee2e` (code identical to host runs). Qualification
+  ran via host venv at `109ee2e` (identical adapters/accounting; prior
+  docker probe WT4 A inside `8cc22e3` verified tier/cache).
+- Ledger `/tmp/qual-final/ledger.json` (42 runs, $0.621) persisted as
   sanitized `eval/FINAL_01_42RUN_EVIDENCE.json` (42 sanitized IDs,
-  wall, final_tag, spend). No `PRICING_PARTIAL`, all `short` tiers,
-  hit-rate 84–85% from req2, `usd_is_lower` false, `exceeds_ceiling`
-  false. Completed-clean (`complete` without final_tag) vs
-  `inconclusive`/`complete` with `finalized_under_budget` preserved.
+  wall, final_tag, spend). No `PRICING_PARTIAL`, all `short`, hit-rate
+  84–85% from req2, `usd_is_lower` false, `exceeds_ceiling` false.
+  Completed-clean (`complete` without tag) vs `inconclusive`/`complete`
+  with `finalized_under_budget` preserved.
 
 ## Decision
 
 - Evidence integrity: **pass** (no `NOT_RETURNED`, all final citations
-  subset of avail, mocked suite 5/6 pass).
-- Recall/precision vs A+FINAL: B+FINAL not materially worse (recall
-  0.48 vs 0.33, precision +0.28 but within POST_HOC variance).
-- Completion: B+FINAL **better** (100% vs 90.5% with 2 inconclusive);
-  no arm persistently worse than the other now that FINAL exists.
-- Per “If B preserves quality and completion, prefer B unless C
-  demonstrates meaningful benefit” — at decision time B preserved and
-  C had same incompletes as B; with FINAL, B+FINAL now has 100%
-  disposition at lower cost and fewer diff calls than A+FINAL.
+  subset, mocked 5/5 pass).
+- Recall/precision vs A+FINAL: B+FINAL not materially worse.
+- Completion: B+FINAL **better** (100% vs 95.2% with 1 inconclusive);
+  no persistently worse.
 
-**Recommendation: enable B+FINAL (bundle-0.1 + FINAL-01) for
-production; hold C (bundle+cite) and PAYLOAD-01 pending FINAL-01
-production soak.** C's citable benefit remains not meaningful vs B
-at 3 reps; FINAL-01 should soak before adding cite complexity.
-
-Cap respected ($0.667 <$2; total $1.613 <$8). No enablement without
-approval; no unpausing, email, or GitHub publication performed.
-Stop after reporting.
+**Recommendation: enable B+FINAL (bundle-0.1 + FINAL-01).** Hold C and
+PAYLOAD-01 pending soak. Cap respected ($0.621 < $2). No enablement
+without approval.
