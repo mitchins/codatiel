@@ -39,15 +39,24 @@ with prior $0.946 = $1.567 <$8. No implementation changes during the
 | L06 | trim | 0/3 | 0/3 | none (both had 1 finalized) |
 | L10 | evidenceTier | 0/3 | 2/3 | B better (A had 1 inconclusive) |
 | WT4 | silence | 3/3 correct | 3/3 | no false |
-| P15 | 4 P15 | 0/3 | 0/3 | none (POST_HOC only) |
+| P15 | 4 historical / 1 at H5 + 4 POST_HOC | 0/3 | 0/3 | none verified (POST_HOC only, excluded) |
+
+Historical-reference (12 distinct concerns across PR evolution) vs
+verified-defect recall at frozen heads: P15 contributes 4 to the
+historical 12 but only 1 (vision preflight) is present at frozen H5
+`58c26e2`; the 4 additional P15 advisories found are POST_HOC
+(readiness/media, guided save, tls, login) and excluded from recall.
+Recall per-review above is verified-defect recall (advisory_grounded
+matching a present defect), not historical-reference agreement.
 
 Recall per-review: A+FINAL 0.33, B+FINAL 0.48. No arm materially worse
 (1.3×/+2).
 
 ### 2. False positives / detector
 
-- `rejected_invalid` 0/42, WT4 0/6 false, avg advisories/run 0.43 A+FINAL
-  vs 0.71 B+FINAL (≤A+0.1 + POST_HOC). No `MODEL_VERIFIED_PROOF`.
+- `rejected_invalid` 0/42, WT4 0/6 false, avg advisories/run 0.81 A+FINAL
+  (17/21) vs 0.76 B+FINAL (16/21) — from immutable
+  `eval/FINAL_01_42RUN_EVIDENCE.json` (33 total). No `MODEL_VERIFIED_PROOF`.
 
 ### 3. Completion
 
@@ -84,8 +93,13 @@ req2.
 L06 and P15 previously had `incomplete_budget_exhausted` (12 turns,
 40 tools) at $0.012–0.029, well under $8 — turn-budget, not spend.
 With FINAL (reserve 1/1), the same large PRs now complete via
-`finalized_under_budget` (L06 A 2, L10 A 1, P15 A 3, L06 B 1) or
-`inconclusive` (L10 A rep3) — no `incomplete` remains. No spend
+`finalized_under_budget` — exactly 4 in the fixed-code 42 runs
+(`eval/FINAL_01_42RUN_EVIDENCE.json`, `final_tag` set): L06 A rep1
+(complete, 0 advisories, $0.0198), L06 A rep2 (complete, 0 advisories,
+$0.0186), L06 B rep3 (complete, 0 advisories, $0.0166), L10 A rep3
+(inconclusive, 0 advisories, $0.0290) — no `incomplete` remains. (An
+earlier pre-fix draft listed 7 including P15 A; that belonged to the
+superseded $0.667 block and is corrected here.) No spend
 violation; turn budget was the limiter, now handled.
 
 ### 7. Identity
