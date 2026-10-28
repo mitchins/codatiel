@@ -456,7 +456,14 @@ class Manager:
         # Drain previously queued pairs first (oldest), revalidating at
         # dispatch; then admit newly eligible pairs into remaining cap.
         # Total queued work stays bounded: never queue beyond max_queued.
-        backlog = self.store.queued_pairs(self.cfg.per_poll_cap)
+        # PAUSE-01: a paused repo's queued rows never enter the dispatch
+        # list. Pause blocks dispatch; resume re-admits them. Checked
+        # here (not just at discovery) because rows queued before the
+        # pause would otherwise still drain via the backlog.
+        paused = set(self.store.paused_repos())
+        backlog = [b for b in
+                   self.store.queued_pairs(self.cfg.per_poll_cap)
+                   if b["repo"] not in paused]
         todo: list[tuple[str, int, str, str]] = [
             (b["repo"], b["pr"], b["base"], b["head"]) for b in backlog]
         for repo, vpr in pairs:
@@ -481,9 +488,13 @@ class Manager:
             # SETTLE-01: a terminal dispatch outcome ends the pending
             # episode; anything still eligible or queued keeps settling.
             # Consumed overrides never linger into the next episode.
+            # PAUSE-01: a pause-blocked dispatch consumes nothing, so an
+            # operator override survives until resume.
             try:
                 cur = self.store.get_pair(repo, number, base, head) or {}
-                if cur.get("status") not in ("eligible", "queued"):
+                if rec.get("suppressed") == "repo paused":
+                    pass
+                elif cur.get("status") not in ("eligible", "queued"):
                     self.store.clear_pending(repo, number)
                 else:
                     self.store.consume_pending_override(repo, number,
@@ -499,12 +510,17 @@ class Manager:
         # Redelivery sweep: complete-but-undelivered pairs retry the same
         # bytes (never re-inference). Ambiguous receipts stay parked for
         # explicit replay-delivery only.
+        # PAUSE-01: never deliver (or suppress) for a paused repo. Rows
+        # are left untouched so resume retries them.
+        sweep_paused = set(self.store.paused_repos())
         for row in self.store.cx.execute(
                 "SELECT repo, pr, base, head, run_dir FROM pairs "
                 "WHERE status='complete' AND spend_unknown=0").fetchall():
             if self._stop or admitted >= self.cfg.per_poll_cap + 3:
                 break
             repo2, number2, base2, head2, rd = row
+            if repo2 in sweep_paused:
+                continue
             dl = self.store.cx.execute(
                 "SELECT status FROM deliveries WHERE run_dir=? "
                 "ORDER BY updated_ts DESC LIMIT 1", (rd,)).fetchone()
@@ -691,8 +707,12 @@ class Manager:
 
     # -- dispatch -------------------------------------------------------
     def revalidate(self, repo: str, number: int, base: str,
-                   head: str) -> tuple[E.ValidatedPR | None, str]:
+                     head: str) -> tuple[E.ValidatedPR | None, str]:
         """Fresh fetch + validate + match the queued pair. Fail closed."""
+        # PAUSE-01: fail closed; callers must not infer, deliver, or
+        # destroy pair state for a paused repo.
+        if repo in self.store.paused_repos():
+            return None, "repo paused"
         try:
             raw, err = self.fetch(repo, number)
         except Exception as exc:
@@ -714,6 +734,13 @@ class Manager:
                  head: str, day: str) -> dict:
         rec: dict[str, Any] = {"pr": f"{repo}#{number}",
                                "base": base, "head": head}
+        # PAUSE-01: fail closed before any revalidation or inference.
+        # Pair status is deliberately untouched so resume can proceed;
+        # the operator resumes first (explicit, auditable), including
+        # for manual backfill which routes through here.
+        if repo in self.store.paused_repos():
+            rec["suppressed"] = "repo paused"
+            return rec
         live, reason = self.revalidate(repo, number, base, head)
         if live is None:
             if reason.startswith(_FETCH_PREFIX) or _NOT_FOUND not in reason:
@@ -894,6 +921,11 @@ class Manager:
         run_dir = out.get("run_dir")
         if not run_dir:
             return {"emailed": False, "why": out.get("error", "no run_dir")}
+        # PAUSE-01: hold delivery for a paused repo without touching pair
+        # state (no suppression, no delivery record); the redelivery
+        # sweep retries the same bytes after resume.
+        if vpr.repo in self.store.paused_repos():
+            return {"emailed": False, "delivery": "repo-paused"}
         identity = {"repo": vpr.repo, "number": vpr.number,
                     "url": vpr.url, "base": vpr.base_sha,
                     "head": vpr.head_sha}
