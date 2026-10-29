@@ -296,6 +296,38 @@ class ScriptedModel(_SDKModel):
                                             "response": {"id": response.response_id}})
 
 
+def _first_arg(kwargs: dict[str, Any], args: tuple[Any, ...],
+               name: str, position: int) -> Any:
+    """Pull one get_response argument by keyword, else by position."""
+    if name in kwargs:
+        return kwargs[name]
+    if len(args) > position:
+        return args[position]
+    return None
+
+
+def estimate_request_tokens(system_instructions: Any, model_input: Any,
+                            tools: Any) -> int:
+    """Stated conservative input-token estimate for an unsent request.
+
+    Serializes the request payload and counts 1 token per
+    PRE_REQUEST_CHARS_PER_TOKEN characters (3). Real review text runs
+    ~4 chars/token, so this deliberately over-counts by >=25% and can
+    never understate context for the pre-request ceiling check. Used
+    only for the refuse/allow decision, never for billing.
+    """
+    import json as _json
+    from codatiel_i2.core.spend import PRE_REQUEST_CHARS_PER_TOKEN
+    try:
+        text = _json.dumps({"system": system_instructions,
+                            "input": model_input, "tools": tools},
+                           default=str)
+    except Exception:
+        text = f"{system_instructions!r}{model_input!r}{tools!r}"
+    chars = len(text)
+    return (chars + PRE_REQUEST_CHARS_PER_TOKEN - 1) // PRE_REQUEST_CHARS_PER_TOKEN
+
+
 class UsageRecordingModel(_SDKModel):
     """Record each completed provider response in a spend ledger.
 
@@ -323,19 +355,95 @@ class UsageRecordingModel(_SDKModel):
         return getattr(self._model, name)
 
     async def get_response(self, *args: Any, **kwargs: Any) -> Any:
+        from codatiel_i2.core.spend import (
+            BudgetCeilingExceeded,
+            PricingUnbounded,
+        )
+        # R1.1: a run holding a PRICING_PARTIAL request has unbounded true
+        # cost — send no further model request. This raises before any
+        # provider call is made, so the halt itself costs nothing.
+        if self.ledger.has_unbounded():
+            raise PricingUnbounded(
+                "run holds a request with unknown cache split "
+                "(PRICING_PARTIAL); true cost is unbounded above, so no "
+                "further model request may be sent")
+        # R1.1 pre-request ceiling check (tiered ledgers only): estimate
+        # this request's cost at the highest tier and category, plus the
+        # stated output allowance. Refuse before sending when it exceeds
+        # the remaining per-review budget.
+        if self.ledger._tier_card() is not None:
+            est_tokens = estimate_request_tokens(
+                _first_arg(kwargs, args, "system_instructions", 0),
+                _first_arg(kwargs, args, "input", 1),
+                _first_arg(kwargs, args, "tools", 3))
+            ok, est_cost, remaining = self.ledger.pre_request_ok(est_tokens)
+            if not ok:
+                raise BudgetCeilingExceeded(
+                    f"next request estimated ${est_cost:.4f} exceeds "
+                    f"remaining budget ${remaining:.4f}; refusing to send")
         response = await self._model.get_response(*args, **kwargs)
         try:
+            usage = getattr(response, "usage", None)
+            cached = write_tokens = reasoning = None
+            details = getattr(usage, "input_tokens_details", None) \
+                if usage is not None else None
+            if ((getattr(self._model, "provider_usage_details", False)
+                    or details is not None)
+                    and usage is not None):
+                # Provider-reported token details only: either the adapter
+                # marks them as sourced from the provider payload, or the
+                # usage object structurally carries provider-mapped details
+                # (native SDK models). Never inferred, never defaulted:
+                # absent details stay None, not zero.
+                try:
+                    cached = details.cached_tokens
+                except (AttributeError, TypeError):
+                    cached = None
+                try:
+                    write_tokens = details.cache_write_tokens
+                except (AttributeError, TypeError):
+                    write_tokens = None
+                try:
+                    reasoning = usage.output_tokens_details.reasoning_tokens
+                except (AttributeError, TypeError):
+                    reasoning = None
+            # Adapter-published provider split (e.g. Haiku, whose cache
+            # fields cannot ride on SDK usage types). The adapter saw the
+            # provider payload, so its values are authoritative and fill
+            # whatever the generic details read left empty.
+            cache_in_input = None
+            try:
+                details_fn = getattr(self._model, "usage_details_for",
+                                     None)
+                adapter = details_fn(
+                    getattr(response, "response_id", None)) \
+                    if callable(details_fn) else None
+            except Exception:
+                adapter = None
+            if isinstance(adapter, dict):
+                if adapter.get("cached_input_tokens") is not None:
+                    cached = adapter["cached_input_tokens"]
+                if adapter.get("cache_write_input_tokens") is not None:
+                    write_tokens = adapter["cache_write_input_tokens"]
+                if adapter.get("cache_in_input") is not None:
+                    cache_in_input = adapter["cache_in_input"]
             added = self.ledger.record_response(
-                getattr(response, "response_id", None),
-                getattr(response, "usage", None))
+                getattr(response, "response_id", None), usage,
+                cached_input_tokens=cached,
+                cache_write_input_tokens=write_tokens,
+                cache_in_input=cache_in_input,
+                reasoning_output_tokens=reasoning)
             if added:
                 unknown_ids = getattr(self._model, "_unknown_usage_response_ids", ())
                 if getattr(response, "response_id", None) in (unknown_ids or ()):
                     self.ledger.mark_unknown(getattr(response, "response_id"))
-            confirmed = self.ledger.confirmed_usd()
-            if confirmed is not None and confirmed > self.ledger.ceiling_usd:
+            if self.ledger.over_ceiling():
+                confirmed = self.ledger.confirmed_usd()
+                bounded = self.ledger.bounded_reserve_usd()
                 raise SpendCeilingExceeded(
-                    f"confirmed spend ${confirmed:.4f} exceeds ceiling "
+                    f"spend ${(confirmed or 0.0) + (bounded or 0.0):.4f} "
+                    f"(confirmed ${confirmed}, bounded "
+                    f"${bounded}) exceeds ceiling "
                     f"${self.ledger.ceiling_usd:.2f}; aborting run with partial ledger")
         except SpendCeilingExceeded:
             raise
@@ -409,6 +517,126 @@ def gemma_model(*, model: str, base_url: str | None = None,
     return OpenAIChatCompletionsModel(model=model, openai_client=client)
 
 
+def deepseek_model(*, model: str = "deepseek-flash",
+                   base_url: str | None = None,
+                   api_key: str | None = None) -> Any:
+    """Build the DeepSeek Flash backend (M10 primary: thinking enabled).
+
+    M10 primary configuration (recorded 2026-10-23, before any evaluation
+    run): thinking ENABLED (explicit ``extra_body`` toggle, provider
+    default), default effort. Rationale: provider default (no tuning);
+    the installed SDK replays ``reasoning_content`` for deepseek models,
+    which thinking mode with tools requires (else HTTP 400); the M9.2
+    escalation hypothesis is reasoning-side, making the thinking variant
+    the theoretically interesting challenger; parity with Haiku's adaptive
+    thinking. If thinking mode proves incompatible, fall back to
+    non-thinking and record the switch as a compatibility finding.
+
+    ``provider_usage_details`` marks SDK Usage token details as
+    provider-reported: DeepSeek returns ``prompt_tokens_details``
+    (cached tokens) and ``completion_tokens_details`` (reasoning tokens)
+    in chat-completion usage (verified by raw probe in M10 smoke test), so
+    the spend ledger may record them as reported — never as inferred.
+    ``reasoning_content`` text is counted via reasoning tokens, never
+    stored: it is deliberation, not review evidence.
+    """
+    import os
+    ensure_local_tracing()
+    require_sdk()
+    from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+    try:
+        from openai import AsyncOpenAI
+    except Exception as exc:
+        raise RuntimeError("openai package required for the DeepSeek backend") from exc
+    base = (base_url or os.environ.get("DEEPSEEK_BASE_URL")
+            or "https://api.deepseek.com").rstrip("/")
+    key = api_key or os.environ.get("DEEPSEEK_API_KEY")
+    if not key:
+        raise RuntimeError("DEEPSEEK_API_KEY is not set")
+    client = AsyncOpenAI(base_url=base, api_key=key)
+
+    class DeepSeekModel(OpenAIChatCompletionsModel):
+        provider_usage_details = True
+
+    return DeepSeekModel(model=model, openai_client=client)
+
+
+def deepseek_model_settings() -> Any:
+    """ModelSettings for DeepSeek: explicit thinking toggle + output bound.
+
+    Thinking enabled explicitly (not relied on as a silent default);
+    ``max_tokens=8192`` bounds output tokens per request (parity with the
+    Haiku adapter). No temperature/top_p: thinking mode ignores them.
+    """
+    agents = require_sdk()
+    from agents.model_settings import ModelSettings
+    return ModelSettings(max_tokens=8192,
+                         extra_body={"thinking": {"type": "enabled"}})
+
+
+def glm_model(*, model: str = "glm-5.3-flash",
+              base_url: str | None = None,
+              api_key: str | None = None) -> Any:
+    """Build the GLM flash backend (M10 primary: forced thinking, preserved).
+
+    M10-GLM primary configuration (recorded 2026-10-23, before any GLM
+    evaluation run): thinking ENABLED + ``clear_thinking: false``
+    (Preserved Thinking, the provider's recommendation for coding/agent
+    scenarios), reasoning_effort unset (provider default). Rationale:
+    thinking is forced-on for glm-5.3-flash (cannot be disabled per
+    provider docs); preserved thinking requires the complete unmodified
+    reasoning_content back with tool results, so the adapter enables the
+    SDK's reasoning replay for glm models (same mechanism the SDK uses
+    for deepseek). ``reasoning_content`` text is counted via reasoning
+    tokens, never stored.
+    """
+    import os
+    ensure_local_tracing()
+    require_sdk()
+    from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+    try:
+        from openai import AsyncOpenAI
+    except Exception as exc:
+        raise RuntimeError("openai package required for the GLM backend") from exc
+    # Default: Z.AI Coding Plan subscription endpoint (OpenAI Chat
+    # Completions format). The general pay-as-you-go endpoint
+    # (https://api.z.ai/api/paas/v4) does NOT consume plan quota.
+    base = (base_url or os.environ.get("ZAI_BASE_URL")
+            or "https://api.z.ai/api/coding/paas/v4").rstrip("/")
+    key = api_key or os.environ.get("ZAI_API_KEY")
+    if not key:
+        raise RuntimeError("ZAI_API_KEY is not set")
+    client = AsyncOpenAI(base_url=base, api_key=key)
+
+    def _replay_glm(context: Any) -> bool:
+        return "glm" in str(getattr(context, "model", "") or "").lower()
+
+    class GLMModel(OpenAIChatCompletionsModel):
+        # Raw probe 2026-10-23 (coding endpoint, fresh key): usage
+        # carries prompt_tokens_details.cached_tokens and
+        # completion_tokens_details.reasoning_tokens — recorded as
+        # provider-reported, never inferred.
+        provider_usage_details = True
+
+    return GLMModel(model=model, openai_client=client,
+                    should_replay_reasoning_content=_replay_glm)
+
+
+def glm_model_settings() -> Any:
+    """ModelSettings for GLM: preserved thinking + output bound.
+
+    ``max_tokens=8192`` bounds output tokens per request (parity with the
+    Haiku/DeepSeek adapters). No temperature/top_p; reasoning_effort
+    unset (provider default).
+    """
+    agents = require_sdk()
+    from agents.model_settings import ModelSettings
+    return ModelSettings(
+        max_tokens=8192,
+        extra_body={"thinking": {"type": "enabled",
+                                 "clear_thinking": False}})
+
+
 class HaikuModel(_SDKModel):
     """Claude Haiku 5.5 backend: native Anthropic Messages API as an SDK Model.
 
@@ -445,6 +673,10 @@ class HaikuModel(_SDKModel):
         # provider-exposed text leaves this adapter. Instances are
         # single-run: build one HaikuModel per review.
         self._thinking_groups: list[dict[str, Any]] = []
+        # Provider-reported usage splits by response ID (cache reads and
+        # cache writes). Plain dicts carried for the recording wrapper;
+        # never inferred, never forced into SDK usage types.
+        self._usage_details: dict[str, dict[str, Any]] = {}
         # Provider responses that arrived with no usable usage payload. The
         # spend ledger must treat these as unknown, never as confirmed zero.
         self._unknown_usage_response_ids: set[str] = set()
@@ -474,14 +706,28 @@ class HaikuModel(_SDKModel):
         )
         system_text, messages = self._input_to_anthropic(input)
         system = "\n\n".join([s for s in [system_instructions or "", system_text]
-                              if s])
+                               if s])
         kwargs: dict[str, Any] = {
             "model": self._model, "max_tokens": self._max_tokens,
-            "system": system, "messages": messages,
+            "messages": messages,
         }
+        # Prompt-caching breakpoints (CACHE-01): Anthropic caches the full
+        # prefix (tools, system, messages) up to and including the
+        # designated block. Markers are metadata only — message content,
+        # order and tool definitions are byte-identical either way.
+        # Default 5-minute TTL (no extended retention); refreshed on hit.
+        if system:
+            kwargs["system"] = [{"type": "text", "text": system,
+                                 "cache_control": {"type": "ephemeral"}}]
+        else:
+            kwargs["system"] = system
         anthropic_tools = self._sdk_tools_to_anthropic(tools)
         if anthropic_tools:
+            anthropic_tools[-1] = {**anthropic_tools[-1],
+                                   "cache_control": {"type": "ephemeral"}}
             kwargs["tools"] = anthropic_tools
+        if messages:
+            _mark_last_message_cacheable(messages)
         if self._thinking:
             kwargs["thinking"] = self._thinking
         kwargs["output_config"] = self._output_config
@@ -543,15 +789,37 @@ class HaikuModel(_SDKModel):
             self._unknown_usage_response_ids.add(resp.id)
             sdk_usage = Usage(requests=1, input_tokens=0, output_tokens=0, total_tokens=0)
         else:
-            cache_in = (getattr(usage, "cache_creation_input_tokens", 0) or 0) \
-                + (getattr(usage, "cache_read_input_tokens", 0) or 0)
+            # Anthropic's input_tokens already includes cache creation and
+            # cache read tokens (they are sub-counts, not extras): report it
+            # unchanged and carry the split separately. Never default a
+            # missing split to zero — absent stays None.
+            cache_write = getattr(usage, "cache_creation_input_tokens", None)
+            cache_read = getattr(usage, "cache_read_input_tokens", None)
             sdk_usage = Usage(
                 requests=1,
-                input_tokens=(getattr(usage, "input_tokens", 0) or 0) + cache_in,
+                input_tokens=(getattr(usage, "input_tokens", 0) or 0),
                 output_tokens=getattr(usage, "output_tokens", 0) or 0,
                 total_tokens=0)
             sdk_usage.total_tokens = sdk_usage.input_tokens + sdk_usage.output_tokens
+            # Provider-sourced cache split, keyed by response ID for the
+            # recording wrapper (see usage_details_for). Kept OFF the SDK
+            # Usage object: its input_tokens_details type cannot express a
+            # write split and must stay SDK-compatible.
+            self._usage_details[resp.id] = {
+                # Anthropic input_tokens counts only uncached tokens; cache
+                # reads and writes are separate billed lines (verified by
+                # live probe: input stayed ~4 while 18K tokens were
+                # cache-written and cache-read).
+                "cached_input_tokens": cache_read,
+                "cache_write_input_tokens": cache_write,
+                "cache_in_input": False}
         return ModelResponse(output=output, usage=sdk_usage, response_id=resp.id)
+
+    def usage_details_for(self, response_id: str | None) -> dict[str, Any] | None:
+        """Provider-reported cache split for one response, if recorded."""
+        if response_id is None:
+            return None
+        return self._usage_details.get(str(response_id))
 
     async def close(self) -> None:
         try:
@@ -683,6 +951,36 @@ def _message_text(content: Any) -> str:
     return "\n".join(p for p in parts if p)
 
 
+def _mark_last_message_cacheable(messages: list[dict[str, Any]]) -> None:
+    """Attach an ephemeral cache breakpoint to the final message.
+
+    The marker moves forward each turn, so every request extends the
+    cached prefix by one message while earlier content keeps hitting.
+    Content is untouched — only the cache_control marker is added.
+    At most one message carries the tail marker per request.
+    """
+    if not messages:
+        return
+    last = messages[-1]
+    content = last.get("content")
+    marker = {"type": "ephemeral"}
+    if isinstance(content, str):
+        if not content:
+            return
+        last["content"] = [{"type": "text", "text": content,
+                            "cache_control": marker}]
+        return
+    if isinstance(content, list) and content:
+        tail = content[-1]
+        if isinstance(tail, dict):
+            tail = dict(tail)
+            tail["cache_control"] = marker
+            last["content"] = content[:-1] + [tail]
+        return
+    # Non-text final content (images etc.): leave unmarked rather than
+    # reshaping provider payloads.
+
+
 def _retain_thinking_block(kind: str, thinking: str,
                            signature: str) -> dict[str, Any] | None:
     """Decide whether a thinking block is re-emitted for tool continuation.
@@ -774,8 +1072,18 @@ def run_review(*, instructions: str, user_input: str, tools: list[Any],
         active_model = UsageRecordingModel(model, usage_ledger)
     agent = agents.Agent(name="codatiel-i2", instructions=instructions,
                          tools=tools, model=active_model, model_settings=model_settings)
-    return asyncio.run(
+    result = asyncio.run(
         agents.Runner.run(agent, user_input, max_turns=max_turns))
+    # M9.2 P1: capture the exact instructions object the SDK received, at
+    # the SDK boundary, so the run record can prove its stored hash matches
+    # what was actually passed to Agent — not just what the service claims.
+    try:
+        import hashlib as _hashlib
+        result.sdk_boundary_instructions_sha256 = _hashlib.sha256(
+            str(agent.instructions).encode("utf-8")).hexdigest()
+    except Exception:
+        pass
+    return result
 
 
 def luna_model_id() -> str:
@@ -789,8 +1097,74 @@ def luna_model_id() -> str:
     return "gpt-6-luna"
 
 
+def terra_model_id() -> str:
+    """Terra backend (REVIEW-TERRA-01): native SDK OpenAI provider; model
+    id only, no adapter — identical integration to Luna, model changed.
+
+    Requires ``OPENAI_API_KEY`` from the Code Review project
+    (STANDARD_API_NO_TRAINING presumed same project/key; flagged as an
+    assumption in the qualification report). Returned as a plain model
+    id for ``Agent(model=...)`` with the SDK default provider. Always
+    pair with ``terra_model_settings()`` so ``store=false`` is enforced.
+    """
+    return "gpt-6.1-terra"
+
+
+def prompt_cache_key_for(*, repo: str, base_sha: str, head_sha: str,
+                           instructions_id: str, model_name: str) -> str:
+    """Stable per-review OpenAI prompt-cache partition.
+
+    The agents SDK otherwise mints a fresh ``prompt_cache_key`` per
+    Runner invocation, which partitions every turn of a review into its
+    own cache namespace and guarantees a zero hit rate. A key derived
+    from (repo, base, head, instructions, model) is stable across one
+    review's turns and distinct across reviews — identical evidence
+    reuses computation, different evidence never collides. Opaque digest
+    only; no paths or SHAs leak into provider metadata.
+    """
+    import hashlib as _hashlib
+    digest = _hashlib.sha256(
+        "\n".join([repo or "", base_sha or "", head_sha or "",
+                   instructions_id or "", model_name or ""]).encode("utf-8")
+    ).hexdigest()[:32]
+    return "codatiel-i2-" + digest
+
+
+def with_prompt_cache_key(model_settings: Any, key: str | None) -> Any:
+    """Return model settings carrying a user-supplied prompt_cache_key.
+
+    The runner forwards ``extra_args["prompt_cache_key"]`` to the model
+    adapter instead of generating a per-run key. Metadata only: request
+    content, tools, instructions and review semantics are untouched.
+    """
+    if not key or model_settings is None:
+        return model_settings
+    import dataclasses as _dataclasses
+    try:
+        extra = dict(getattr(model_settings, "extra_args", None) or {})
+    except Exception:
+        return model_settings
+    if extra.get("prompt_cache_key"):
+        return model_settings
+    extra["prompt_cache_key"] = key
+    try:
+        return _dataclasses.replace(model_settings, extra_args=extra)
+    except Exception:
+        return model_settings
+
+
 def luna_model_settings() -> Any:
     """ModelSettings enforcing the Luna privacy posture (store=false)."""
+    agents = require_sdk()
+    from agents.model_settings import ModelSettings
+    return ModelSettings(store=False)
+
+
+def terra_model_settings() -> Any:
+    """ModelSettings enforcing the Terra privacy posture (store=false).
+
+    Identical to Luna: no model-specific tuning during qualification.
+    """
     agents = require_sdk()
     from agents.model_settings import ModelSettings
     return ModelSettings(store=False)

@@ -79,7 +79,9 @@ def write_run(*, run_dir: Path, scan_key: str, run_id: str, repo: str,
               evidence: list[dict], verifications: list[dict],
               findings: list[dict], metrics: dict,
               tool_calls: list[dict] | None = None,
-              model_calls: list[dict] | None = None) -> Path:
+              model_calls: list[dict] | None = None,
+              pr_number: int | None = None,
+              pr_url: str | None = None) -> Path:
     from codatiel_i2.dashboard import build as dashboard_mod
 
     run_dir = Path(run_dir)
@@ -92,6 +94,10 @@ def write_run(*, run_dir: Path, scan_key: str, run_id: str, repo: str,
     (run_dir / "candidates").mkdir(parents=True, exist_ok=True)
     fingerprinted = fingerprint_config(config)
     pr_payload = {"repo": repo, "base_sha": base_sha, "head_sha": head_sha}
+    if pr_number is not None:
+        pr_payload["pr_number"] = pr_number
+    if pr_url is not None:
+        pr_payload["pr_url"] = pr_url
     write_json(run_dir / "run.json", {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_id,
@@ -101,6 +107,8 @@ def write_run(*, run_dir: Path, scan_key: str, run_id: str, repo: str,
         "repo": repo,
         "base_sha": base_sha,
         "head_sha": head_sha,
+        "pr_number": pr_number,
+        "pr_url": pr_url,
         "created_at": utc_now_iso(),
         "workspace": workspace,
     })
