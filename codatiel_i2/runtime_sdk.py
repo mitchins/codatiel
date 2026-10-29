@@ -1097,6 +1097,19 @@ def luna_model_id() -> str:
     return "gpt-6-luna"
 
 
+def terra_model_id() -> str:
+    """Terra backend (REVIEW-TERRA-01): native SDK OpenAI provider; model
+    id only, no adapter — identical integration to Luna, model changed.
+
+    Requires ``OPENAI_API_KEY`` from the Code Review project
+    (STANDARD_API_NO_TRAINING presumed same project/key; flagged as an
+    assumption in the qualification report). Returned as a plain model
+    id for ``Agent(model=...)`` with the SDK default provider. Always
+    pair with ``terra_model_settings()`` so ``store=false`` is enforced.
+    """
+    return "gpt-6.1-terra"
+
+
 def prompt_cache_key_for(*, repo: str, base_sha: str, head_sha: str,
                            instructions_id: str, model_name: str) -> str:
     """Stable per-review OpenAI prompt-cache partition.
@@ -1142,6 +1155,16 @@ def with_prompt_cache_key(model_settings: Any, key: str | None) -> Any:
 
 def luna_model_settings() -> Any:
     """ModelSettings enforcing the Luna privacy posture (store=false)."""
+    agents = require_sdk()
+    from agents.model_settings import ModelSettings
+    return ModelSettings(store=False)
+
+
+def terra_model_settings() -> Any:
+    """ModelSettings enforcing the Terra privacy posture (store=false).
+
+    Identical to Luna: no model-specific tuning during qualification.
+    """
     agents = require_sdk()
     from agents.model_settings import ModelSettings
     return ModelSettings(store=False)

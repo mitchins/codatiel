@@ -326,10 +326,12 @@ class SpendLedger:
 
     # -- Tiered provider pricing (STABILIZE-02 R1 Stage A) ---------------
     # Active when ``rate`` carries a tiered card: ``pricing_backend`` in
-    # {"luna", "haiku"}, an integer ``tier_threshold_tokens``, an explicit
-    # ``processing_tier`` and a ``tiers`` mapping with per-tier input /
-    # output / cache-hit / cache-write rates. Legacy flat ledgers (no
-    # card) keep the exact historical behaviour below.
+    # {"luna", "haiku", "terra"}, an integer ``tier_threshold_tokens``, an
+    # explicit ``processing_tier`` and a ``tiers`` mapping with per-tier
+    # input / output / cache-hit / cache-write rates. Legacy flat ledgers
+    # (no card) keep the exact historical behaviour below. Terra shares
+    # Luna's OpenAI pricing semantics (threshold on reported input
+    # tokens; REVIEW-TERRA-01).
 
     def _tier_card(self) -> dict[str, Any] | None:
         rate = self.rate
@@ -337,7 +339,8 @@ class SpendLedger:
             return None
         tiers = rate.get("tiers")
         backend = rate.get("pricing_backend")
-        if not isinstance(tiers, dict) or backend not in ("luna", "haiku"):
+        if not isinstance(tiers, dict) or backend not in ("luna", "haiku",
+                                                             "terra"):
             return None
         try:
             threshold = int(rate.get("tier_threshold_tokens", -1))
@@ -360,16 +363,17 @@ class SpendLedger:
                                                  int | None]:
         """Select the context-size tier for one known-usage entry.
 
-        Luna's threshold is on total input tokens as reported, which by
-        provider semantics include cache reads and writes (verified live:
-        ``input_tokens`` counts the whole prompt). Haiku's threshold is
+        Luna's (and Terra's, same OpenAI semantics) threshold is on total
+        input tokens as reported, which by provider semantics include
+        cache reads and writes (verified live for Luna: ``input_tokens``
+        counts the whole prompt). Haiku's threshold is
         on the whole prompt — uncached input plus cache reads plus cache
         writes (per Anthropic's long-context pricing). A Haiku entry with
         an absent cache split has an unknowable prompt size and is placed
         in the higher tier: a missing classification never assumes cheap.
         """
         threshold = card["threshold"]
-        if card["backend"] == "luna":
+        if card["backend"] in ("luna", "terra"):
             total = entry["input_tokens"]
             name = "short" if total <= threshold else "long"
             return name, self._tier_rates(card["tiers"], name), total

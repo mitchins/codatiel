@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-BACKENDS = ("luna", "haiku", "gemma", "deepseek", "glm")
+BACKENDS = ("luna", "haiku", "gemma", "deepseek", "glm", "terra")
 
 _PROFILE_PATH = Path(__file__).resolve().parent / "config" / "model_profiles.json"
 
@@ -66,6 +66,8 @@ def build_model(name: str) -> tuple[Any, Any]:
     resolved = resolve_backend(name)
     if name == "luna":
         return runtime_sdk.luna_model_id(), runtime_sdk.luna_model_settings()
+    if name == "terra":
+        return runtime_sdk.terra_model_id(), runtime_sdk.terra_model_settings()
     if name == "gemma":
         profiles = load_profiles()
         profile = profiles[name]
