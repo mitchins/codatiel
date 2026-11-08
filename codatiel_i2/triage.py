@@ -24,16 +24,16 @@ TRIAGE_INVENTORY_STRATEGY = "triage-0.1"
 TRIAGE_MAX_FILES = 25
 TRIAGE_MAX_SYMBOL_SEARCHES = 12
 
-_PATH_CLASSES: list[tuple[str, re.Pattern]] = [
-    ("tests", re.compile(r"(^|/)(test_|_test\.|tests?/|spec/|__tests__/)", re.I)),
-    # S5850: every alternation branch carries its own explicit anchor —
-    # extension-suffix branches end with $, path-prefix branches start
-    # with ^ — so no branch inherits an anchor by precedence accident.
-    ("docs", re.compile(r"(?:^docs?/|^README|^CHANGELOG|^LICENSE|\.md$|\.rst$|\.txt$)", re.I)),
-    ("config", re.compile(r"\.(json|ya?ml|toml|ini|cfg|conf|acls?)$|(^|/)(Dockerfile|Makefile|\.github/)", re.I)),
-    ("auth", re.compile(r"auth|permission|owner|role|guard|polic|acl|login|session|token|passwd|secret|trusted|verif", re.I)),
-    ("persistence/schema/migration", re.compile(r"migrat|schema|models?/|store|ledger|_db|database|d1_|r2_|queue", re.I)),
-    ("api/route", re.compile(r"route|router|handler|endpoint|controller|/api/|views?/|haproxy|vhost|\.conf$", re.I)),
+_PATH_CLASSES: list[tuple[str, tuple[re.Pattern, ...]]] = [
+    ("tests", (re.compile(r"(^|/)(test_|_test\.|tests?/|spec/|__tests__/)", re.I),)),
+    # S5850: suffix and prefix branches live in separate patterns so no
+    # alternation ever mixes ^ and $ anchors. Behavior is the union.
+    ("docs", (re.compile(r"\.(?:md|rst|txt)$", re.I),
+              re.compile(r"^(?:docs?/|README|CHANGELOG|LICENSE)", re.I))),
+    ("config", (re.compile(r"\.(json|ya?ml|toml|ini|cfg|conf|acls?)$|(^|/)(Dockerfile|Makefile|\.github/)", re.I),)),
+    ("auth", (re.compile(r"auth|permission|owner|role|guard|polic|acl|login|session|token|passwd|secret|trusted|verif", re.I),)),
+    ("persistence/schema/migration", (re.compile(r"migrat|schema|models?/|store|ledger|_db|database|d1_|r2_|queue", re.I),)),
+    ("api/route", (re.compile(r"route|router|handler|endpoint|controller|/api/|views?/|haproxy|vhost|\.conf$", re.I),)),
 ]
 
 _DEF_RE = re.compile(
@@ -44,8 +44,8 @@ _DEF_RE = re.compile(
 
 
 def path_class(path: str) -> str:
-    for name, rx in _PATH_CLASSES:
-        if rx.search(path):
+    for name, patterns in _PATH_CLASSES:
+        if any(rx.search(path) for rx in patterns):
             return name
     return "other"
 

@@ -89,9 +89,9 @@ def test_triage_is_deterministic_and_capped(tmp_path: Path):
     assert first == second
 
 
-def test_docs_path_class_groups_anchors_explicitly():
-    # S5850: the docs alternation groups its anchored branches
-    # explicitly — extension-suffix OR path-prefix, nothing else.
+def test_docs_path_class_matches_suffix_or_prefix():
+    # S5850: suffix and prefix branches live in separate patterns, so no
+    # alternation mixes ^ and $ anchors. Behavior is the union.
     assert triage_mod.path_class("docs/guide.md") == "docs"
     assert triage_mod.path_class("README") == "docs"
     assert triage_mod.path_class("docs/api/CHANGELOG") == "docs"
