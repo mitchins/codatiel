@@ -1,4 +1,7 @@
 # Codatiel I2 runtime dependency lock (production image only).
+# Kept under the conventional requirements.txt name so static analysis
+# recognises the locked install; every entry is ==-pinned, so this file
+# IS the lock (see regeneration command below).
 #
 # Generated 2026-11-08 with CPython 3.12 (matches docker/Dockerfile base
 # image python:3.12-slim) via:

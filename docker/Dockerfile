@@ -17,11 +17,11 @@ WORKDIR /app
 RUN chown codatiel:codatiel /app \
  && mkdir -p /data/state /data/runs /data/work /data/feedback \
  && chown -R codatiel:codatiel /data
-# Locked runtime dependencies first (docker/requirements-lock.txt pins
-# every deployed version; S8544). The local tree provides codatiel_i2
-# itself via --no-deps so the lock stays the single version authority.
-COPY docker/requirements-lock.txt ./
-RUN pip install --no-cache-dir --only-binary :all: -r requirements-lock.txt && pip cache purge
+# Locked runtime dependencies first (docker/requirements.txt pins every
+# deployed version; S8544). The local tree provides codatiel_i2 itself
+# via --no-deps so the lock stays the single version authority.
+COPY docker/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir --only-binary :all: -r requirements.txt && pip cache purge
 COPY pyproject.toml ./
 COPY codatiel_i2 ./codatiel_i2
 RUN pip install --no-cache-dir --no-deps --only-binary :all: . && pip cache purge
