@@ -340,14 +340,29 @@ class UsageRecordingModel(_SDKModel):
     def __init__(self, model: Any, ledger: SpendLedger | None = None):
         if isinstance(model, UsageRecordingModel):
             raise ValueError("model is already usage-recorded")
+        # CLOSURE-02 provenance: whether this wrapper may read
+        # ``usage.input_tokens_details`` as provider measurements. The
+        # installed SDK auto-creates zero-valued details on every
+        # ``Usage()`` and normalizes missing fields to zero, so a present
+        # details object proves nothing by itself. Provenance is asserted
+        # by the model layer only: adapters/models that verified their
+        # usage flows from a real provider payload set
+        # ``provider_usage_details`` (DeepSeek, GLM), and string model ids
+        # resolve through the native OpenAI Responses provider, whose
+        # usage always carries provider-reported ``input_tokens_details``
+        # (required by openai-python types). Anything else — scripted
+        # fakes, adapters without the flag — must have its structural
+        # details ignored: absent stays None, never zero.
+        self._native_openai_provenance = False
         if isinstance(model, str):
-            # Native SDK string model ids (e.g. the Luna backend) must be
-            # resolved to Model objects: the recording wrapper can only
-            # forward to a real Model.
+            # Native SDK string model ids (e.g. the Luna/Terra backends)
+            # must be resolved to Model objects: the recording wrapper can
+            # only forward to a real Model.
             require_sdk()
             from agents.models.openai_provider import OpenAIProvider
 
             model = OpenAIProvider().get_model(model)
+            self._native_openai_provenance = True
         self._model = model
         self.ledger = ledger if ledger is not None else SpendLedger()
 
@@ -387,14 +402,15 @@ class UsageRecordingModel(_SDKModel):
             cached = write_tokens = reasoning = None
             details = getattr(usage, "input_tokens_details", None) \
                 if usage is not None else None
-            if ((getattr(self._model, "provider_usage_details", False)
-                    or details is not None)
-                    and usage is not None):
-                # Provider-reported token details only: either the adapter
-                # marks them as sourced from the provider payload, or the
-                # usage object structurally carries provider-mapped details
-                # (native SDK models). Never inferred, never defaulted:
-                # absent details stay None, not zero.
+            provenance = (getattr(self._model, "provider_usage_details", False)
+                          or self._native_openai_provenance)
+            if provenance and usage is not None:
+                # Provider-reported token details only: the model layer
+                # asserts these details flow from a real provider payload
+                # (native OpenAI resolution or an adapter with the
+                # provider_usage_details flag). SDK-populated defaults on
+                # unflagged models are never measurements: absent details
+                # stay None, not zero.
                 try:
                     cached = details.cached_tokens
                 except (AttributeError, TypeError):
@@ -1062,13 +1078,12 @@ def run_review(*, instructions: str, user_input: str, tools: list[Any],
     if isinstance(model, UsageRecordingModel):
         active_model = model
     else:
-        if isinstance(model, str):
-            # Native SDK string model ids (e.g. the Luna backend) must be
-            # resolved to Model objects before wrapping: the spend ledger's
-            # recording wrapper can only forward to a real Model.
-            from agents.models.openai_provider import OpenAIProvider
-
-            model = OpenAIProvider().get_model(model)
+        # String ids resolve inside the wrapper, which records native
+        # OpenAI provenance there (CLOSURE-02). Pre-resolved native SDK
+        # models obtained elsewhere carry no assertion: callers must set
+        # provider_usage_details themselves when the usage genuinely
+        # flows from a provider payload. All production paths resolve
+        # through strings (providers.build_model), so this stays correct.
         active_model = UsageRecordingModel(model, usage_ledger)
     agent = agents.Agent(name="codatiel-i2", instructions=instructions,
                          tools=tools, model=active_model, model_settings=model_settings)

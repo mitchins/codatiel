@@ -2,7 +2,7 @@
 
 import json, os, sys
 from pathlib import Path
-sys.path.insert(0, "/tmp/codatiel-public")
+sys.path.insert(0, "/tmp/codatiel-public")  # NOSONAR - research-only qual script, never shipped; fixed path, not user input
 from codatiel_i2 import providers as P, service as S
 
 CASES = {
@@ -15,7 +15,7 @@ CASES = {
     "P15": {"repo": "mitchins/yt2wiki", "pr": 15, "base": "c45c2ec6e43faa43a136ce49ed16197aaf6a144b", "head": "58c26e20e0fc4c764fd224b3a562ddf08e38be7a"},
 }
 ARMS = {"A": "file-list-0.1", "B": "bundle-0.1"}
-ROOT = Path(os.environ.get("FINAL_ROOT", "/tmp/qual-final"))
+ROOT = Path(os.environ.get("FINAL_ROOT", "/tmp/qual-final"))  # NOSONAR - research-only qual script, never shipped; env-overridable scratch dir
 RUNS = ROOT / "runs"
 WORK = ROOT / "work"
 LEDGER = ROOT / "ledger.json"
@@ -43,7 +43,7 @@ def run_one(case, arm, rep):
     settings=ModelSettings(store=False, max_tokens=3000)
     # Use local for P15
     if case=="P15":
-        repo_root=Path(os.environ.get("YT2WIKI_REPO", "/tmp/yt2wiki"))
+        repo_root=Path(os.environ.get("YT2WIKI_REPO", "/tmp/yt2wiki"))  # NOSONAR - frozen research fixture path, env-overridable
         out=S.review_local(repo_root, spec["base"], spec["head"], model=model, model_name=f"luna:{resolved['model']}", runs_root=RUNS/"luna"/arm/case/f"rep{rep}", work_root=WORK/"luna"/arm/case/f"rep{rep}", max_turns=12, model_settings=settings, rate=resolved["rate_usd_per_mtok"], rate_status=resolved["rate_status"], max_usd_per_review=CEILING-lg["spent_usd"], inventory_strategy=strat, enable_final=True)
     else:
         out=S.review_pr(spec["repo"], spec["pr"], model=model, model_name=f"luna:{resolved['model']}", runs_root=RUNS/"luna"/arm/case/f"rep{rep}", work_root=WORK/"luna"/arm/case/f"rep{rep}", max_turns=12, model_settings=settings, rate=resolved["rate_usd_per_mtok"], rate_status=resolved["rate_status"], max_usd_per_review=CEILING-lg["spent_usd"], expected_base=spec["base"], expected_head=spec["head"], inventory_strategy=strat, enable_final=True)

@@ -131,7 +131,7 @@ def test_accurate_cost_reservations_with_cache():
 
 # ------------------------------------------------------------------ Luna wrapper
 
-def _luna_wrapped(cached=None):
+def _luna_wrapped(cached=None, provenance=True):
     from codatiel_i2 import runtime_sdk as R
     details = None if cached == "absent" else _ns(cached_tokens=cached)
     usage = _ns(requests=1, input_tokens=1000, output_tokens=10,
@@ -144,6 +144,11 @@ def _luna_wrapped(cached=None):
                          rate_status="t", ceiling_usd=5.0)
 
     class NativeOpenAIModel:
+        # Native OpenAI path asserts provenance at resolution: its usage
+        # flows from a real Responses API payload. CLOSURE-02: structural
+        # details without this assertion are never measurements.
+        provider_usage_details = provenance
+
         async def get_response(self, *a, **k):
             return resp
 
@@ -155,9 +160,8 @@ def _luna_wrapped(cached=None):
 
 
 def test_luna_native_details_recorded_not_dropped():
-    # Root-cause regression: the native OpenAI model has no
-    # provider_usage_details flag, yet its usage structurally carries
-    # provider-mapped input_tokens_details. Cached tokens must be read.
+    # Provenance asserted (native OpenAI resolution): provider-mapped
+    # input_tokens_details are read as measurements.
     ledger = _luna_wrapped(cached=800)
     assert ledger.entries["resp-luna-1"]["cached_input_tokens"] == 800
 
@@ -165,6 +169,44 @@ def test_luna_native_details_recorded_not_dropped():
 def test_luna_absent_details_stay_none():
     ledger = _luna_wrapped(cached="absent")
     assert ledger.entries["resp-luna-1"]["cached_input_tokens"] is None
+
+
+def test_unflagged_structural_details_are_not_measurements():
+    # CLOSURE-02: a model without asserted provenance carries
+    # explicitly-built details, but the wrapper must not treat them as
+    # provider measurements — SDK-populated defaults are
+    # indistinguishable from these, so structural carrying alone proves
+    # nothing. Absent stays None, never zero.
+    ledger = _luna_wrapped(cached=800, provenance=False)
+    assert ledger.entries["resp-luna-1"]["cached_input_tokens"] is None
+
+
+def test_unflagged_sdk_default_details_are_not_measurements():
+    # CLOSURE-02 root cause: the installed SDK auto-creates zero-valued
+    # input_tokens_details on every Usage() and normalizes missing
+    # fields to zero, so a present details object on an unflagged model
+    # (scripted fakes, adapters without the flag) must be ignored.
+    agents = pytest.importorskip("agents")
+    from agents.usage import Usage as SDKUsage  # noqa: F401  (via agents)
+    from codatiel_i2 import runtime_sdk as R
+    resp = _ns(response_id="resp-sdk-default-1",
+               usage=SDKUsage(requests=1, input_tokens=1000,
+                              output_tokens=10, total_tokens=1010))
+    assert resp.usage.input_tokens_details is not None  # SDK default
+    ledger = SpendLedger(rate={"input": 0.1, "output": 0.5,
+                               "input_cache_hit": 0.01,
+                               "input_cache_write": 0.125},
+                         rate_status="t", ceiling_usd=5.0)
+
+    class UnflaggedModel:
+        async def get_response(self, *a, **k):
+            return resp
+
+    asyncio.run(R.UsageRecordingModel(UnflaggedModel(),
+                                      ledger).get_response())
+    entry = ledger.entries["resp-sdk-default-1"]
+    assert entry["cached_input_tokens"] is None
+    assert entry["cache_write_input_tokens"] is None
 
 
 # ------------------------------------------------------------------ Haiku adapter

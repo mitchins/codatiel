@@ -162,8 +162,12 @@ class Store:
                              "run `watcher activate` first (refusing to run)")
         return at
 
-    def activate(self) -> str:
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    def activate(self, at: str | None = None) -> str:
+        # `at` is a test-only clock injection (CLOSURE-02): acceptance
+        # fixtures freeze the activation boundary, so tests pass an
+        # explicit timestamp instead of the wall clock. Production call
+        # sites pass nothing and the boundary stays wall-clock.
+        now = at or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         try:
             self.cx.execute(_BEGIN)
             row = self.cx.execute(

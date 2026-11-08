@@ -405,7 +405,7 @@ class Manager:
                                         " note=?, updated_ts=? WHERE repo=? "
                                         "AND pr=? AND status='queued'",
                                         (f"lifecycle at discovery: {reason}",
-                                         time.time(), repo, number))
+                                         self.now(), repo, number))
                                     self.store.cx.commit()
                     continue
                 out["discovered"] += 1

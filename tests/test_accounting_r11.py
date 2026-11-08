@@ -370,3 +370,129 @@ def test_service_maps_budget_ceiling_to_incomplete(tmp_path: Path):
     assert model.calls == 0
     spend = json.loads((Path(out["run_dir"]) / "metrics.json").read_text())["spend"]
     assert spend["usage"]["requests"] == 0
+
+
+# --------------------------------- CLOSURE-02 provenance regression
+
+class _NativeProvenanceModel:
+    """Fake for the native OpenAI path (Luna/Terra): provenance asserted
+    exactly as UsageRecordingModel does when it resolves a string model
+    id, usage built with the real SDK Usage type (defaults included)."""
+
+    provider_usage_details = True
+
+    def __init__(self, usages):
+        from agents.items import ModelResponse
+
+        self._ModelResponse = ModelResponse
+        self._usages = list(usages)
+        self.calls = 0
+
+    async def get_response(self, *args, **kwargs):
+        self.calls += 1
+        usage = self._usages[min(self.calls - 1, len(self._usages) - 1)]
+        return self._ModelResponse(output=[], usage=usage,
+                                   response_id=f"resp-n-{self.calls}")
+
+
+class _AdapterNoSplitModel(_NativeProvenanceModel):
+    """Fake for the adapter path (Haiku): no provenance flag, split
+    published only through usage_details_for."""
+
+    provider_usage_details = False
+
+    def __init__(self, usages, split):
+        super().__init__(usages)
+        self._split = dict(split)
+
+    def usage_details_for(self, response_id):
+        return dict(self._split)
+
+
+def _sdk_usage(in_tokens, out_tokens, cached=None, write=None):
+    from agents.usage import Usage
+
+    details = None
+    if cached is not None or write is not None:
+        details = {"cached_tokens": cached or 0,
+                   "cache_write_tokens": write or 0}
+    if details is None:
+        return Usage(requests=1, input_tokens=in_tokens,
+                     output_tokens=out_tokens,
+                     total_tokens=in_tokens + out_tokens)
+    return Usage(requests=1, input_tokens=in_tokens, output_tokens=out_tokens,
+                 total_tokens=in_tokens + out_tokens,
+                 input_tokens_details=details)
+
+
+def test_luna_native_nonzero_split_priced_exact():
+    # Distinction 3: provider reports nonzero reads/writes under asserted
+    # provenance -> PRICED at the exact split, run proceeds.
+    led = _ledger("luna")
+    model = _NativeProvenanceModel([_sdk_usage(10000, 100, cached=8000,
+                                               write=1000)])
+    wrapped = runtime_sdk.UsageRecordingModel(model, led)
+    asyncio.run(wrapped.get_response(None, "hi", None, [], None, [],
+                                     previous_response_id=None,
+                                     conversation_id=None, prompt=None))
+    assert model.calls == 1
+    rows = {r["response_id"]: r
+            for r in led.to_record()["request_ledger"]}
+    assert rows["resp-n-1"]["pricing_status"] == PRICED
+    assert rows["resp-n-1"]["priced_cost_usd"] == pytest.approx(
+        (1000 * 0.1 + 8000 * 0.01 + 1000 * 0.125 + 100 * 0.5) / 1e6)
+    assert led.has_unbounded() is False
+
+
+def test_terra_native_explicit_zero_priced_not_partial():
+    # Distinction 2: provider explicitly reports zero cache usage under
+    # asserted provenance -> PRICED (Terra shares OpenAI-family
+    # semantics). The next request is sent, not halted.
+    led = _ledger("luna")
+    model = _NativeProvenanceModel([_sdk_usage(1000, 10), _sdk_usage(1000, 10)])
+    wrapped = runtime_sdk.UsageRecordingModel(model, led)
+    for _ in range(2):
+        asyncio.run(wrapped.get_response(
+            None, "hi", None, [], None, [], previous_response_id=None,
+            conversation_id=None, prompt=None))
+    assert model.calls == 2
+    rows = {r["response_id"]: r
+            for r in led.to_record()["request_ledger"]}
+    assert all(r["pricing_status"] == PRICED for r in rows.values())
+    assert led.has_unbounded() is False
+
+
+def test_haiku_adapter_absent_split_halts_next_call():
+    # Distinction 1: cache measurements absent from the provider
+    # response (adapter publishes no split) -> PRICING_PARTIAL, and the
+    # invariant holds: the next provider call is never sent.
+    led = _ledger("haiku")
+    model = _AdapterNoSplitModel([_sdk_usage(5000, 50), _sdk_usage(5000, 50)],
+                                 {"cache_in_input": False})
+    wrapped = runtime_sdk.UsageRecordingModel(model, led)
+    asyncio.run(wrapped.get_response(None, "hi", None, [], None, [],
+                                     previous_response_id=None,
+                                     conversation_id=None, prompt=None))
+    assert model.calls == 1
+    rec = led.to_record()
+    assert rec["pricing_partial_ids"] == ["resp-n-1"]
+    assert led.has_unbounded() is True
+    with pytest.raises(PricingUnbounded):
+        asyncio.run(wrapped.get_response(
+            None, "hi", None, [], None, [], previous_response_id=None,
+            conversation_id=None, prompt=None))
+    assert model.calls == 1
+    assert led.to_record()["usage"]["requests"] == 1
+
+
+def test_string_model_id_resolution_asserts_native_provenance(monkeypatch):
+    # CLOSURE-02: the native OpenAI string-resolution path (Luna/Terra)
+    # records provenance on the wrapper. Offline: resolution constructs
+    # the SDK model object only (no network, no inference).
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-resolution-only-key")
+    wrapped = runtime_sdk.UsageRecordingModel(
+        "gpt-6-luna", _ledger("luna"))
+    assert wrapped._native_openai_provenance is True
+    prebuilt = runtime_sdk.UsageRecordingModel(
+        _NativeProvenanceModel([_sdk_usage(100, 10)]), _ledger("luna"))
+    assert prebuilt._native_openai_provenance is False

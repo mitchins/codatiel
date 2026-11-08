@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, "/tmp/codatiel-public")
+sys.path.insert(0, "/tmp/codatiel-public")  # NOSONAR - research-only qual script, never shipped; fixed path, not user input
 from codatiel_i2 import providers as P
 from codatiel_i2 import service as S
 
@@ -50,7 +50,7 @@ ARMS = {
     "C": {"inventory_strategy": "bundle-cite-0.1"},
 }
 
-ROOT = Path(os.environ.get("CONTEXT_01_ROOT", "/tmp/qual"))
+ROOT = Path(os.environ.get("CONTEXT_01_ROOT", "/tmp/qual"))  # NOSONAR - research-only qual script, never shipped; env-overridable scratch dir
 RUNS = ROOT / "runs"
 WORK = ROOT / "work"
 LEDGER = ROOT / "ledger.json"
@@ -92,7 +92,7 @@ def main(case_id: str, model_name: str, arm: str, rep: int):
                        inventory_strategy=spec["inventory_strategy"])
     # P15: frozen head no longer matches live PR; use local repo.
     if case_id == "P15":
-        repo_root = Path(os.environ.get("YT2WIKI_REPO", "/tmp/yt2wiki"))
+        repo_root = Path(os.environ.get("YT2WIKI_REPO", "/tmp/yt2wiki"))  # NOSONAR - frozen research fixture path, env-overridable
         out = S.review_local(repo_root, case["base"], case["head"], **common_kw)
     else:
         kw = dict(common_kw, expected_base=case["base"],

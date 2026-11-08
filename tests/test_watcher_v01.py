@@ -9,6 +9,7 @@ and the read-only GitHub scope. Live contract tests are separate
 
 from __future__ import annotations
 
+import calendar
 import json
 import time
 from pathlib import Path
@@ -24,6 +25,13 @@ from codatiel_i2 import watcher_store as S
 ACTIVATED = "2026-10-24T00:00:00Z"
 OLD = "2026-10-01T00:00:00Z"
 NEW = "2026-10-24T12:00:00Z"
+# CLOSURE-02 deterministic clock: the whole suite runs in the frozen
+# Oct-24 world its fixtures describe, not on the wall clock. Production
+# eligibility windows, grandfathering and pause semantics are untouched;
+# only the test harness clock is pinned.
+FIXED_NOW = float(calendar.timegm(
+    time.strptime("2026-10-24T18:00:00Z", "%Y-%m-%dT%H:%M:%SZ")))
+FIXED_DAY = "2026-10-24"
 
 
 def raw_pr(number=1, base="aa" * 20, head="bb" * 20, created=OLD,
@@ -51,12 +59,13 @@ def make_mgr(tmp_path: Path, **kw) -> tuple[M.ManagerConfig, S.Store, M.Manager]
     for k, v in kw.items():
         setattr(cfg, k, v)
     store = S.Store(tmp_path / "watch.sqlite")
-    mgr = M.Manager(cfg, store)
+    mgr = M.Manager(cfg, store, now=lambda: FIXED_NOW,
+                    day=lambda: FIXED_DAY)
     return cfg, store, mgr
 
 
 def activate(store: S.Store) -> str:
-    return store.activate()
+    return store.activate(at=ACTIVATED)
 
 
 class Harness:
@@ -346,15 +355,44 @@ def test_pagination_rate_limits_and_expired_tokens(tmp_path):
     h.fetch_error[("o/r", 1)] = "401 Unauthorized (expired token)"
     out = mgr.cycle()
     assert h.reviews == 0
-    assert any(r.get("retry") for r in out["dispatched"])
+    # SETTLE-01: a transient fetch failure at settle waits (no inference,
+    # no dispatch) instead of dispatching into a blind revalidation retry.
+    assert out["settle_waiting"] == 1
+    assert out["dispatched"] == []
+    # The next cycle retries with fresh credentials and dispatches.
+    del h.fetch_error[("o/r", 1)]
+    out = mgr.cycle()
+    assert h.reviews == 1
     # partial API failure on discovery fails closed, no inference
     def boom_discover(repo, limit=100):
         raise ConnectionError("rate limited")
 
     mgr.discover = boom_discover  # type: ignore[method-assign]
     out = mgr.cycle()
-    assert h.reviews == 0
+    assert h.reviews == 1
     assert out["errors"]
+
+
+def test_dispatch_revalidate_retry_stays_eligible(tmp_path):
+    # The dispatch-time revalidation retry (narrow race: settle saw a
+    # live PR, dispatch-time fetch fails) stays eligible for the next
+    # cycle with no inference. Covered directly because the settle wait
+    # above normally absorbs transient fetch failures first.
+    _cfg, store, mgr = make_mgr(tmp_path)
+    activate(store)
+    h = Harness(tmp_path)
+    h.prs = {"o/r": [raw_pr(created=NEW)]}
+    wire(mgr, h)
+    h.fetch_error[("o/r", 1)] = "401 Unauthorized (expired token)"
+    store.upsert_pair("o/r", 1, "aa" * 20, "bb" * 20,
+                      pr_url="https://github.com/o/r/pull/1",
+                      pr_created_at=NEW)
+    store.set_status("o/r", 1, "aa" * 20, "bb" * 20, "queued")
+    rec = mgr.dispatch("o/r", 1, "aa" * 20, "bb" * 20, FIXED_DAY)
+    assert rec.get("retry")
+    assert h.reviews == 0
+    row = store.get_pair("o/r", 1, "aa" * 20, "bb" * 20)
+    assert row and row["status"] == "eligible"
 
 
 # -- queue, concurrency, crash ------------------------------------------

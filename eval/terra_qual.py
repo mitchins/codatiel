@@ -15,21 +15,21 @@ no email, no watcher, no Haiku.
 
 import json, os, sys
 from pathlib import Path
-sys.path.insert(0, "/tmp/codatiel-public")
+sys.path.insert(0, "/tmp/codatiel-public")  # NOSONAR - research-only qual script, never shipped; fixed path, not user input
 from codatiel_i2 import providers as P, service as S
 
 CASES = {
     "FW3": {"mode": "pr", "repo": "mitchins/frigate-watchdog", "pr": 3, "base": "956f7445fa13e93309dc5809395cd316ae4d7403", "head": "d9b61df6c889a28b0cb49547979897533b873ba4"},
     "KL1": {"mode": "pr", "repo": "mitchins/kinglet-lms", "pr": 1, "base": "dbf06e0004a44570dc253e88fffd7433d95997c8", "head": "694269d572bd77791f50dfd61d2ec52323da9c47"},
     "L08": {"mode": "pr", "repo": "Smart-Compliance-Systems/scs-infra", "pr": 4, "base": "aa807b86fda364ef0723b536672e07cca4646c6e", "head": "aff2a0680940964ce0d7304a2699f0415893a4b4"},
-    "L06": {"mode": "local", "root": "/tmp/repos/mdmwi", "base": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86", "head": "4051ff05090a76165f1a533675086e5760b97cbd"},
-    "L10": {"mode": "local", "root": "/tmp/repos/needletail", "base": "08847b4cd2691c127597218dfd31457bf246145f", "head": "80bf493d1cae6d9d40fe70894ee294be80292af2"},
+    "L06": {"mode": "local", "root": "/tmp/repos/mdmwi", "base": "6509400ca318ba90d868e3cfa7fe7a5f2571bb86", "head": "4051ff05090a76165f1a533675086e5760b97cbd"},  # NOSONAR - frozen research fixture path, not user input
+    "L10": {"mode": "local", "root": "/tmp/repos/needletail", "base": "08847b4cd2691c127597218dfd31457bf246145f", "head": "80bf493d1cae6d9d40fe70894ee294be80292af2"},  # NOSONAR - frozen research fixture path, not user input
     "WT4": {"mode": "pr", "repo": "mitchins/wall-tidbits", "pr": 4, "base": "9333622385f7139ae2eddeb4a1efaec42c59f1aa", "head": "f053c2f89fd1f1acd509b0962e83ab211cbb4f71"},
-    "P15": {"mode": "local", "root": "/tmp/yt2wiki", "base": "c45c2ec6e43faa43a136ce49ed16197aaf6a144b", "head": "58c26e20e0fc4c764fd224b3a562ddf08e38be7a"},
-    "PR25": {"mode": "local", "root": "/tmp/yt2wiki", "base": "5c17a97c21d0ce77900957dcaa9613e856f1aa28", "head": "ebd9783cc2aa6534abdd39b68fe27c070996bc82"},
-    "PR27": {"mode": "local", "root": "/tmp/yt2wiki", "base": "bed3aae8df6994ccb6c5b8e38628c45949dee581", "head": "d28cdfcbc0cff39e8dbc628a225a4fe2259d465a"},
+    "P15": {"mode": "local", "root": "/tmp/yt2wiki", "base": "c45c2ec6e43faa43a136ce49ed16197aaf6a144b", "head": "58c26e20e0fc4c764fd224b3a562ddf08e38be7a"},  # NOSONAR - frozen research fixture path, not user input
+    "PR25": {"mode": "local", "root": "/tmp/yt2wiki", "base": "5c17a97c21d0ce77900957dcaa9613e856f1aa28", "head": "ebd9783cc2aa6534abdd39b68fe27c070996bc82"},  # NOSONAR - frozen research fixture path, not user input
+    "PR27": {"mode": "local", "root": "/tmp/yt2wiki", "base": "bed3aae8df6994ccb6c5b8e38628c45949dee581", "head": "d28cdfcbc0cff39e8dbc628a225a4fe2259d465a"},  # NOSONAR - frozen research fixture path, not user input
 }
-ROOT = Path(os.environ.get("TERRA_ROOT", "/tmp/terra"))
+ROOT = Path(os.environ.get("TERRA_ROOT", "/tmp/terra"))  # NOSONAR - research-only qual script, never shipped; env-overridable scratch dir
 RUNS = ROOT / "runs"
 WORK = ROOT / "work"
 LEDGER = ROOT / "ledger.json"
