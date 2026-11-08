@@ -207,11 +207,14 @@ def bind_fact(fact: dict, revision: str, revision_sha: str,
               evidence: list[dict]) -> dict:
     """Bind an extracted fact to the exact revision bytes + evidence that
     produced it. The ID incorporates revision, SHA and evidence IDs, so
-    unchanged base/head facts never share identity."""
-    ids = sorted(e["evidence_id"] for e in evidence
-                 if e.get("path") == fact.get("path")
-                 and e.get("revision") == revision
-                 and e.get("evidence_id"))
+    unchanged base/head facts never share identity. Evidence IDs are
+    deduplicated: re-reading a file must not change the identity of an
+    otherwise identical logical fact (that instability defeated issue
+    dedup by candidate ID)."""
+    ids = sorted({e["evidence_id"] for e in evidence
+                  if e.get("path") == fact.get("path")
+                  and e.get("revision") == revision
+                  and e.get("evidence_id")})
     payload = {k: v for k, v in fact.items()
                if k not in ("fact_id", "detector_id", "proof_class", "fact_kind",
                            "path", "line_start", "line_end",
@@ -384,12 +387,38 @@ def _guess_doc_subject(line: str) -> str:
 
 _ENV_READERS = [
     re.compile(r"os\.getenv\(\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']"),
+    # os.environ.get("X") / os.environ["X"]: the dominant Python idiom.
+    re.compile(r"os\.environ\.get\(\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']"),
+    re.compile(r"os\.environ\[\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']\s*\]"),
     re.compile(r"process\.env\.([A-Za-z_][A-Za-z0-9_]*)"),
     re.compile(r"process\.env\[([\"'])([A-Za-z_][A-Za-z0-9_]*)\1\]"),
     re.compile(r'std::env::var\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*\)'),
     re.compile(r'os\.Getenv\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*\)'),
     re.compile(r'environment\["([A-Za-z_][A-Za-z0-9_]*)"\]'),
 ]
+
+# Module-level string constants used as env keys:
+#   PASSWORD_ENV = "YT2WIKI_OPERATOR_PASSWORD"; os.environ.get(PASSWORD_ENV)
+_CONST_ASSIGN = re.compile(
+    r"^\s*([A-Z][A-Z0-9_]{2,})\s*=\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']",
+    re.M)
+
+
+def _const_env_names(text: str) -> dict[str, str]:
+    """Map UPPER_SNAKE identifiers to the string literal they alias."""
+    return {m.group(1): m.group(2) for m in _CONST_ASSIGN.finditer(text)}
+
+
+def _dynamic_env_read(text: str) -> bool:
+    """True when env is read through a non-literal key: os.environ.get(name),
+    os.environ[expr], os.getenv(var). Absence from the static surface then
+    proves nothing (ambiguous_absence, never a verified miss)."""
+    stripped = re.sub(r"os\.environ(?:\.get)?\(\s*[\"'][^\"']*[\"']", "", text)
+    stripped = re.sub(r"os\.environ\[\s*[\"'][^\"']*[\"']\s*\]", "", stripped)
+    stripped = re.sub(r"os\.getenv\(\s*[\"'][^\"']*[\"']", "", stripped)
+    return bool(re.search(
+        r"os\.environ(?:\.get)?\(\s*[A-Za-z_]|os\.environ\[\s*[A-Za-z_]"
+        r"|os\.getenv\(\s*[A-Za-z_]", stripped))
 
 _CLI_FLAGS = [
     re.compile(r"add_argument\(\s*[\"'](--[A-Za-z0-9-]+)[\"']"),
@@ -414,13 +443,33 @@ def extract_code_names(path: str, lines: list[str]) -> list[dict]:
     """Declared env vars, CLI flags, config keys with alias detection."""
     facts = []
     text = "\n".join(lines)
+    consts = _const_env_names(text)
+    seen: set[tuple] = set()
     for pattern in _ENV_READERS:
         for match in pattern.finditer(text):
             name = match.group(match.lastindex or 1)
             lineno = text[:match.start()].count("\n") + 1
+            key = (name, lineno)
+            if key in seen:
+                continue
+            seen.add(key)
             facts.append(_fact("named_contract", "declared_name", path, lineno, lineno, {
                 "name": name, "surface": _classify_surface(name, match.group(0)),
                 "aliases": _find_aliases(text, name),
+            }))
+    # Constant indirection resolved in the same file only: IDENT = "LITERAL"
+    # followed by os.environ.get(IDENT). Data-flow beyond this is out of scope.
+    for ident, literal in consts.items():
+        hit = re.search(
+            rf"os\.environ(?:\.get)?\(\s*{ident}\s*[,)]|"
+            rf"os\.environ\[\s*{ident}\s*\]|"
+            rf"os\.getenv\(\s*{ident}\s*[,)]", text)
+        if hit and (literal, 1) not in seen:
+            lineno = text[:hit.start()].count("\n") + 1
+            seen.add((literal, 1))
+            facts.append(_fact("named_contract", "declared_name", path, lineno, lineno, {
+                "name": literal, "surface": "env",
+                "aliases": _find_aliases(text, literal),
             }))
     for pattern in _CLI_FLAGS:
         for match in pattern.finditer(text):
@@ -435,7 +484,8 @@ def extract_code_names(path: str, lines: list[str]) -> list[dict]:
 def _classify_surface(name: str, context: str) -> str:
     if name.startswith("--") or "option(" in context or "add_argument" in context or "flag" in context.lower():
         return "cli"
-    if "getenv" in context or "process.env" in context or "env::var" in context or "environment[" in context:
+    if ("getenv" in context or "process.env" in context or "env::var" in context
+            or "environment[" in context or "os.environ" in context):
         return "env"
     return "config"
 
@@ -460,26 +510,49 @@ _BARE_FLAG = re.compile(r"(?<![A-Za-z0-9_`-])(--[a-z0-9][a-z0-9-]*)\b")
 # 5+ all-caps chars: WORKERS yes, API/CLI/URL no.
 _BARE_ENV = re.compile(r"\b([A-Z][A-Z0-9_]{4,})\b")
 # A removal note is explicitly NOT a provision claim ("Removed X in v2").
-_REMOVAL_LINE = re.compile(r"\b(removed?|removes|deleted?|dropped|retired|no longer)\b", re.I)
-_CLAIM_VERBS = ("support", "supports", "supported", "set ", "configure",
-                "flag", "option", "formerly", "alias", "reference", "now")
+# Neither is a non-requirement ("Does not require --gpus").
+_REMOVAL_LINE = re.compile(r"\b(removed?|removes|deleted?|dropped|retired|no longer|"
+                           r"does\s+not\s+require|do\s+not\s+require|"
+                           r"requires?\s+no|not\s+required)\b", re.I)
+# A contract must be CLAIMED (provision verb), SHAPED (UPPER_SNAKE env or
+# --flag), not negated and not reference-framed. Arbitrary prose nouns
+# (export, model, torch), JSON/config keys and foreign-tool flags are not
+# contracts, even on a line that happens to contain "set" or "now".
+_CLAIM_VERBS = ("support", "set ", "configur", "flag", "option", "requir",
+                "provid", "accept", "expect", "use ", "pass", "defin",
+                "need", "allow", "specif", "expos", "enabl", "formerly",
+                "alias", "reference", "now")
+# "no `FOO`" / "without `FOO`": asserts absence, never provision.
+_NO_PROVISION = re.compile(r"(?:^|[\s(>,;])(?:no|without)\s+`([^`]+)`")
+
+
+def _contract_shape(name: str) -> bool:
+    if name.startswith("--"):
+        return True
+    return bool(name.isupper() and (len(name) >= 4 or "_" in name))
 
 
 def extract_doc_names(path: str, lines: list[str]) -> list[dict]:
     """Backticked names in claim-bearing sentences, CLI flags, or ENV-style
-    constants. A --flag or SCREAMING name is itself claim-shaped. Bare
-    (unbackticked) flags and ENV names count when a claim verb is present:
-    reverse-direction claims rarely bother with backticks."""
+    constants. A name becomes a contract ONLY when it is claimed (provision
+    verb on the line) AND shaped (UPPER_SNAKE env or --flag): bare prose
+    nouns, JSON/config keys and foreign-tool flags never qualify, even on
+    lines containing weak verbs like "set" or "now"."""
     facts = []
     seen: set[tuple] = set()
     for i, line in enumerate(lines, 1):
         lowered = line.lower()
         if _REMOVAL_LINE.search(line):
             continue
+        noprov = set()
+        for m in _NO_PROVISION.finditer(line):
+            noprov.add(m.group(1))
         for name in _DOC_NAME.findall(line):
-            looks_like_flag = name.startswith("--")
-            looks_like_env = name.isupper() and len(name) > 3
-            if not (looks_like_flag or looks_like_env or any(k in lowered for k in _CLAIM_VERBS)):
+            if name in noprov:
+                continue
+            if not _contract_shape(name):
+                continue
+            if not any(k in lowered for k in _CLAIM_VERBS):
                 continue
             key = (name, i)
             if key in seen:
@@ -487,7 +560,7 @@ def extract_doc_names(path: str, lines: list[str]) -> list[dict]:
             seen.add(key)
             facts.append(_fact("named_contract", "documented_name", path, i, i, {
                 "name": name,
-                "surface": "cli" if name.startswith("--") else "env" if name.isupper() else "config",
+                "surface": "cli" if name.startswith("--") else "env",
                 "claim": line.strip()[:300],
             }))
         if any(v in lowered for v in ("support", "set ", "configure", "flag", "now")):
@@ -633,9 +706,20 @@ def extract_doc_sets(path: str, lines: list[str]) -> list[dict]:
 
 # ------------------------------------------------------------------ interface
 
+# Receivers that register routes. An ordinary method CALL is only route
+# evidence on one of these; anything else (config, entry, client, view,
+# providers, ...) is data access, never a served endpoint. Ambiguous
+# receivers must not count as evidence that a route is served: a phantom
+# surface entry would hide a genuinely missing documented route.
+_ROUTE_REGISTRARS = frozenset({"app", "router", "api"})
+
 _ROUTE_PATTERNS = [
-    (re.compile(r"@app\.(get|post|put|delete|patch)\(\s*[\"']([^\"']+)[\"']"), "http_route"),
-    (re.compile(r"\.(get|post|put|delete|patch)\(\s*['\"]([^'\"]+)['\"]"), "http_route"),
+    # @app.get("/x") / @router.post("/y"): decorator registration syntax
+    # is itself evidence of a route; any receiver qualifies.
+    (re.compile(r"@([A-Za-z_][A-Za-z0-9_]*)\.(get|post|put|delete|patch)\(\s*[\"']([^\"']+)[\"']"), "http_route"),
+    # app.get("/x"): an ordinary call needs a registrar receiver.
+    # config.get("/library") and entry.get("job_id") are not endpoints.
+    (re.compile(r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.(get|post|put|delete|patch)\(\s*['\"]([^'\"]+)['\"]"), "http_route"),
     (re.compile(r"HandleFunc\(\s*\"([^\"]+)\""), "http_route"),
     (re.compile(r"\.route\(\s*\"([^\"]+)\""), "http_route"),
 ]
@@ -655,6 +739,63 @@ def _parse_params(lang_hint: str, params: str) -> list[dict]:
     out = []
     depth = 0
     current = ""
+    current_eq0 = False  # '=' at nesting depth 0: keyword-passed or defaulted
+    parts = []
+    for char in params:
+        if char in "{[(":
+            depth += 1
+        elif char in "}])":
+            depth -= 1
+        if char == "=" and depth == 0:
+            current_eq0 = True
+        if char == "," and depth == 0:
+            parts.append((current, current_eq0))
+            current = ""
+            current_eq0 = False
+        else:
+            current += char
+    if current.strip():
+        parts.append((current, current_eq0))
+    keyword_only = False
+    for part, eq0 in parts:
+        part = part.strip()
+        if part == "*":
+            keyword_only = True
+            continue
+        if part.startswith("**"):
+            # Keyword variadic (**kwargs) absorbs extra keywords; it does
+            # not change the positional/keyword-only boundary (and must be
+            # last in valid Python).
+            continue
+        if re.match(r"\*\s*[A-Za-z_]", part):
+            # Positional variadic (*args, *args: T): every following
+            # parameter is keyword-only per Python semantics. Record the
+            # splat at the interface level via _variadic_kinds, never as a
+            # named parameter.
+            keyword_only = True
+            continue
+        name_match = re.match(r"([A-Za-z_][A-Za-z0-9_]*)", part)
+        if not name_match:
+            continue
+        name = name_match.group(1)
+        if name in ("self", "cls"):
+            continue
+        required = ("=" not in part and "?" not in part and "opts" not in part.lower()
+                    and "options" not in part.lower())
+        out.append({"name": name, "required": required,
+                    "keyword_only": keyword_only, "keyword": eq0})
+    return out
+
+
+def _variadic_kinds(params: str) -> tuple[bool, bool]:
+    """(pos_variadic, kw_variadic) for one raw parameter string.
+
+    ``*args`` absorbs extra POSITIONALS; ``**kwargs`` absorbs extra
+    KEYWORDS; neither does the other's job. A bare ``*`` is only the
+    keyword-only marker and absorbs nothing.
+    """
+    depth = 0
+    current = ""
     parts = []
     for char in params:
         if char in "{[(":
@@ -666,33 +807,38 @@ def _parse_params(lang_hint: str, params: str) -> list[dict]:
             current = ""
         else:
             current += char
-    if current.strip():
-        parts.append(current)
-    keyword_only = False
+    parts.append(current)
+    pos = kw = False
     for part in parts:
-        part = part.strip()
-        if part == "*":
-            keyword_only = True
-            continue
-        name_match = re.match(r"([A-Za-z_][A-Za-z0-9_]*)", part)
-        if not name_match:
-            continue
-        name = name_match.group(1)
-        if name in ("self", "cls"):
-            continue
-        required = ("=" not in part and "?" not in part and "opts" not in part.lower()
-                    and "options" not in part.lower())
-        out.append({"name": name, "required": required, "keyword_only": keyword_only})
-    return out
+        stripped = part.strip()
+        if re.match(r"\*\*\s*[A-Za-z_]", stripped):
+            kw = True
+        elif re.match(r"\*\s*[A-Za-z_]", stripped):
+            pos = True
+    return pos, kw
 
 
 def extract_code_interfaces(path: str, lines: list[str]) -> list[dict]:
     facts = []
     text = "\n".join(lines)
-    for pattern, kind in _ROUTE_PATTERNS:
+    for pi, (pattern, kind) in enumerate(_ROUTE_PATTERNS):
         for match in pattern.finditer(text):
             groups = match.groups()
-            method, route = (groups[0].upper(), groups[1]) if len(groups) == 2 else ("*", groups[0])
+            if len(groups) == 3:
+                receiver, method, route = groups[0], groups[1].upper(), groups[2]
+                if pi == 1 and receiver.split(".")[-1] not in _ROUTE_REGISTRARS:
+                    # Ordinary call on a non-registrar receiver:
+                    # data access, not a served endpoint.
+                    continue
+            elif len(groups) == 2:
+                method, route = groups[0].upper(), groups[1]
+            else:
+                method, route = "*", groups[0]
+            # Route discipline: a served path starts with '/'. Bare tokens
+            # (dict .get("job_id"), config lookups) are not routes, even when
+            # the receiver looks like an HTTP verb.
+            if not route.startswith("/"):
+                continue
             lineno = text[:match.start()].count("\n") + 1
             facts.append(_fact("interface", "implemented_interface", path, lineno, lineno, {
                 "subject": route, "interface": {"kind": "http_route", "method": method, "path": route},
@@ -701,24 +847,34 @@ def extract_code_interfaces(path: str, lines: list[str]) -> list[dict]:
         match = _SIG_DEF.match(line)
         if match:
             symbol, params = match.group(1), match.group(2)
+            pos_var, kw_var = _variadic_kinds(params)
             facts.append(_fact("interface", "implemented_interface", path, i, i, {
                 "subject": symbol,
                 "interface": {"kind": "call_signature", "symbol": symbol,
-                              "parameters": _parse_params(path, params)},
+                              "parameters": _parse_params(path, params),
+                              "variadic_pos": pos_var, "variadic_kw": kw_var},
             }))
     return facts
 
 
 def extract_doc_interfaces(path: str, lines: list[str]) -> list[dict]:
+    from codatiel_i2.detectors.docs_code.candidates import NOT_SERVED_LINE
     facts = []
     for i, line in enumerate(lines, 1):
+        # A line that disclaims serving ("verified 404", "not served")
+        # describes an upstream/third-party API, never a project contract.
+        route_disclaimed = bool(NOT_SERVED_LINE.search(line))
         for match in _DOC_ROUTE.finditer(line):
+            if route_disclaimed:
+                continue
             method, route = match.group(1), _clean_path(match.group(2))
             facts.append(_fact("interface", "documented_interface", path, i, i, {
                 "subject": route,
                 "interface": {"kind": "http_route", "method": method, "path": route},
             }))
         for match in _DOC_BARE_PATH.finditer(line):
+            if route_disclaimed:
+                continue
             if "`" in line[max(0, match.start() - 40):match.start()]:
                 continue  # already covered by a backticked route nearby
             route = _clean_path(match.group(1))
@@ -728,12 +884,77 @@ def extract_doc_interfaces(path: str, lines: list[str]) -> list[dict]:
             }))
         for match in re.finditer(r"`([A-Za-z_][A-Za-z0-9_]*)\(([^`]*)\)`", line):
             symbol, params = match.group(1), match.group(2)
+            pos_var, kw_var = _variadic_kinds(params)
             facts.append(_fact("interface", "documented_interface", path, i, i, {
                 "subject": symbol,
                 "interface": {"kind": "call_signature", "symbol": symbol,
-                              "parameters": _parse_params(path, params)},
+                              "parameters": _parse_params(path, params),
+                              "variadic_pos": pos_var, "variadic_kw": kw_var},
             }))
     return facts
+
+
+_ROUTE_TEMPLATE = re.compile(r"\{[^}]*\}")
+
+
+def normalize_route_template(path: str) -> str:
+    """Path params are wildcards: /articles/{id} == /articles/{article_id}."""
+    return _ROUTE_TEMPLATE.sub("{}", path)
+
+
+def pool_has_dynamic_reads(pool: dict[str, str]) -> bool:
+    """True when any pooled code file reads env through a non-literal key."""
+    return any(path.endswith(CODE_SUFFIXES) and _dynamic_env_read(text)
+               for path, text in (pool or {}).items())
+
+
+def dynamic_env_reads_in(root) -> bool:
+    """True when any code file reads env through a non-literal key."""
+    from pathlib import Path
+
+    root = Path(root)
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink() or not path.is_file() or ".git" in path.parts:
+            continue
+        if path.suffix not in CODE_SUFFIXES:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="strict")
+        except Exception:
+            continue
+        if _dynamic_env_read(text):
+            return True
+    return False
+
+
+def enumerate_code_routes(root) -> tuple[set[tuple[str, str]], int]:
+    """Repo-wide implemented route surface: (method, template) pairs.
+
+    Route serving is a repository property; judging it against one
+    counterpart file manufactures misses for routes served elsewhere.
+    Shares the file walk with enumerate_code_names (same CODE_SUFFIXES).
+    """
+    from pathlib import Path
+
+    root = Path(root)
+    routes: set[tuple[str, str]] = set()
+    scanned = 0
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink() or not path.is_file() or ".git" in path.parts:
+            continue
+        if path.suffix not in CODE_SUFFIXES:
+            continue
+        scanned += 1
+        try:
+            content = path.read_text(encoding="utf-8", errors="strict").splitlines()
+        except Exception:
+            continue
+        for fact in extract_code_interfaces(str(path.relative_to(root)), content):
+            iface = fact.get("interface", {})
+            if iface.get("kind") == "http_route":
+                routes.add((iface.get("method", "*"),
+                            normalize_route_template(iface.get("path", ""))))
+    return routes, scanned
 
 
 EXTRACTORS: dict[str, object] = {}

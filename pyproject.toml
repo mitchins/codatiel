@@ -7,7 +7,10 @@ name = "codatiel-i2"
 version = "0.1.0"
 description = "Codatiel Iteration 2 — self-hosted semantic regression scanner for pull requests"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["pyjwt>=2", "cryptography"]
+
+[project.scripts]
+codatiel-i2 = "codatiel_i2.cli:main"
 
 [project.optional-dependencies]
 test = [
@@ -34,7 +37,7 @@ where = ["."]
 include = ["codatiel_i2*"]
 
 [tool.setuptools.package-data]
-codatiel_i2 = ["config/*.json"]
+codatiel_i2 = ["config/*.json", "guidebook_port.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -39,14 +39,92 @@
       "role": "review_backend",
       "privacy": "OPENAI_STANDARD_API_NO_TRAINING",
       "store": false,
+      "processing_tier": "standard",
       "rate_usd_per_mtok": {
         "input": 0.1,
-        "output": 0.5
+        "output": 0.5,
+        "input_cache_hit": 0.01,
+        "input_cache_write": 0.125,
+        "input_cache_write_12h": 0.25,
+        "pricing_backend": "luna",
+        "processing_tier": "standard",
+        "tier_threshold_tokens": 272000,
+        "tier_threshold_basis": "total_input_tokens_including_cache",
+        "tier_threshold_note": "Per OpenAI pricing (Short context: <=272K input tokens; Long: >272K) the threshold is on input tokens as reported, and input_tokens by provider semantics includes cache reads and writes (verified live: cached reads counted inside input_tokens). Tier decision therefore uses reported input_tokens directly.",
+        "tiers": {
+          "short": {
+            "label": "short_context_leq_272k_input",
+            "input": 0.1,
+            "output": 0.5,
+            "input_cache_hit": 0.01,
+            "input_cache_write": 0.125
+          },
+          "long": {
+            "label": "long_context_gt_272k_input",
+            "input": 0.2,
+            "output": 0.75,
+            "input_cache_hit": 0.02,
+            "input_cache_write": 0.25
+          }
+        },
+        "rate_source": {
+          "provider": "OpenAI",
+          "docs_url": "https://developers.openai.com/api/docs/pricing",
+          "retrieved": "2026-10-26"
+        }
       },
-      "rate_status": "standard_verified_2026-10-20_official_docs",
+      "rate_status": "standard_tier_verified_2026-10-26_official_pricing_short_long",
+      "rate_cache_note": "Active retention is the default 30m (write 1.25x); 12h writes (2.5x) are documented for the assertion but never priced. Flex/batch are 50% and fast 2x; priority renamed Fast mode 2026-07-30. Regional/data-residency +10% uplift exists for eligible models but standard endpoints are used.",
       "max_usd_per_review": 5.0,
       "credential_env": "OPENAI_API_KEY",
       "expected_context": 400000
+    },
+    {
+      "profile": "terra_review",
+      "backend": "terra",
+      "provider": "openai",
+      "model": "gpt-6.1-terra",
+      "role": "review_backend",
+      "privacy": "OPENAI_STANDARD_API_NO_TRAINING",
+      "store": false,
+      "rate_usd_per_mtok": {
+        "input": 1.0,
+        "output": 5.0,
+        "input_cache_hit": 0.05,
+        "input_cache_write": 1.25,
+        "input_cache_write_12h": 2.5,
+        "pricing_backend": "terra",
+        "processing_tier": "standard",
+        "tier_threshold_tokens": 272000,
+        "tier_threshold_basis": "total_input_tokens_including_cache",
+        "tier_threshold_note": "Per OpenAI pricing (Short context: <=272K input tokens; Long: >272K) the threshold is on input tokens as reported, and input_tokens by provider semantics includes cache reads and writes (same OpenAI Responses semantics as Luna; Terra cache behaviour to be confirmed live in REVIEW-TERRA-01). Tier decision therefore uses reported input_tokens directly.",
+        "tiers": {
+          "short": {
+            "label": "short_context_leq_272k_input",
+            "input": 1.0,
+            "output": 5.0,
+            "input_cache_hit": 0.05,
+            "input_cache_write": 1.25
+          },
+          "long": {
+            "label": "long_context_gt_272k_input",
+            "input": 2.0,
+            "output": 7.5,
+            "input_cache_hit": 0.10,
+            "input_cache_write": 2.50
+          }
+        },
+        "rate_source": {
+          "provider": "OpenAI",
+          "docs_url": "https://developers.openai.com/api/docs/pricing",
+          "retrieved": "2026-10-28"
+        }
+      },
+      "rate_status": "standard_tier_verified_2026-10-28_official_pricing_short_long",
+      "rate_cache_note": "Active retention is the default 30m (write 1.25x); 12h writes (2.5x) are documented but never priced unless observed. Batch/Flex are 50% and Fast 2x.",
+      "rate_note": "REVIEW-TERRA-01: official OpenAI pricing for gpt-6.1-terra retrieved 2026-10-28 (input $1.00/M, output $5.00/M, cached $0.05/M, write $1.25/M; long >272K 2x in/cache, 1.5x out). ~10x Luna cost.",
+      "max_usd_per_review": 5.0,
+      "credential_env": "OPENAI_API_KEY"
     },
     {
       "profile": "haiku_review",
@@ -57,14 +135,84 @@
       "privacy": "ANTHROPIC_COMMERCIAL_NO_TRAINING_DEFAULT",
       "retention": "30d_standard",
       "thinking": "adaptive_default",
+      "processing_tier": "standard",
       "rate_usd_per_mtok": {
         "input": 0.1,
-        "output": 0.5
+        "output": 0.5,
+        "input_cache_hit": 0.01,
+        "input_cache_write": 0.125,
+        "input_cache_write_1h": 0.2,
+        "pricing_backend": "haiku",
+        "processing_tier": "standard",
+        "tier_threshold_tokens": 100000,
+        "tier_threshold_basis": "prompt_total_uncached_plus_cache_read_plus_cache_write",
+        "tier_threshold_note": "Per Anthropic long-context pricing a request's prompt length counts all of its input tokens, including cache reads and cache writes; each request is priced on its own, even when part of its prompt is a cache hit. Entries with an absent cache split price in the high tier.",
+        "tiers": {
+          "standard": {
+            "label": "prompt_leq_100k",
+            "input": 0.1,
+            "output": 0.5,
+            "input_cache_hit": 0.01,
+            "input_cache_write": 0.125
+          },
+          "high": {
+            "label": "prompt_gt_100k",
+            "input": 0.5,
+            "output": 2.5,
+            "input_cache_hit": 0.05,
+            "input_cache_write": 0.625
+          }
+        },
+        "rate_source": {
+          "provider": "Anthropic",
+          "docs_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+          "retrieved": "2026-10-26"
+        }
       },
-      "rate_status": "standard_tier_verified_2026-10",
+      "rate_status": "standard_tier_verified_2026-10-26_official_pricing_std_high",
+      "rate_cache_note": "Active retention is the default 5m TTL (write 1.25x); 1h writes (2x) are documented for the assertion but never priced. Multipliers stack with batch/data-residency modifiers; batch is 50% (not used).",
       "max_usd_per_review": 5.0,
       "credential_env": "ANTHROPIC_API_KEY",
       "expected_context": 200000
+    },
+    {
+      "profile": "deepseek_flash_review",
+      "backend": "deepseek",
+      "provider": "deepseek_openai_compatible",
+      "model": "deepseek-flash",
+      "served_model_claim": "DeepSeek-V4.1-Flash-1017 (per provider docs 2026-10-23; verify per run)",
+      "base_url": "https://api.deepseek.com",
+      "role": "review_backend",
+      "privacy": "UNVERIFIED_NO_TRAINING_CLAIM_M10_SCOPE_FROZEN_PUBLIC_PRIVATE_CASES_ONLY",
+      "thinking": "enabled_explicit_extra_body_default_effort",
+      "rate_usd_per_mtok": {
+        "input": 0.30,
+        "input_cache_hit": 0.006,
+        "output": 1.20
+      },
+      "rate_status": "peak_tier_official_docs_2026-10-23_cache_hit_miss_split",
+      "max_usd_per_review": 1.0,
+      "credential_env": "DEEPSEEK_API_KEY",
+      "expected_context": 1000000,
+      "output_bound_per_request": 8192
+    },
+    {
+      "profile": "glm_53_flash_review",
+      "backend": "glm",
+      "provider": "zai_coding_plan_openai_compatible",
+      "model": "glm-5.3-flash",
+      "served_model_claim": "glm-5.3-flash (verified by raw probe 2026-10-23)",
+      "base_url": "https://api.z.ai/api/coding/paas/v4",
+      "role": "review_backend",
+      "privacy": "UNVERIFIED_NO_TRAINING_CLAIM_M10_SCOPE_FROZEN_CASES_ONLY",
+      "thinking": "forced_enabled_preserved_clear_thinking_false",
+      "billing": "coding_plan_subscription_quota_no_per_token_charge",
+      "rate_usd_per_mtok": {},
+      "rate_status": "quota_zai_coding_plan_tokens_recorded_usd_unconfirmed",
+      "max_usd_per_review": 1.0,
+      "credential_env": "ZAI_API_KEY",
+      "expected_context": 1000000,
+      "output_bound_per_request": 8192
     },
     {
       "profile": "gemma_review",

@@ -1,0 +1,1923 @@
+{
+  "ceiling_usd": 8.0,
+  "spent_usd": 0.946,
+  "runs": [
+    {
+      "case": "FW3",
+      "arm": "A",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/FW3/A/rep1/e157bbad82b9",
+      "tool_calls": 30,
+      "usd_estimate": 0.01733448,
+      "usage": {
+        "input_tokens": 398786,
+        "output_tokens": 4012,
+        "requests": 6
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 61.14,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.01733448,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "FW3",
+      "arm": "A",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/FW3/A/rep2/fdf941a00a1e",
+      "tool_calls": 40,
+      "usd_estimate": 0.019438340000000002,
+      "usage": {
+        "input_tokens": 661047,
+        "output_tokens": 5236,
+        "requests": 10
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 87.34,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.019438340000000002,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "FW3",
+      "arm": "A",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/FW3/A/rep3/339afb1ab585",
+      "tool_calls": 37,
+      "usd_estimate": 0.023995179999999998,
+      "usage": {
+        "input_tokens": 805283,
+        "output_tokens": 5175,
+        "requests": 9
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 85.82,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.023995179999999998,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "FW3",
+      "arm": "B",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/FW3/B/rep1/bf34d58a3403",
+      "tool_calls": 31,
+      "usd_estimate": 0.016574460000000003,
+      "usage": {
+        "input_tokens": 662226,
+        "output_tokens": 6879,
+        "requests": 12
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 98.4,
+      "bundle": {
+        "chars": 58545,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.016574460000000003,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "FW3",
+      "arm": "B",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/FW3/B/rep2/920a850657ff",
+      "tool_calls": 15,
+      "usd_estimate": 0.01207543,
+      "usage": {
+        "input_tokens": 364063,
+        "output_tokens": 3724,
+        "requests": 8
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 63.67,
+      "bundle": {
+        "chars": 58545,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.01207543,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "FW3",
+      "arm": "B",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/FW3/B/rep3/4d1b8e22d637",
+      "tool_calls": 27,
+      "usd_estimate": 0.012328155,
+      "usage": {
+        "input_tokens": 358533,
+        "output_tokens": 5460,
+        "requests": 7
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 75.26,
+      "bundle": {
+        "chars": 58545,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.012328155,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "FW3",
+      "arm": "C",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/FW3/C/rep1/a2cebb838438",
+      "tool_calls": 18,
+      "usd_estimate": 0.009508444999999999,
+      "usage": {
+        "input_tokens": 193389,
+        "output_tokens": 3470,
+        "requests": 5
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 48.91,
+      "bundle": {
+        "chars": 71442,
+        "evidence_count": 205,
+        "evidence_omitted": 0,
+        "evidence_total": 205,
+        "omitted_files": 0,
+        "omitted_runs": 6,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.009508444999999999,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "FW3",
+      "arm": "C",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/FW3/C/rep2/48ed2a07c3c7",
+      "tool_calls": 21,
+      "usd_estimate": 0.01398916,
+      "usage": {
+        "input_tokens": 468843,
+        "output_tokens": 5366,
+        "requests": 10
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 81.88,
+      "bundle": {
+        "chars": 71442,
+        "evidence_count": 205,
+        "evidence_omitted": 0,
+        "evidence_total": 205,
+        "omitted_files": 0,
+        "omitted_runs": 6,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.01398916,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "FW3",
+      "arm": "C",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/FW3/C/rep3/6e6aaf458107",
+      "tool_calls": 20,
+      "usd_estimate": 0.0094361,
+      "usage": {
+        "input_tokens": 215833,
+        "output_tokens": 5098,
+        "requests": 5
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 77.6,
+      "bundle": {
+        "chars": 71442,
+        "evidence_count": 205,
+        "evidence_omitted": 0,
+        "evidence_total": 205,
+        "omitted_files": 0,
+        "omitted_runs": 6,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.0094361,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "KL1",
+      "arm": "A",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/KL1/A/rep1/0dc5cb082364",
+      "tool_calls": 26,
+      "usd_estimate": 0.02626491,
+      "usage": {
+        "input_tokens": 941331,
+        "output_tokens": 3416,
+        "requests": 10
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 83.24,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.02626491,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "KL1",
+      "arm": "A",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/KL1/A/rep2/dc0107e122e1",
+      "tool_calls": 33,
+      "usd_estimate": 0.028310374999999995,
+      "usage": {
+        "input_tokens": 1086947,
+        "output_tokens": 6937,
+        "requests": 12
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 106.37,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.028310374999999995,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "KL1",
+      "arm": "A",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/KL1/A/rep3/3caf683a4af6",
+      "tool_calls": 17,
+      "usd_estimate": 0.007866675,
+      "usage": {
+        "input_tokens": 102435,
+        "output_tokens": 3571,
+        "requests": 4
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 58.59,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.007866675,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "KL1",
+      "arm": "B",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/KL1/B/rep1/1d22d09e7538",
+      "tool_calls": 28,
+      "usd_estimate": 0.024405375000000003,
+      "usage": {
+        "input_tokens": 658929,
+        "output_tokens": 5408,
+        "requests": 7
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 83.61,
+      "bundle": {
+        "chars": 100548,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 41,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.024405375000000003,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "KL1",
+      "arm": "B",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/KL1/B/rep2/88e67d60c40b",
+      "tool_calls": 26,
+      "usd_estimate": 0.017461575,
+      "usage": {
+        "input_tokens": 400374,
+        "output_tokens": 5352,
+        "requests": 6
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 90.65,
+      "bundle": {
+        "chars": 100548,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 41,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.017461575,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "KL1",
+      "arm": "B",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/KL1/B/rep3/63f6d5ccb1db",
+      "tool_calls": 28,
+      "usd_estimate": 0.017008864999999998,
+      "usage": {
+        "input_tokens": 459575,
+        "output_tokens": 4511,
+        "requests": 6
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 88.46,
+      "bundle": {
+        "chars": 100548,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 41,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.017008864999999998,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "KL1",
+      "arm": "C",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/KL1/C/rep1/b689868dde70",
+      "tool_calls": 30,
+      "usd_estimate": 0.0231411,
+      "usage": {
+        "input_tokens": 773115,
+        "output_tokens": 5779,
+        "requests": 10
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 97.59,
+      "bundle": {
+        "chars": 59308,
+        "evidence_count": 88,
+        "evidence_omitted": 0,
+        "evidence_total": 88,
+        "omitted_files": 45,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.0231411,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "KL1",
+      "arm": "C",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/KL1/C/rep2/dc684dcc1d3e",
+      "tool_calls": 35,
+      "usd_estimate": 0.02533326,
+      "usage": {
+        "input_tokens": 890216,
+        "output_tokens": 5334,
+        "requests": 11
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 98.43,
+      "bundle": {
+        "chars": 59308,
+        "evidence_count": 88,
+        "evidence_omitted": 0,
+        "evidence_total": 88,
+        "omitted_files": 45,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.02533326,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "KL1",
+      "arm": "C",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/KL1/C/rep3/e2c1353b7ad3",
+      "tool_calls": 30,
+      "usd_estimate": 0.021038480000000002,
+      "usage": {
+        "input_tokens": 607375,
+        "output_tokens": 5127,
+        "requests": 8
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 117.21,
+      "bundle": {
+        "chars": 59308,
+        "evidence_count": 88,
+        "evidence_omitted": 0,
+        "evidence_total": 88,
+        "omitted_files": 45,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.021038480000000002,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L06",
+      "arm": "A",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L06/A/rep1/76d8878290d3",
+      "tool_calls": 40,
+      "usd_estimate": 0.01663858,
+      "usage": {
+        "input_tokens": 514223,
+        "output_tokens": 3827,
+        "requests": 9
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 88.06,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.01663858,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L06",
+      "arm": "A",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L06/A/rep2/128880775d8a",
+      "tool_calls": 40,
+      "usd_estimate": 0.026393565,
+      "usage": {
+        "input_tokens": 941867,
+        "output_tokens": 6437,
+        "requests": 11
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 91.45,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.026393565,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L06",
+      "arm": "A",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L06/A/rep3/d2dfd72c5a1b",
+      "tool_calls": 40,
+      "usd_estimate": 0.026159474999999998,
+      "usage": {
+        "input_tokens": 638192,
+        "output_tokens": 4413,
+        "requests": 8
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 72.23,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.026159474999999998,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L06",
+      "arm": "B",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L06/B/rep1/e87ac47aab75",
+      "tool_calls": 28,
+      "usd_estimate": 0.017577005,
+      "usage": {
+        "input_tokens": 646125,
+        "output_tokens": 3491,
+        "requests": 10
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 66.39,
+      "bundle": {
+        "chars": 98705,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.017577005,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L06",
+      "arm": "B",
+      "rep": 2,
+      "status": "incomplete_budget_exhausted",
+      "stage": "budget_exhausted",
+      "sanitized_run_id": "runs/luna/L06/B/rep2/1872030955cb",
+      "tool_calls": null,
+      "usd_estimate": 0.018169319999999996,
+      "usage": {
+        "input_tokens": 762701,
+        "output_tokens": 2835,
+        "requests": 12
+      },
+      "accounting_status": "UNKNOWN_USAGE",
+      "metrics_status": "incomplete_budget_exhausted",
+      "wall_seconds": null,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.018169319999999996,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L06",
+      "arm": "B",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L06/B/rep3/3b915a19db7b",
+      "tool_calls": 29,
+      "usd_estimate": 0.014226224999999999,
+      "usage": {
+        "input_tokens": 641754,
+        "output_tokens": 4999,
+        "requests": 11
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 87.04,
+      "bundle": {
+        "chars": 98705,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.014226224999999999,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L06",
+      "arm": "C",
+      "rep": 1,
+      "status": "incomplete_budget_exhausted",
+      "stage": "budget_exhausted",
+      "sanitized_run_id": "runs/luna/L06/C/rep1/56ba84931eb3",
+      "tool_calls": null,
+      "usd_estimate": 0.012671675000000002,
+      "usage": {
+        "input_tokens": 523072,
+        "output_tokens": 3090,
+        "requests": 12
+      },
+      "accounting_status": "UNKNOWN_USAGE",
+      "metrics_status": "incomplete_budget_exhausted",
+      "wall_seconds": null,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.012671675000000002,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L06",
+      "arm": "C",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L06/C/rep2/efa70bc088a0",
+      "tool_calls": 40,
+      "usd_estimate": 0.017675205000000003,
+      "usage": {
+        "input_tokens": 614629,
+        "output_tokens": 4781,
+        "requests": 10
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 84.34,
+      "bundle": {
+        "chars": 88538,
+        "evidence_count": 205,
+        "evidence_omitted": 0,
+        "evidence_total": 205,
+        "omitted_files": 8,
+        "omitted_runs": 76,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.017675205000000003,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L06",
+      "arm": "C",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L06/C/rep3/b7eda9347d24",
+      "tool_calls": 28,
+      "usd_estimate": 0.013151550000000001,
+      "usage": {
+        "input_tokens": 602823,
+        "output_tokens": 4606,
+        "requests": 11
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 115.78,
+      "bundle": {
+        "chars": 88538,
+        "evidence_count": 205,
+        "evidence_omitted": 0,
+        "evidence_total": 205,
+        "omitted_files": 8,
+        "omitted_runs": 76,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.013151550000000001,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L08",
+      "arm": "A",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L08/A/rep1/42f6441b1eb5",
+      "tool_calls": 32,
+      "usd_estimate": 0.010769505000000002,
+      "usage": {
+        "input_tokens": 187474,
+        "output_tokens": 5706,
+        "requests": 6
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 66.77,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.010769505000000002,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L08",
+      "arm": "A",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L08/A/rep2/10af8cef832e",
+      "tool_calls": 22,
+      "usd_estimate": 0.00587431,
+      "usage": {
+        "input_tokens": 84578,
+        "output_tokens": 2550,
+        "requests": 4
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 29.66,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.00587431,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L08",
+      "arm": "A",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L08/A/rep3/1997fa21242d",
+      "tool_calls": 23,
+      "usd_estimate": 0.00624548,
+      "usage": {
+        "input_tokens": 114258,
+        "output_tokens": 3057,
+        "requests": 5
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 39.78,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.00624548,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L08",
+      "arm": "B",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L08/B/rep1/2b1a9476b627",
+      "tool_calls": 14,
+      "usd_estimate": 0.005754525,
+      "usage": {
+        "input_tokens": 104661,
+        "output_tokens": 3150,
+        "requests": 5
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 43.11,
+      "bundle": {
+        "chars": 31326,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.005754525,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L08",
+      "arm": "B",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L08/B/rep2/56012990e444",
+      "tool_calls": 23,
+      "usd_estimate": 0.007554,
+      "usage": {
+        "input_tokens": 144084,
+        "output_tokens": 3439,
+        "requests": 5
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 41.25,
+      "bundle": {
+        "chars": 31326,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.007554,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L08",
+      "arm": "B",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L08/B/rep3/b2c7182e2d79",
+      "tool_calls": 12,
+      "usd_estimate": 0.008281789999999999,
+      "usage": {
+        "input_tokens": 170852,
+        "output_tokens": 2540,
+        "requests": 4
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 35.2,
+      "bundle": {
+        "chars": 31326,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.008281789999999999,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L08",
+      "arm": "C",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L08/C/rep1/15771ac5094e",
+      "tool_calls": 30,
+      "usd_estimate": 0.0256058,
+      "usage": {
+        "input_tokens": 580389,
+        "output_tokens": 8332,
+        "requests": 7
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 95.01,
+      "bundle": {
+        "chars": 32421,
+        "evidence_count": 10,
+        "evidence_omitted": 0,
+        "evidence_total": 10,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.0256058,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L08",
+      "arm": "C",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L08/C/rep2/d8766efe4bab",
+      "tool_calls": 23,
+      "usd_estimate": 0.01247785,
+      "usage": {
+        "input_tokens": 243549,
+        "output_tokens": 5161,
+        "requests": 5
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 58.23,
+      "bundle": {
+        "chars": 32421,
+        "evidence_count": 10,
+        "evidence_omitted": 0,
+        "evidence_total": 10,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.01247785,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L08",
+      "arm": "C",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L08/C/rep3/0f6da5e4971d",
+      "tool_calls": 13,
+      "usd_estimate": 0.005994060000000001,
+      "usage": {
+        "input_tokens": 88909,
+        "output_tokens": 3610,
+        "requests": 4
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 50.07,
+      "bundle": {
+        "chars": 32421,
+        "evidence_count": 10,
+        "evidence_omitted": 0,
+        "evidence_total": 10,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.005994060000000001,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L10",
+      "arm": "A",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L10/A/rep1/e687355d97ae",
+      "tool_calls": 31,
+      "usd_estimate": 0.016822635,
+      "usage": {
+        "input_tokens": 385088,
+        "output_tokens": 4147,
+        "requests": 7
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 64.71,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.016822635,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L10",
+      "arm": "A",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L10/A/rep2/2ad2e28f4f07",
+      "tool_calls": 36,
+      "usd_estimate": 0.01711357,
+      "usage": {
+        "input_tokens": 430138,
+        "output_tokens": 4387,
+        "requests": 7
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 66.9,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.01711357,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L10",
+      "arm": "A",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L10/A/rep3/6295207897cb",
+      "tool_calls": 40,
+      "usd_estimate": 0.02630944,
+      "usage": {
+        "input_tokens": 978621,
+        "output_tokens": 4768,
+        "requests": 11
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 84.18,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.02630944,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L10",
+      "arm": "B",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L10/B/rep1/cc4cf5cdf98c",
+      "tool_calls": 27,
+      "usd_estimate": 0.02186251,
+      "usage": {
+        "input_tokens": 777250,
+        "output_tokens": 3980,
+        "requests": 10
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 72.37,
+      "bundle": {
+        "chars": 19888,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.02186251,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L10",
+      "arm": "B",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L10/B/rep2/ef1df5e5b9a6",
+      "tool_calls": 34,
+      "usd_estimate": 0.025639655000000004,
+      "usage": {
+        "input_tokens": 739968,
+        "output_tokens": 5406,
+        "requests": 9
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 74.85,
+      "bundle": {
+        "chars": 19888,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.025639655000000004,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L10",
+      "arm": "B",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L10/B/rep3/a3b14861a819",
+      "tool_calls": 30,
+      "usd_estimate": 0.014670629999999999,
+      "usage": {
+        "input_tokens": 346794,
+        "output_tokens": 5653,
+        "requests": 7
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 90.23,
+      "bundle": {
+        "chars": 19888,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.014670629999999999,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L10",
+      "arm": "C",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L10/C/rep1/07e761b3b232",
+      "tool_calls": 21,
+      "usd_estimate": 0.012371420000000001,
+      "usage": {
+        "input_tokens": 195969,
+        "output_tokens": 4028,
+        "requests": 5
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 61.94,
+      "bundle": {
+        "chars": 21960,
+        "evidence_count": 24,
+        "evidence_omitted": 0,
+        "evidence_total": 24,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.012371420000000001,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L10",
+      "arm": "C",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L10/C/rep2/c3d12e5926de",
+      "tool_calls": 21,
+      "usd_estimate": 0.009048770000000001,
+      "usage": {
+        "input_tokens": 186333,
+        "output_tokens": 3036,
+        "requests": 6
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 48.12,
+      "bundle": {
+        "chars": 21960,
+        "evidence_count": 24,
+        "evidence_omitted": 0,
+        "evidence_total": 24,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.009048770000000001,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "L10",
+      "arm": "C",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/L10/C/rep3/01089a4009b4",
+      "tool_calls": 27,
+      "usd_estimate": 0.015721915,
+      "usage": {
+        "input_tokens": 401624,
+        "output_tokens": 3476,
+        "requests": 7
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 65.78,
+      "bundle": {
+        "chars": 21960,
+        "evidence_count": 24,
+        "evidence_omitted": 0,
+        "evidence_total": 24,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.015721915,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "P15",
+      "arm": "A",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/P15/A/rep1/dbdd53c28d68",
+      "tool_calls": 33,
+      "usd_estimate": 0.02658087,
+      "usage": {
+        "input_tokens": 1053591,
+        "output_tokens": 5834,
+        "requests": 12
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 93.53,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.02658087,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "P15",
+      "arm": "A",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/P15/A/rep2/3503b8d83b01",
+      "tool_calls": 39,
+      "usd_estimate": 0.03137569999999999,
+      "usage": {
+        "input_tokens": 1220626,
+        "output_tokens": 4091,
+        "requests": 11
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 65.02,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.03137569999999999,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "P15",
+      "arm": "A",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/P15/A/rep3/5cd996f5e07c",
+      "tool_calls": 40,
+      "usd_estimate": 0.027204585000000003,
+      "usage": {
+        "input_tokens": 812513,
+        "output_tokens": 6061,
+        "requests": 9
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 107.65,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.027204585000000003,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "P15",
+      "arm": "B",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/P15/B/rep1/9a5ff6cc041f",
+      "tool_calls": 17,
+      "usd_estimate": 0.019094795,
+      "usage": {
+        "input_tokens": 545830,
+        "output_tokens": 4746,
+        "requests": 7
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 89.52,
+      "bundle": {
+        "chars": 87007,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 2,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.019094795,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "P15",
+      "arm": "B",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/P15/B/rep2/20df5f697612",
+      "tool_calls": 18,
+      "usd_estimate": 0.01668098,
+      "usage": {
+        "input_tokens": 494118,
+        "output_tokens": 5251,
+        "requests": 8
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 86.06,
+      "bundle": {
+        "chars": 87007,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 2,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.01668098,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "P15",
+      "arm": "B",
+      "rep": 3,
+      "status": "incomplete_budget_exhausted",
+      "stage": "budget_exhausted",
+      "sanitized_run_id": "runs/luna/P15/B/rep3/3436bf7a8e1b",
+      "tool_calls": null,
+      "usd_estimate": 0.029648830000000004,
+      "usage": {
+        "input_tokens": 1268225,
+        "output_tokens": 6369,
+        "requests": 12
+      },
+      "accounting_status": "UNKNOWN_USAGE",
+      "metrics_status": "incomplete_budget_exhausted",
+      "wall_seconds": null,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.029648830000000004,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "P15",
+      "arm": "C",
+      "rep": 1,
+      "status": "incomplete_budget_exhausted",
+      "stage": "budget_exhausted",
+      "sanitized_run_id": "runs/luna/P15/C/rep1/9f494394b3f6",
+      "tool_calls": null,
+      "usd_estimate": 0.017961920000000003,
+      "usage": {
+        "input_tokens": 686653,
+        "output_tokens": 3897,
+        "requests": 12
+      },
+      "accounting_status": "UNKNOWN_USAGE",
+      "metrics_status": "incomplete_budget_exhausted",
+      "wall_seconds": null,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.017961920000000003,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "P15",
+      "arm": "C",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/P15/C/rep2/f39a92588551",
+      "tool_calls": 20,
+      "usd_estimate": 0.018602169999999998,
+      "usage": {
+        "input_tokens": 489243,
+        "output_tokens": 3821,
+        "requests": 6
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 65.28,
+      "bundle": {
+        "chars": 90137,
+        "evidence_count": 379,
+        "evidence_omitted": 0,
+        "evidence_total": 379,
+        "omitted_files": 11,
+        "omitted_runs": 59,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.018602169999999998,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "P15",
+      "arm": "C",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/P15/C/rep3/1dd6cd2e24d7",
+      "tool_calls": 27,
+      "usd_estimate": 0.016362165,
+      "usage": {
+        "input_tokens": 495000,
+        "output_tokens": 5620,
+        "requests": 7
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 135.48,
+      "bundle": {
+        "chars": 90137,
+        "evidence_count": 379,
+        "evidence_omitted": 0,
+        "evidence_total": 379,
+        "omitted_files": 11,
+        "omitted_runs": 59,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": true
+      },
+      "spend_summary": {
+        "usd_estimate": 0.016362165,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "WT4",
+      "arm": "A",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/WT4/A/rep1/9df619796142",
+      "tool_calls": 1,
+      "usd_estimate": 0.00047585,
+      "usage": {
+        "input_tokens": 3062,
+        "output_tokens": 228,
+        "requests": 2
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 8.6,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.00047585,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "WT4",
+      "arm": "A",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/WT4/A/rep2/1b2aa8b913ad",
+      "tool_calls": 3,
+      "usd_estimate": 0.000793255,
+      "usage": {
+        "input_tokens": 10500,
+        "output_tokens": 290,
+        "requests": 4
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 10.75,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.000793255,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "WT4",
+      "arm": "A",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/WT4/A/rep3/cb29cc7c634d",
+      "tool_calls": 3,
+      "usd_estimate": 0.0007746,
+      "usage": {
+        "input_tokens": 5324,
+        "output_tokens": 260,
+        "requests": 2
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 6.97,
+      "bundle": null,
+      "spend_summary": {
+        "usd_estimate": 0.0007746,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "WT4",
+      "arm": "B",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/WT4/B/rep1/a7f4386dd1b2",
+      "tool_calls": 3,
+      "usd_estimate": 0.000799665,
+      "usage": {
+        "input_tokens": 11744,
+        "output_tokens": 322,
+        "requests": 4
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 11.38,
+      "bundle": {
+        "chars": 815,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.000799665,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "WT4",
+      "arm": "B",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/WT4/B/rep2/860090a7c5b7",
+      "tool_calls": 3,
+      "usd_estimate": 0.000743195,
+      "usage": {
+        "input_tokens": 8013,
+        "output_tokens": 327,
+        "requests": 3
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 8.33,
+      "bundle": {
+        "chars": 815,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.000743195,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "WT4",
+      "arm": "B",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/WT4/B/rep3/09776fe20420",
+      "tool_calls": 3,
+      "usd_estimate": 0.000667875,
+      "usage": {
+        "input_tokens": 10450,
+        "output_tokens": 450,
+        "requests": 4
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 13.18,
+      "bundle": {
+        "chars": 815,
+        "evidence_count": 0,
+        "evidence_omitted": 0,
+        "evidence_total": 0,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.000667875,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "WT4",
+      "arm": "C",
+      "rep": 1,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/WT4/C/rep1/f21cfc3b733c",
+      "tool_calls": 2,
+      "usd_estimate": 0.00067516,
+      "usage": {
+        "input_tokens": 7293,
+        "output_tokens": 373,
+        "requests": 3
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 10.64,
+      "bundle": {
+        "chars": 1049,
+        "evidence_count": 2,
+        "evidence_omitted": 0,
+        "evidence_total": 2,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.00067516,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "WT4",
+      "arm": "C",
+      "rep": 2,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/WT4/C/rep2/76f0a7222393",
+      "tool_calls": 3,
+      "usd_estimate": 0.000624415,
+      "usage": {
+        "input_tokens": 4716,
+        "output_tokens": 339,
+        "requests": 2
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 7.33,
+      "bundle": {
+        "chars": 1049,
+        "evidence_count": 2,
+        "evidence_omitted": 0,
+        "evidence_total": 2,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.000624415,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    },
+    {
+      "case": "WT4",
+      "arm": "C",
+      "rep": 3,
+      "status": "complete",
+      "stage": null,
+      "sanitized_run_id": "runs/luna/WT4/C/rep3/107bb6a527c8",
+      "tool_calls": 2,
+      "usd_estimate": 0.00044489999999999997,
+      "usage": {
+        "input_tokens": 6637,
+        "output_tokens": 266,
+        "requests": 3
+      },
+      "accounting_status": "CONFIRMED_USAGE",
+      "metrics_status": "complete",
+      "wall_seconds": 7.9,
+      "bundle": {
+        "chars": 1049,
+        "evidence_count": 2,
+        "evidence_omitted": 0,
+        "evidence_total": 2,
+        "omitted_files": 0,
+        "omitted_runs": 0,
+        "schema": "codatiel_i2.change_bundle.v1",
+        "truncated": false
+      },
+      "spend_summary": {
+        "usd_estimate": 0.00044489999999999997,
+        "pricing_partial_ids": [],
+        "exceeds_ceiling": false,
+        "tier_threshold_tokens": 272000
+      }
+    }
+  ]
+}

@@ -14,3 +14,7 @@ eval/.m7_fixture_store/
 # R3a docmat snapshot cache (multi-GB matrices; reproducible, never commit)
 .docmat_cache/
 eval/auth3r/.docmat_cache/
+# v0.1.0 deployment secrets: filled env files are host-private, never commit.
+docker/*.env
+watcher_state.json
+watcher_state.json.heartbeat

@@ -340,3 +340,103 @@ def test_tool_budget_reservation_is_atomic_under_concurrency(tmp_path):
     # Exactly `tool_budget` racers admitted; the rest were refused.
     assert len(admitted) == 3
     assert len(ctx.tool_log) == 3
+
+
+def test_split_cache_pricing_uses_hit_rate_for_reported_cached_tokens():
+    from codatiel_i2.core.spend import SpendLedger
+
+    ledger = SpendLedger(
+        rate={"input": 0.30, "input_cache_hit": 0.006, "output": 1.20},
+        rate_status="priced", ceiling_usd=5.0)
+    ledger.record_response("r1", _usage(in_tokens=1000, out_tokens=100),
+                           cached_input_tokens=800, reasoning_output_tokens=60)
+    record = ledger.to_record()
+    # 200 miss @0.30 + 800 hit @0.006 + 100 out @1.20, per million.
+    assert record["usd_estimate"] == pytest.approx(
+        200 / 1e6 * 0.30 + 800 / 1e6 * 0.006 + 100 / 1e6 * 1.20)
+    assert record["cached_input_tokens"] == 800
+    assert record["reasoning_output_tokens"] == 60
+    assert record["usage_details_reported_responses"] == 1
+
+
+def test_absent_details_stay_unknown_not_zero_and_use_flat_rate():
+    from codatiel_i2.core.spend import SpendLedger
+
+    ledger = SpendLedger(
+        rate={"input": 0.30, "input_cache_hit": 0.006, "output": 1.20},
+        rate_status="priced", ceiling_usd=5.0)
+    ledger.record_response("r1", _usage(in_tokens=1000, out_tokens=100))
+    entry = ledger.entries["r1"]
+    assert entry["cached_input_tokens"] is None
+    assert entry["reasoning_output_tokens"] is None
+    record = ledger.to_record()
+    assert record["usd_estimate"] == pytest.approx(
+        1000 / 1e6 * 0.30 + 100 / 1e6 * 1.20)
+    assert record["usage_details_reported_responses"] == 0
+
+
+def test_mark_unknown_clears_reported_details():
+    from codatiel_i2.core.spend import SpendLedger
+
+    ledger = SpendLedger(rate={"input": 0.30, "output": 1.20}, rate_status="priced",
+                         ceiling_usd=5.0)
+    ledger.record_response("r1", _usage(), cached_input_tokens=50,
+                           reasoning_output_tokens=5)
+    ledger.mark_unknown("r1")
+    entry = ledger.entries["r1"]
+    assert entry["cached_input_tokens"] is None
+    assert entry["reasoning_output_tokens"] is None
+
+
+def test_deepseek_backend_resolves_and_marks_usage_details(monkeypatch):
+    from codatiel_i2 import providers as P
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key-not-real")
+    resolved = P.resolve_backend("deepseek")
+    assert resolved["model"] == "deepseek-flash"
+    assert resolved["rate_usd_per_mtok"]["input_cache_hit"] == 0.006
+    model, settings = P.build_model("deepseek")
+    assert getattr(model, "provider_usage_details", False) is True
+    assert settings.extra_body == {"thinking": {"type": "enabled"}}
+    assert settings.max_tokens == 8192
+
+
+def test_deepseek_is_paid_backend():
+    from codatiel_i2 import service as service_mod
+
+    assert service_mod._model_is_paid_backend("deepseek:deepseek-flash") is True
+
+
+def test_glm_backend_resolves_with_quota_billing(monkeypatch):
+    from codatiel_i2 import providers as P
+
+    monkeypatch.setenv("ZAI_API_KEY", "test-id.test-secret")
+    resolved = P.resolve_backend("glm")
+    assert resolved["model"] == "glm-5.3-flash"
+    assert resolved["rate_status"].startswith("quota_")
+    assert resolved["rate_usd_per_mtok"] == {}
+    model, settings = P.build_model("glm")
+    assert getattr(model, "provider_usage_details", False) is True
+    assert settings.extra_body == {"thinking": {"type": "enabled",
+                                                "clear_thinking": False}}
+    assert settings.max_tokens == 8192
+    # Reasoning replay is enabled for glm models (provider requires
+    # reasoning_content back with tool results under preserved thinking).
+    hook = getattr(model, "should_replay_reasoning_content", None)
+    assert callable(hook)
+    from agents.models.reasoning_content_replay import (
+        ReasoningContentReplayContext, ReasoningContentSource)
+    ctx = ReasoningContentReplayContext(
+        model="glm-5.3-flash", base_url=None,
+        reasoning=ReasoningContentSource(item={}, origin_model="glm-5.3-flash",
+                                         provider_data={}))
+    assert hook(ctx) is True
+
+
+def test_glm_is_paid_backend_with_quota_carve_out():
+    from codatiel_i2 import service as service_mod
+
+    assert service_mod._model_is_paid_backend("glm:glm-5.3-flash") is True
+    assert service_mod._rate_is_quota(
+        "quota_zai_coding_plan_tokens_recorded_usd_unconfirmed") is True
+    assert service_mod._rate_is_quota("standard_verified") is False

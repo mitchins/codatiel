@@ -258,11 +258,48 @@ def test_review_pr_failure_is_explicit(tmp_path: Path):
         "no-such-owner-xyz/no-such-repo-xyz", 1,
         model=service_mod.scripted_model_from_scenario(
             _scenario(tmp_path, "pr", [],
-                       {"status": "silence", "summary": "", "findings": []})),
+                        {"status": "silence", "summary": "", "findings": []})),
         model_name="scripted:pr", runs_root=tmp_path / "runs",
         work_root=tmp_path / "work")
     assert out["status"] == "failed"
     assert out["stage"] in ("pr_metadata", "workspace")
+
+
+def test_review_pr_enforces_frozen_shas(tmp_path: Path, monkeypatch):
+    # M9.1 Phase A3: frozen roster SHAs abort on live-PR drift instead of
+    # silently reviewing the wrong revision.
+    import codatiel_i2.service as svc
+
+    def _fake_meta(repo, pr):
+        return ({"baseRefOid": "a" * 40, "headRefOid": "b" * 40,
+                 "baseRefName": "main", "headRefName": "feat",
+                 "state": "OPEN", "title": "t", "url": "u"}, None)
+
+    monkeypatch.setattr(svc, "fetch_github_pr_metadata", _fake_meta)
+    out = svc.review_pr(
+        "o/r", 1,
+        model=svc.scripted_model_from_scenario(
+            _scenario(tmp_path, "pr", [],
+                        {"status": "silence", "summary": "", "findings": []})),
+        model_name="scripted:pr", runs_root=tmp_path / "runs",
+        work_root=tmp_path / "work",
+        expected_base="c" * 40, expected_head="b" * 40)
+    assert out["status"] == "failed"
+    assert out["stage"] == "sha_mismatch"
+    assert "frozen base" in out["error"]
+    # Matching SHAs (including short prefixes) pass the gate to metadata
+    # stage — here workspace prep fails loudly, which is the correct next
+    # stage, proving the gate did not false-positive.
+    out2 = svc.review_pr(
+        "no-such-owner-xyz/no-such-repo-xyz", 1,
+        model=svc.scripted_model_from_scenario(
+            _scenario(tmp_path, "pr", [],
+                        {"status": "silence", "summary": "", "findings": []})),
+        model_name="scripted:pr", runs_root=tmp_path / "runs",
+        work_root=tmp_path / "work",
+        expected_base="a" * 8, expected_head="b" * 8)
+    assert out2["status"] == "failed"
+    assert out2["stage"] in ("pr_metadata", "workspace")
 
 
 def test_turn_budget_exhaustion_is_incomplete(repo: dict, tmp_path: Path):

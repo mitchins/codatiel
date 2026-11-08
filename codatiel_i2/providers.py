@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-BACKENDS = ("luna", "haiku", "gemma")
+BACKENDS = ("luna", "haiku", "gemma", "deepseek", "glm", "terra")
 
 _PROFILE_PATH = Path(__file__).resolve().parent / "config" / "model_profiles.json"
 
@@ -66,6 +66,8 @@ def build_model(name: str) -> tuple[Any, Any]:
     resolved = resolve_backend(name)
     if name == "luna":
         return runtime_sdk.luna_model_id(), runtime_sdk.luna_model_settings()
+    if name == "terra":
+        return runtime_sdk.terra_model_id(), runtime_sdk.terra_model_settings()
     if name == "gemma":
         profiles = load_profiles()
         profile = profiles[name]
@@ -75,6 +77,20 @@ def build_model(name: str) -> tuple[Any, Any]:
             api_key=None), _default_settings())
     if name == "haiku":
         return runtime_sdk.HaikuModel(), _default_settings()
+    if name == "deepseek":
+        profiles = load_profiles()
+        profile = profiles[name]
+        return (runtime_sdk.deepseek_model(
+            model=str(profile.get("model", "deepseek-flash")),
+            base_url=str(profile.get("base_url", "")) or None),
+            runtime_sdk.deepseek_model_settings())
+    if name == "glm":
+        profiles = load_profiles()
+        profile = profiles[name]
+        return (runtime_sdk.glm_model(
+            model=str(profile.get("model", "glm-5.3-flash")),
+            base_url=str(profile.get("base_url", "")) or None),
+            runtime_sdk.glm_model_settings())
     raise ValueError(f"unknown backend {name!r}")
 
 
