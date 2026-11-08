@@ -1183,3 +1183,30 @@ def terra_model_settings() -> Any:
     agents = require_sdk()
     from agents.model_settings import ModelSettings
     return ModelSettings(store=False)
+
+
+def sol_model_id() -> str:
+    """Sol backend (REVIEW-COMPLEMENT-02): native SDK OpenAI provider;
+    model id only, no adapter — identical integration to Luna/Terra,
+    model changed.
+
+    Requires ``OPENAI_API_KEY`` from the Code Review project
+    (STANDARD_API_NO_TRAINING presumed same project/key; flagged as an
+    assumption in the qualification report). Returned as a plain model
+    id for ``Agent(model=...)`` with the SDK default provider. Always
+    pair with ``sol_model_settings()`` so ``store=false`` is enforced.
+    Reasoning effort is left at the provider default (medium): no
+    model-specific tuning during qualification.
+    """
+    return "gpt-6.1-sol"
+
+
+def sol_model_settings() -> Any:
+    """ModelSettings enforcing the Sol privacy posture (store=false).
+
+    Identical to Luna/Terra: no model-specific tuning during
+    qualification.
+    """
+    agents = require_sdk()
+    from agents.model_settings import ModelSettings
+    return ModelSettings(store=False)

@@ -1,0 +1,776 @@
+{
+ "experiment": "REVIEW-COMPLEMENT-02",
+ "stage": "C+D",
+ "blinding": "fixed seed 20261109; arm codes; separate attribution (private)",
+ "revision_note": "RC-PR27-DOCSTRING revised P3 on new evidence (TERRA_01R FP superseded here; original frozen).",
+ "findings": [
+  {
+   "root_cause": "RC-FW3-MIGRATION",
+   "title": "Compose /data migration loses upgrade state",
+   "severity": "P1",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Migrate named volume contents on upgrade or document manual step.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-FW3-REBOOTS",
+   "title": "reboots_sent counts NULL-outcome rows",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Exclude UNRECORDED rows from sent count.",
+   "models": {
+    "luna": [
+     2
+    ],
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 4,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-FW3-LATCHED-COUNT",
+   "title": "report() miscounts latched incidents",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Count latched-only; exclude acknowledged-never-latched; keep resolved.",
+   "models": {
+    "terra": [
+     1,
+     3
+    ]
+   },
+   "instances": 2,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-FW3-RESTART",
+   "title": "Restart drops runtime-only outage_rebooted flag",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Persist reboot attribution or re-derive on re-adopt.",
+   "models": {
+    "terra": [
+     2,
+     3
+    ]
+   },
+   "instances": 2,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-FW3-OUTAGES",
+   "title": "Report counts every frames_stopped as a distinct outage",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Dedupe by outage boundary or emit start-only events. Sol-exclusive; verified emission double-count across UNKNOWN telemetry gaps; base lacks counting.",
+   "models": {},
+   "instances": 0,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-FW3-INHIBITION",
+   "title": "Global inhibition ignores peer stability",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Require stability duration for healthy-peer votes.",
+   "models": {},
+   "instances": 0,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-FW3-BIND",
+   "title": "Example binds 0.0.0.0 with unauth endpoints",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Restore loopback default or gate bind change on auth review.",
+   "models": {
+    "luna": [
+     3
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-KL1-FIXTURE",
+   "title": "65-byte probe fixture vs 64-expectation cases",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Fix fixture or case expectations to agree.",
+   "models": {
+    "terra": [
+     1
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-KL1-UUID",
+   "title": "Manifest validator ignores resource IDs",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Compare (type,name,id) in validation.",
+   "models": {
+    "terra": [
+     1
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-KL1-README",
+   "title": "README totals stale vs ledger",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Regenerate totals from ledger.",
+   "models": {
+    "luna": [
+     3
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-KL1-PAIR",
+   "title": "Pair validator omits docs-fixed retail/B2B mapping",
+   "severity": "UNRESOLVED",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Undecided: enforce mapping in runner or prove downstream registry gate covers pair evidence.",
+   "models": {
+    "haiku": [
+     2
+    ],
+    "terra": [
+     3
+    ],
+    "luna": [
+     2
+    ]
+   },
+   "instances": 3,
+   "validated": false
+  },
+  {
+   "root_cause": "RC-KL1-ARCH",
+   "title": "Archive concurrency admission",
+   "severity": "UNRESOLVED",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Undecided: contract side not located.",
+   "models": {
+    "terra": [
+     2,
+     3
+    ]
+   },
+   "instances": 2,
+   "validated": false
+  },
+  {
+   "root_cause": "RC-L08-LMS",
+   "title": "LMS backend :443 vs :9443 vhost",
+   "severity": "P1",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Align backend port with vhost listener.",
+   "models": {
+    "luna": [
+     1,
+     2,
+     3
+    ],
+    "haiku": [
+     1,
+     3
+    ],
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 8,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-L08-EPCORE",
+   "title": "Epcore route has no matching vhost",
+   "severity": "P1",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Add epcore vhost on :9443 or correct route.",
+   "models": {
+    "terra": [
+     2
+    ],
+    "haiku": [
+     1,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-L08-COOKIEMASK",
+   "title": "Self-set cookie bypasses admin login rate limit",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Validate session server-side instead of substring match.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-L08-PROTO",
+   "title": "No WP HTTPS fixup behind TLS-terminating proxy",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Set HTTPS fixup or document wp-config snippet.",
+   "models": {
+    "terra": [
+     1,
+     3
+    ]
+   },
+   "instances": 2,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-L08-CART403",
+   "title": "Cart 403 without trailing-slash caveat",
+   "severity": "NONACTIONABLE",
+   "scope": "PR_INTRODUCED",
+   "remedy": "No action: real /cart/ traffic unaffected.",
+   "models": {
+    "luna": [
+     2
+    ]
+   },
+   "instances": 1,
+   "validated": false
+  },
+  {
+   "root_cause": "RC-L06-TRIM",
+   "title": "Trimmed IDs requested, raw IDs joined",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Join on trimmed IDs.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-L06-GUARD",
+   "title": "Loading guard cleared before async StoreKit done",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Hold guard until product request completes; tag responses by catalogue generation.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-L06-STALE",
+   "title": "Failed refresh leaves stale purchasable options",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Clear options/products on discovery error.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ],
+    "luna": [
+     1
+    ]
+   },
+   "instances": 4,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-L06-DUPKEY",
+   "title": "Duplicate catalogue keys resolve to first match",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Reject duplicate keys or resolve by row identity.",
+   "models": {
+    "terra": [
+     1,
+     2
+    ]
+   },
+   "instances": 2,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-L06-ONERROR",
+   "title": "Success path emits global error signal",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Report skipped entries via telemetry, not error channel; avoid double-report on parse failure.",
+   "models": {
+    "haiku": [
+     1
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-L10-MATCHER",
+   "title": "Integration tier accepts pure evidence",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Enforce tier match; correct bogus WIRE-01 pinning comment.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-L10-REF",
+   "title": "Synthesized records default to pure tier",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Require explicit tier on synthesized records.",
+   "models": {
+    "luna": [
+     1
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-L10-CLIPATH",
+   "title": "Fixed /usr/bin/sqlite3 breaks quick gate",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Locate CLI via PATH with skip, or provision CLI in CI.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-CAPFLAG",
+   "title": "Probe-path caption flag always false",
+   "severity": "P3",
+   "scope": "PRE_EXISTING",
+   "remedy": "Thread actual caption state through probe path (pre-existing).",
+   "models": {
+    "terra": [
+     1
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-CLIIDENT",
+   "title": "CLI-tested endpoints can never show Ready",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Record model/key identity in CLI path or relax gate to tested URL.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-ENVASR",
+   "title": "Env ASR marked Ready unprobed; default set",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Probe env-resolved endpoints or gate on service presence.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ],
+    "luna": [
+     3
+    ]
+   },
+   "instances": 4,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-SESSION",
+   "title": "Sessions survive password change",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Bind sessions to credential generation; rotate on password change.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-SAVETEST",
+   "title": "Save-test persists before probing; UI says Not saved",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Test before persist, or stage config until pass.",
+   "models": {
+    "terra": [
+     1,
+     3
+    ]
+   },
+   "instances": 2,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-RECQUAL",
+   "title": "record_qualified substitutes stored identity",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Record the tested identity actually probed.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-RECAP",
+   "title": "Reprocess drops has_captions",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Thread caption flag through reprocess path.",
+   "models": {
+    "terra": [
+     1,
+     3
+    ],
+    "luna": [
+     2
+    ]
+   },
+   "instances": 3,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-SCHEME",
+   "title": "Secure-cookie depends on in-app scheme behind TLS proxy",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Honor X-Forwarded-Proto or document COOKIE_SECURE.",
+   "models": {
+    "terra": [
+     2,
+     3
+    ]
+   },
+   "instances": 2,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-ORDER",
+   "title": "Readiness gate runs after upload copy",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Gate before copy/registration.",
+   "models": {
+    "terra": [
+     2,
+     3
+    ]
+   },
+   "instances": 2,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-PROFILE",
+   "title": "Web follows deployed enhanced default; CLI-only lifted silently",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Confirm intended or restore restriction with explicit override.",
+   "models": {
+    "luna": [
+     1
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-DOCSGATE",
+   "title": "Docs promise strict dual-Ready; code exempts captioned",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Update docs to describe exemption.",
+   "models": {
+    "haiku": [
+     1
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-LOGIN",
+   "title": "Network-reachable login has no throttling",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Add rate limiting/lockout to auth endpoint.",
+   "models": {
+    "haiku": [
+     1
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-SETTINGS",
+   "title": "Unauth settings page leaks provider/error detail",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Move readiness block inside operator guard; scrub error detail.",
+   "models": {
+    "haiku": [
+     1
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-DENO",
+   "title": "Version-only Deno fetch breaks digest policy",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Pin by digest/signature.",
+   "models": {
+    "haiku": [
+     1
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-P15-FILL",
+   "title": "Single-model autofill without persist",
+   "severity": "NONACTIONABLE",
+   "scope": "PRE_EXISTING",
+   "remedy": "No action: trivial pre-existing quirk.",
+   "models": {
+    "terra": [
+     2
+    ]
+   },
+   "instances": 1,
+   "validated": false
+  },
+  {
+   "root_cause": "RC-PR25-SELECT",
+   "title": "Fail-closed refactor discards valid best",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Retain parsed best when only advisory field malforms.",
+   "models": {
+    "terra": [
+     2
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-PR25-PUBLISH",
+   "title": "Source-ref lost when body normalizes empty",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Gate ref on original body as before.",
+   "models": {
+    "terra": [
+     3
+    ]
+   },
+   "instances": 1,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-PR27-DOCSTRING",
+   "title": "Docstring misstates hash trust boundary; acquisition skips check",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Scope docstring claims; route acquisition through _canonical_for or check recorded hash at ingestion. (Terra angle partially revised: dedup hashing itself is fine.)",
+   "models": {
+    "luna": [
+     3
+    ],
+    "haiku": [
+     1,
+     3
+    ],
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 6,
+   "validated": true
+  },
+  {
+   "root_cause": "RC-FW3-PHASEHALT",
+   "title": "Phase-halt stability (both-model misread)",
+   "severity": "NONACTIONABLE",
+   "scope": "PR_INTRODUCED",
+   "remedy": "No action: documented guarantee holds.",
+   "models": {
+    "terra": [
+     1,
+     2
+    ],
+    "luna": [
+     1
+    ]
+   },
+   "instances": 3,
+   "validated": false
+  },
+  {
+   "root_cause": "RC-FW3-OBSERVE",
+   "title": "Observe-mode simultaneity",
+   "severity": "NONACTIONABLE",
+   "scope": "PR_INTRODUCED",
+   "remedy": "No action: intended semantics.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": false
+  },
+  {
+   "root_cause": "RC-FW3-TIMER",
+   "title": "Outage-timer mechanism",
+   "severity": "UNRESOLVED",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Undecided.",
+   "models": {},
+   "instances": 0,
+   "validated": false
+  },
+  {
+   "root_cause": "RC-FW3-FLAPS",
+   "title": "Frame-flap recording",
+   "severity": "UNRESOLVED",
+   "scope": "PR_INTRODUCED",
+   "remedy": "Undecided.",
+   "models": {
+    "terra": [
+     1
+    ]
+   },
+   "instances": 1,
+   "validated": false
+  },
+  {
+   "root_cause": "RC-L10-STORE02",
+   "title": "STORE-02 probe sufficiency",
+   "severity": "NONACTIONABLE",
+   "scope": "PR_INTRODUCED",
+   "remedy": "No action now: deferred binding.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": false
+  },
+  {
+   "root_cause": "RC-L10-STORE79",
+   "title": "Test-local cert for deferred STORE cases",
+   "severity": "NONACTIONABLE",
+   "scope": "PR_INTRODUCED",
+   "remedy": "No action now: deferred binding.",
+   "models": {
+    "terra": [
+     1,
+     2,
+     3
+    ]
+   },
+   "instances": 3,
+   "validated": false
+  }
+ ],
+ "sol_extension": {
+  "root_cause": "RC-FW3-OUTAGES",
+  "model": "sol",
+  "reps": [
+   1
+  ],
+  "verdict": "P2",
+  "note": "Independently verified: SUSPECT-gated double emit across UNKNOWN gaps + unconditional per-event counting; base lacks counting."
+ }
+}

@@ -326,12 +326,12 @@ class SpendLedger:
 
     # -- Tiered provider pricing (STABILIZE-02 R1 Stage A) ---------------
     # Active when ``rate`` carries a tiered card: ``pricing_backend`` in
-    # {"luna", "haiku", "terra"}, an integer ``tier_threshold_tokens``, an
+    # {"luna", "haiku", "terra", "sol"}, an integer ``tier_threshold_tokens``, an
     # explicit ``processing_tier`` and a ``tiers`` mapping with per-tier
     # input / output / cache-hit / cache-write rates. Legacy flat ledgers
-    # (no card) keep the exact historical behaviour below. Terra shares
+    # (no card) keep the exact historical behaviour below. Terra and Sol share
     # Luna's OpenAI pricing semantics (threshold on reported input
-    # tokens; REVIEW-TERRA-01).
+    # tokens; REVIEW-TERRA-01, REVIEW-COMPLEMENT-02).
 
     def _tier_card(self) -> dict[str, Any] | None:
         rate = self.rate
@@ -340,7 +340,7 @@ class SpendLedger:
         tiers = rate.get("tiers")
         backend = rate.get("pricing_backend")
         if not isinstance(tiers, dict) or backend not in ("luna", "haiku",
-                                                             "terra"):
+                                                             "terra", "sol"):
             return None
         try:
             threshold = int(rate.get("tier_threshold_tokens", -1))
@@ -373,7 +373,7 @@ class SpendLedger:
         in the higher tier: a missing classification never assumes cheap.
         """
         threshold = card["threshold"]
-        if card["backend"] in ("luna", "terra"):
+        if card["backend"] in ("luna", "terra", "sol"):
             total = entry["input_tokens"]
             name = "short" if total <= threshold else "long"
             return name, self._tier_rates(card["tiers"], name), total
