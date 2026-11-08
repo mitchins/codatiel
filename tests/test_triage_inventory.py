@@ -99,6 +99,34 @@ def test_docs_path_class_matches_suffix_or_prefix():
     assert triage_mod.path_class("src/app.py") != "docs"
 
 
+def test_path_classes_keep_anchor_pure_union_semantics():
+    # Every class keeps its historical classification after the S5850
+    # anchor-pure split: alternation order and grouping never decided
+    # boolean search outcomes, and the tests lock that in.
+    cases = {
+        "tests/test_x.py": "tests",
+        "test_x.py": "tests",
+        "src/__tests__/x.js": "tests",
+        "src/spec/helper.rb": "tests",
+        "src/app.py": "other",
+        "config.yaml": "config",
+        "Dockerfile": "config",
+        "a/Dockerfile": "config",
+        ".github/workflows/ci.yml": "config",
+        "src/authz.py": "auth",
+        "src/login.js": "auth",
+        "db/migrate/001.py": "persistence/schema/migration",
+        "src/store.py": "persistence/schema/migration",
+        "haproxy/edge": "api/route",
+        "src/router.py": "api/route",
+        "conf/vhost": "api/route",
+        "src/app.py": "other",
+        "notes.txt.bak": "other",
+    }
+    for path, expected in cases.items():
+        assert triage_mod.path_class(path) == expected, path
+
+
 def test_triage_reference_counts_use_existing_search(tmp_path: Path):
     repo = _repo(tmp_path)
     body = _render(repo)

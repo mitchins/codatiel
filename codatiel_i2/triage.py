@@ -25,15 +25,20 @@ TRIAGE_MAX_FILES = 25
 TRIAGE_MAX_SYMBOL_SEARCHES = 12
 
 _PATH_CLASSES: list[tuple[str, tuple[re.Pattern, ...]]] = [
-    ("tests", (re.compile(r"(^|/)(test_|_test\.|tests?/|spec/|__tests__/)", re.I),)),
-    # S5850: suffix and prefix branches live in separate patterns so no
-    # alternation ever mixes ^ and $ anchors. Behavior is the union.
+    # S5850: no alternation in this table mixes ^ and $ anchors. Classes
+    # whose branches need different anchors use one anchor-pure pattern
+    # per branch; path_class matches on the union.
+    ("tests", (re.compile(r"^(?:test_|_test\.|tests?/|spec/|__tests__/)", re.I),
+               re.compile(r"/(?:test_|_test\.|tests?/|spec/|__tests__/)", re.I))),
     ("docs", (re.compile(r"\.(?:md|rst|txt)$", re.I),
               re.compile(r"^(?:docs?/|README|CHANGELOG|LICENSE)", re.I))),
-    ("config", (re.compile(r"\.(json|ya?ml|toml|ini|cfg|conf|acls?)$|(^|/)(Dockerfile|Makefile|\.github/)", re.I),)),
+    ("config", (re.compile(r"\.(?:json|ya?ml|toml|ini|cfg|conf|acls?)$", re.I),
+                re.compile(r"^(?:Dockerfile|Makefile|\.github/)", re.I),
+                re.compile(r"/(?:Dockerfile|Makefile|\.github/)", re.I))),
     ("auth", (re.compile(r"auth|permission|owner|role|guard|polic|acl|login|session|token|passwd|secret|trusted|verif", re.I),)),
     ("persistence/schema/migration", (re.compile(r"migrat|schema|models?/|store|ledger|_db|database|d1_|r2_|queue", re.I),)),
-    ("api/route", (re.compile(r"route|router|handler|endpoint|controller|/api/|views?/|haproxy|vhost|\.conf$", re.I),)),
+    ("api/route", (re.compile(r"route|router|handler|endpoint|controller|/api/|views?/|haproxy|vhost", re.I),
+                   re.compile(r"\.conf$", re.I))),
 ]
 
 _DEF_RE = re.compile(
