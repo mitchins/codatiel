@@ -48,7 +48,7 @@ ARMS = {
           "inventory_strategy": "triage-0.1"},
 }
 
-ROOT = Path(os.environ.get("M9_2_ROOT", "/tmp/m9_2"))
+ROOT = Path(os.environ.get("M9_2_ROOT", "/tmp/m9_2"))  # NOSONAR - research-only eval script, never shipped; env-overridable scratch dir
 RUNS = ROOT / "runs"
 WORK = ROOT / "work"
 LEDGER = ROOT / "ledger.json"

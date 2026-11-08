@@ -3,7 +3,7 @@ FROM python:3.12-slim
 # git for revision-bound checkouts, gh for read-only PR discovery.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git curl ca-certificates \
- && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+ && curl -fsSL --proto '=https' https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
  && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \

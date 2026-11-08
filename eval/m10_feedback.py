@@ -19,7 +19,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-ROOT = Path(os.environ.get("M10_ROOT", "/tmp/m10"))
+ROOT = Path(os.environ.get("M10_ROOT", "/tmp/m10"))  # NOSONAR - research-only eval script, never shipped; env-overridable scratch dir
 FEEDBACK = ROOT / "feedback.jsonl"
 VALID = ("useful", "low_value", "wrong")
 

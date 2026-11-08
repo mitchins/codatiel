@@ -13,7 +13,7 @@ sys.path.insert(0, "/tmp/codatiel-public")  # NOSONAR - fixed source path
 from codatiel_i2 import providers as P  # NOSONAR
 from codatiel_i2 import service as S  # NOSONAR
 
-ROOT = Path(os.environ.get("M10_ROOT", "/tmp/m10"))
+ROOT = Path(os.environ.get("M10_ROOT", "/tmp/m10"))  # NOSONAR - research-only eval script, never shipped; env-overridable scratch dir
 RUNS = ROOT / "runs"
 WORK = ROOT / "work"
 LEDGER = ROOT / "ledger.json"

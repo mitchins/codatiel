@@ -20,7 +20,7 @@ NORMALIZE = {"novel:L06-readme-sub": "L06-readme-sub"}
 
 
 def main():
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/m9_2")
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/m9_2")  # NOSONAR - research-only eval CLI, never shipped; operator-given archive path
     bmap = json.loads(
         Path("eval/M9_2_BLIND_MAP.json").read_text())["map"]
     verdicts = json.loads(

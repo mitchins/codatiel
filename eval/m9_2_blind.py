@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 def main():
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/m9_2")
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/m9_2")  # NOSONAR - research-only eval CLI, never shipped; operator-given archive path
     out_items = Path("eval/M9_2_BLIND_ITEMS.json")
     out_map = Path("eval/M9_2_BLIND_MAP.json")
     items, mapping = [], {}

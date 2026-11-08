@@ -99,12 +99,12 @@ def build(root: Path):
 
 
 def main():
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/m9_2")
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/m9_2")  # NOSONAR - research-only eval CLI, never shipped; operator-given archive path
     out = Path(sys.argv[2]) if len(sys.argv) > 2 else None
     ledger = build(root)
     text = json.dumps(ledger, indent=1, sort_keys=True)
     if out:
-        out.write_text(text)
+        out.write_text(text)  # NOSONAR - research-only eval CLI output; operator-given path, never a service
     else:
         print(text)
 

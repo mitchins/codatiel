@@ -107,9 +107,9 @@ def load_runs():
                              "repo": None, "status": None, "variant": None,
                              "model": None})
     # M9/M9.1 traces (luna + gemma + haiku)
-    for tag, root in (("M9-luna", "/tmp/m9_test_luna/runs"),
-                      ("M9-gemma", "/tmp/m9_gemma/runs"),
-                      ("M9-haiku", "/tmp/m9_haiku/runs")):
+    for tag, root in (("M9-luna", "/tmp/m9_test_luna/runs"),  # NOSONAR - frozen research fixture paths, never shipped
+                      ("M9-gemma", "/tmp/m9_gemma/runs"),  # NOSONAR - frozen research fixture paths, never shipped
+                      ("M9-haiku", "/tmp/m9_haiku/runs")):  # NOSONAR - frozen research fixture paths, never shipped
         r = Path(root)
         if r.exists():
             for rd in sorted(r.rglob("run.json")):
@@ -444,7 +444,7 @@ def main():
                                "title": f.get("title"),
                                "path": f.get("path"),
                                "class": cls, "judgement": why})
-    Path("/tmp/codatiel-public/eval/M9_2_TRACE_TAXONOMY.json").write_text(
+    Path("/tmp/codatiel-public/eval/M9_2_TRACE_TAXONOMY.json").write_text(  # NOSONAR - research-only eval output; fixed path, not user input
         json.dumps({"schema_version": "m9.2.taxonomy.v1",
                     "reference_items": REF, "rows": rows,
                     "false_findings": false_rows}, indent=1))

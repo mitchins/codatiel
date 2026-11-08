@@ -15,7 +15,7 @@ import m9_2_taxonomy as T
 
 
 def main():
-    root = Path(os.environ.get("M9_2_ROOT", "/tmp/m9_2"))
+    root = Path(os.environ.get("M9_2_ROOT", "/tmp/m9_2"))  # NOSONAR - research-only eval script, never shipped; env-overridable scratch dir
     runs = []
     for rd in sorted((root / "runs" / "luna").rglob("run.json")):
         try:
@@ -47,7 +47,7 @@ def main():
                                "title": f.get("title"),
                                "path": f.get("path"),
                                "class": cls, "judgement": why})
-    Path("/tmp/codatiel-public/eval/M9_2_P4_TAXONOMY.json").write_text(
+    Path("/tmp/codatiel-public/eval/M9_2_P4_TAXONOMY.json").write_text(  # NOSONAR - research-only eval output; fixed path, not user input
         json.dumps({"schema_version": "m9.2.p4tax.v1", "rows": rows,
                     "false_findings": false_rows}, indent=1, sort_keys=True))
     from collections import Counter

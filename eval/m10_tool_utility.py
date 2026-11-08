@@ -25,7 +25,7 @@ def load_jsonl(p):
 
 
 def main():
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/m9_2")
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/m9_2")  # NOSONAR - research-only eval CLI, never shipped; operator-given archive path
     repo = Path("eval")
     bmap = json.loads((repo / "M9_2_BLIND_MAP.json").read_text())["map"]
     verdicts = json.loads(
@@ -60,7 +60,7 @@ def main():
         n_executed += 1
         rel = str(d)
         # arm/model/rep from blind map (authoritative, sealed during P4)
-        oid = dir2oid.get(rel, dir2oid.get(rel.replace("/tmp/m9_2", str(root))))
+        oid = dir2oid.get(rel, dir2oid.get(rel.replace("/tmp/m9_2", str(root))))  # NOSONAR - research-only eval script; fixed archive prefix join, not user input
         arm = model = rep = None
         if oid:
             m = bmap[oid]

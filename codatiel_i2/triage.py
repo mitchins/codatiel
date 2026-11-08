@@ -26,7 +26,7 @@ TRIAGE_MAX_SYMBOL_SEARCHES = 12
 
 _PATH_CLASSES: list[tuple[str, re.Pattern]] = [
     ("tests", re.compile(r"(^|/)(test_|_test\.|tests?/|spec/|__tests__/)", re.I)),
-    ("docs", re.compile(r"(?:\.(?:md|rst|txt)$|^(?:docs?/|README|CHANGELOG|LICENSE))", re.I)),
+    ("docs", re.compile(r"(?:(?:\.(?:md|rst|txt)$)|(?:^(?:docs?/|README|CHANGELOG|LICENSE)))", re.I)),
     ("config", re.compile(r"\.(json|ya?ml|toml|ini|cfg|conf|acls?)$|(^|/)(Dockerfile|Makefile|\.github/)", re.I)),
     ("auth", re.compile(r"auth|permission|owner|role|guard|polic|acl|login|session|token|passwd|secret|trusted|verif", re.I)),
     ("persistence/schema/migration", re.compile(r"migrat|schema|models?/|store|ledger|_db|database|d1_|r2_|queue", re.I)),
