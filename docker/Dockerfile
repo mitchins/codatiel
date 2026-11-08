@@ -19,7 +19,7 @@ RUN chown codatiel:codatiel /app \
  && chown -R codatiel:codatiel /data
 COPY pyproject.toml ./
 COPY codatiel_i2 ./codatiel_i2
-RUN pip install --no-cache-dir ".[sdk]" && pip cache purge
+RUN pip install --no-cache-dir --only-binary :all: ".[sdk]" && pip cache purge
 COPY docker/entrypoint.sh /usr/local/bin/codatiel-entrypoint.sh
 RUN chmod +x /usr/local/bin/codatiel-entrypoint.sh
 
