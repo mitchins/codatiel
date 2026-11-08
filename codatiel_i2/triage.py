@@ -26,7 +26,10 @@ TRIAGE_MAX_SYMBOL_SEARCHES = 12
 
 _PATH_CLASSES: list[tuple[str, re.Pattern]] = [
     ("tests", re.compile(r"(^|/)(test_|_test\.|tests?/|spec/|__tests__/)", re.I)),
-    ("docs", re.compile(r"(?:(?:\.(?:md|rst|txt)$)|(?:^(?:docs?/|README|CHANGELOG|LICENSE)))", re.I)),
+    # S5850: every alternation branch carries its own explicit anchor —
+    # extension-suffix branches end with $, path-prefix branches start
+    # with ^ — so no branch inherits an anchor by precedence accident.
+    ("docs", re.compile(r"(?:^docs?/|^README|^CHANGELOG|^LICENSE|\.md$|\.rst$|\.txt$)", re.I)),
     ("config", re.compile(r"\.(json|ya?ml|toml|ini|cfg|conf|acls?)$|(^|/)(Dockerfile|Makefile|\.github/)", re.I)),
     ("auth", re.compile(r"auth|permission|owner|role|guard|polic|acl|login|session|token|passwd|secret|trusted|verif", re.I)),
     ("persistence/schema/migration", re.compile(r"migrat|schema|models?/|store|ledger|_db|database|d1_|r2_|queue", re.I)),
