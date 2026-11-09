@@ -288,6 +288,7 @@ def prepare_delegation(*, ws: Any, diff_repo: Path, inventory: str,
                    f"Repository: {ws.repo}. {inventory}")
     for role in spec.subs:
         resolved = providers_mod.resolve_backend(role)
+        rsp = spec.role_spec(role)
         if models is not None and role in models:
             model, settings = models[role]
         else:
@@ -297,7 +298,6 @@ def prepare_delegation(*, ws: Any, diff_repo: Path, inventory: str,
                 settings = ModelSettings(
                     store=False,
                     max_tokens=int(rsp.get("sub_max_tokens", 8000)))
-        rsp = spec.role_spec(role)
         sub_ledger = SpendLedger(
             rate=resolved["rate_usd_per_mtok"],
             rate_status=resolved["rate_status"],
