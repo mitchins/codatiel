@@ -158,6 +158,14 @@ def is_duplicate(luna: dict, terra_findings: list[dict]) -> tuple[bool, str]:
     return False, ""
 
 
+def _is_explicit_clean(sweep_text: str) -> bool:
+    """Explicit clean verdict (no block needed): conservative Terra-only."""
+    low = _norm(sweep_text or "")
+    return any(p in low for p in (
+        "no genuine defects found", "no genuine pr-introduced defects",
+        "no defects found", "no findings."))
+
+
 def consolidate(*, terra_run_dir: Path, luna_findings: list[dict],
                 base_dir: Path, head_dir: Path) -> dict[str, Any]:
     """Deterministic merge: sealed Terra findings + validated Luna-only."""
@@ -279,11 +287,19 @@ def run_additive(*, mode: str, target: dict[str, Any],
         sweep_input = ("Review this change between BASE and HEAD. "
                        f"Repository: {ws_state.get('repo', '')}. {inv}")
         sweep = asyncio.run(sess.sweep(sweep_input, sub_ledger))
+        try:
+            (work_root / "sub" / f"sweep-{sub_role}.txt").write_text(
+                sweep["text"], encoding="utf-8")
+        except OSError:
+            pass
         if sweep["status"] != "ok" or not sweep["text"].strip():
             raise RuntimeError(f"sweep {sweep['status']}")
         findings, perr = parse_sweep_findings(sweep["text"])
         if perr:
-            raise RuntimeError(perr)
+            if _is_explicit_clean(sweep["text"]):
+                findings = []
+            else:
+                raise RuntimeError(perr)
         merged = consolidate(terra_run_dir=terra_run_dir,
                              luna_findings=findings, base_dir=base_dir,
                              head_dir=head_dir)

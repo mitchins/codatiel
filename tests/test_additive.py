@@ -184,6 +184,16 @@ def test_run_additive_degrades_on_bad_sweep(two_commit_repo, tmp_path,
     assert "reason" in out and Path(out["run_dir"]).exists()
 
 
+def test_explicit_clean_counts_as_additive_zero(two_commit_repo, tmp_path,
+                                                monkeypatch):
+    silence = {"status": "silence", "summary": "clean", "findings": []}
+    out = _run_additive_with(
+        two_commit_repo, tmp_path, monkeypatch, silence,
+        "## Findings\n\nNo genuine defects found in the reviewed changes.")
+    assert out["mode"] == "additive", out
+    assert out["added"] == 0
+
+
 def test_session_continues_post_seal(two_commit_repo, tmp_path):
     from codatiel_i2 import providers as providers_mod
     import os
