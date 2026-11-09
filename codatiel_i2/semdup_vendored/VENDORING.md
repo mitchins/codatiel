@@ -52,3 +52,19 @@ pinned by the upstream venv) to index PHP/Swift identically.
   prompts, and the older `audit.py`/`assess.py` assessment pipeline are
   byte-identical to upstream. The DEV adapter reuses `check.classify`
   (pure classification) but never `check.run_check` / `audit.*`.
+
+## SEMDUP-03 performance promotion (qualified in SEMDUP-02, minimal)
+
+Only these Track A changes were promoted; the concurrency work
+(`target_workers`, `_investigate_targets` thread pool) was NOT:
+
+- `index_cmd.py`: optional `trace=False` skips the read-only per-unit
+  retrieval-trace loop. Default `True` preserves upstream behaviour
+  exactly; with `trace=False` the summary reports
+  `searched == indexed` so the M0 §4 honesty rule is preserved.
+  Verified: base DBs built with/without trace are byte-identical.
+- `overlay.py`: optional `trace=False` forwarded to the scratch index
+  build. Default `True` preserves upstream behaviour exactly.
+- The embedding cache itself lives in the adapter
+  (`codatiel_i2/semdup_dev/embcache.py`, content-addressed, with a
+  deterministic LRU eviction bound), not in vendored code.

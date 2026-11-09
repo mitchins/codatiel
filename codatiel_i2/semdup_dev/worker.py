@@ -36,11 +36,13 @@ import time
 from pathlib import Path
 
 from codatiel_i2.semdup_dev import SEMDUP_DEV_KIND
+from codatiel_i2.semdup_dev import advisory as AV
 from codatiel_i2.semdup_dev import config as C
 from codatiel_i2.semdup_dev import delta as D
 from codatiel_i2.semdup_dev import findings as F
 from codatiel_i2.semdup_dev import index_state as IX
 from codatiel_i2.semdup_dev import merged_view as MV
+from codatiel_i2.semdup_dev import perf as _perf
 from codatiel_i2.semdup_dev import resolve as R
 
 FILE_CAP = 300  # mirrors the GitHub compare changed-file cap
@@ -168,12 +170,15 @@ def _process(cfg, store, repo_path, repo, pr, base_rev, head_rev,
                           ov_stat.get("reason", ""))
     overlay_dir = Path(ov_stat["overlay_dir"])
     run_dir = run_dir_for(cfg.state_dir, repo, pr, head_rev)
-    merged = MV.build_merged_view(base_db, overlay_dir,
-                                  run_dir / "head_view.sqlite")
+    perf = _perf.PerfLog()
+    with perf.stage("merged_view"):
+        merged = MV.build_merged_view(base_db, overlay_dir,
+                                      run_dir / "head_view.sqlite")
     if not merged["ok"]:
         return _defer(store, cfg, repo, pr, base_rev, head_rev, from_head,
                       "head view unavailable", merged["reason"])
-    classification = D.classify_delta(base_db, Path(merged["db"]))
+    with perf.stage("classify"):
+        classification = D.classify_delta(base_db, Path(merged["db"]))
     units = classification["units"]
     fp = D.delta_fingerprint(base_rev, head_rev, from_head,
                              classification["touched"])
@@ -181,9 +186,21 @@ def _process(cfg, store, repo_path, repo, pr, base_rev, head_rev,
         return {"status": "skipped",
                 "reason": "delta fingerprint already processed"}
     targets = _select_targets(classification, cfg.max_targets_per_delta)
-    records = [_target_record(cfg, repo_path, repo, pr, base_rev, head_rev,
-                              from_head, fp, merged, target, classification)
-               for target in targets["selected"]]
+    # One head-tree materialization per delta (was: one per target).
+    # Read-only shared state; per-target investigations run sequentially
+    # and open their own sqlite connections (target_workers stays 1:
+    # SEMDUP-03 promotes no concurrency optimisation).
+    head_tree = _materialize_head(repo_path, head_rev)
+    try:
+        kinds = [_kind_of(classification, t) for t in targets["selected"]]
+        records = [_target_record(cfg, repo, pr, base_rev, head_rev,
+                                  from_head, fp, merged, target, kind,
+                                  head_tree, perf)
+                   for target, kind in zip(targets["selected"], kinds)]
+    finally:
+        if head_tree is not None:
+            import shutil as _shutil
+            _shutil.rmtree(str(Path(head_tree).parent), ignore_errors=True)
     for extra in targets["deferred"]:
         records.append(F.deferred_record(
             repo=repo, pr=pr, base_rev=base_rev, head_rev=head_rev,
@@ -196,12 +213,27 @@ def _process(cfg, store, repo_path, repo, pr, base_rev, head_rev,
         status = "partial" if summary["actionable"] or any(
             r["status"] == "finding" for r in records) else "deferred"
     run_id = f"semdup-dev-{head_rev[:12]}-{fp}"
+    perf_summary = perf.summary()
+    # Advisory layer: outward-facing classification built from stored
+    # evidence only (no inference). Failure degrades to no advisory —
+    # the engine disposition above is unaffected.
+    try:
+        advisories = AV.advisories_for_run(
+            records, Path(merged["db"]), merged["retrieval_coverage"],
+            enabled=cfg.advisory_enabled)
+    except Exception:  # noqa: BLE001 - never fail a run for advisories
+        advisories = []
+    emitted = [a for a in advisories if not a.get("suppressed")]
     (run_dir / "run.json").write_text(json.dumps(
         {"run_id": run_id, "detector": "semdup-dev-01", "repo": repo,
          "pr": pr, "base_sha": base_rev, "head_sha": head_rev,
          "from_head": from_head, "delta_fingerprint": fp,
          "config": {"model": cfg.investigator_model,
-                    "expected_model": cfg.investigator_expected},
+                    "expected_model": cfg.investigator_expected,
+                    "advisory_enabled": cfg.advisory_enabled},
+         "perf": perf_summary,
+         "advisory": {"emitted": len(emitted),
+                      "suppressed": len(advisories) - len(emitted)},
          "status": status}, indent=1))
     (run_dir / "shadow_result.json").write_text(json.dumps(
         {"status": status,
@@ -221,6 +253,11 @@ def _process(cfg, store, repo_path, repo, pr, base_rev, head_rev,
                     "counts": merged["counts"],
                     "retrieval_coverage": merged["retrieval_coverage"]},
                    indent=1, default=str))
+    (run_dir / "advisories.json").write_text(
+        json.dumps({"advisories": advisories,
+                    "note": "Outward-facing layer only; engine records in "
+                            "findings.json are preserved unchanged."},
+                   indent=1, default=str))
     store.review_record(repo=repo, pr=pr, kind=SEMDUP_DEV_KIND,
                         base_sha=base_rev, head_sha=head_rev, diff_sha=fp,
                         files=len(ch["files"]), pipeline="semdup-dev-01",
@@ -231,6 +268,8 @@ def _process(cfg, store, repo_path, repo, pr, base_rev, head_rev,
             "delta_fingerprint": fp,
             "retrieval_coverage": merged["retrieval_coverage"],
             "summary": summary,
+            "advisory": {"emitted": len(emitted),
+                         "suppressed": len(advisories) - len(emitted)},
             "records": records}
 
 
@@ -261,8 +300,8 @@ def _select_targets(classification: dict, budget: int) -> dict:
             "moved_skipped": len(classification["units"].get("moved", []))}
 
 
-def _target_record(cfg, repo_path, repo, pr, base_rev, head_rev, from_head,
-                   fp, merged, target, classification) -> dict:
+def _target_record(cfg, repo, pr, base_rev, head_rev, from_head,
+                   fp, merged, target, kind, head_tree, perf) -> dict:
     from_cod = "codatiel_i2.semdup_vendored.semdup"
     import importlib
     ST = importlib.import_module(f"{from_cod}.staged")
@@ -277,34 +316,33 @@ def _target_record(cfg, repo_path, repo, pr, base_rev, head_rev, from_head,
             repo=repo, pr=pr, base_rev=base_rev, head_rev=head_rev,
             from_head=from_head, delta_fingerprint=fp,
             reason="target unresolvable", detail=resolved.get("detail", ""),
-            classification=_kind_of(classification, target))
-    head_tree = _materialize_head(repo_path, head_rev)
+            classification=kind)
     if head_tree is None:
         return F.deferred_record(
             repo=repo, pr=pr, base_rev=base_rev, head_rev=head_rev,
             from_head=from_head, delta_fingerprint=fp,
             reason="head tree unavailable",
-            classification=_kind_of(classification, target))
+            classification=kind)
     try:
-        rep = ST.investigate(
-            Path(head_tree), Path(merged["db"]),
-            {"file": resolved["path"], "symbol": resolved["symbol"]},
-            (cfg.investigator_url, cfg.investigator_model),
-            (cfg.challenger_url, cfg.challenger_model)
-            if cfg.challenger_url else None,
-            emb=merged["emb"],
-            investigator_expected=cfg.investigator_expected,
-            challenger_expected=cfg.challenger_expected)
+        with perf.stage("investigate") if perf is not None else _noop():
+            rep = ST.investigate(
+                Path(head_tree), Path(merged["db"]),
+                {"file": resolved["path"], "symbol": resolved["symbol"]},
+                (cfg.investigator_url, cfg.investigator_model),
+                (cfg.challenger_url, cfg.challenger_model)
+                if cfg.challenger_url else None,
+                emb=merged["emb"],
+                investigator_expected=cfg.investigator_expected,
+                challenger_expected=cfg.challenger_expected)
     except Exception as exc:  # noqa: BLE001 - engine failure is deferral
         return F.deferred_record(
             repo=repo, pr=pr, base_rev=base_rev, head_rev=head_rev,
             from_head=from_head, delta_fingerprint=fp,
             reason="investigation failed",
             detail=f"{type(exc).__name__}: {str(exc)[:200]}",
-            classification=_kind_of(classification, target))
-    finally:
-        import shutil as _shutil
-        _shutil.rmtree(str(Path(head_tree).parent), ignore_errors=True)
+            classification=kind)
+    if perf is not None:
+        perf.note_investigation(rep)
     served = _verify_model_identity(rep, cfg)
     provenance = dict(provenance)
     provenance["served_model_check"] = served
@@ -312,7 +350,7 @@ def _target_record(cfg, repo_path, repo, pr, base_rev, head_rev, from_head,
         repo=repo, pr=pr, base_rev=base_rev, head_rev=head_rev,
         from_head=from_head, delta_fingerprint=fp,
         target=resolved, report=rep, provenance=provenance,
-        classification=_kind_of(classification, target),
+        classification=kind,
         retrieval_coverage=merged["retrieval_coverage"])
 
 
@@ -350,6 +388,11 @@ def _verify_model_identity(rep: dict, cfg: C.SemdupDevConfig) -> dict:
             "expected": cfg.investigator_expected,
             "note": "per-call served-id verification in inference.chat; "
                     "any mismatch aborts the investigation"}
+
+
+class _noop:
+    def __enter__(self): return None
+    def __exit__(self, *a): return False
 
 
 def _materialize_head(repo_path: Path, head_rev: str) -> str | None:

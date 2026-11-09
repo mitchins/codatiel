@@ -28,6 +28,8 @@ import time
 from pathlib import Path
 
 from codatiel_i2.semdup_vendored.semdup import index_cmd as IC
+from codatiel_i2.semdup_dev import embcache as EC
+from codatiel_i2.semdup_dev import perf as _perf
 
 
 def slug(repo: str) -> str:
@@ -93,8 +95,15 @@ def ensure_base_index(repo_path: Path, repo: str, rev: str,
     Synchronous build; callers schedule it asynchronously so it never
     delays the standard PR reviewer. Returns a status dict; on failure
     the caller must defer with incomplete status, never proceed.
+
+    The retrieval-trace loop inside IC.build is skipped (trace=False —
+    read-only loop whose totals this adapter never consumes; the DB is
+    byte-identical either way), and embedding sidecars go through the
+    content-addressed cache (embcache) so unchanged symbols reuse vectors
+    across revs.
     """
     from codatiel_i2.semdup_vendored.semdup import harrier as HAR
+    perf = _perf.PerfLog()
     paths = base_paths(state_dir, repo, rev)
     paths["db"].parent.mkdir(parents=True, exist_ok=True)
     status = base_index_status(state_dir, repo, rev)
@@ -103,23 +112,40 @@ def ensure_base_index(repo_path: Path, repo: str, rev: str,
     with tempfile.TemporaryDirectory(prefix="semdup-base-") as tmp:
         tree = Path(tmp) / "tree"
         try:
-            materialize(rev, repo_path, tree)
+            with perf.stage("materialize_base"):
+                materialize(rev, repo_path, tree)
         except subprocess.CalledProcessError as exc:
             return {"reused": False, "present": False,
                     "reason": f"cannot materialize base rev {rev[:12]}: {exc}"}
-        summary = IC.build(tree, paths["db"])
+        with perf.stage("index_build"):
+            summary = IC.build(tree, paths["db"], trace=False)
     emb: dict = {"harrier": False, "gcb": False}
     if allow_embeddings:
         try:
-            HAR.build_index(paths["db"], paths["harrier"])
+            with perf.stage("embeddings"):
+                rep = EC.build_sidecar(paths["db"], paths["harrier"],
+                                       channel="harrier", model=HAR.MODEL_ID,
+                                       state_dir=state_dir, perf=perf)
             emb["harrier"] = paths["harrier"].exists()
+            emb["harrier_report"] = {k: rep.get(k) for k in
+                                     ("units", "reused", "embedded",
+                                      "encode_wall_s", "cached",
+                                      "cache_evicted")}
         except Exception as exc:  # noqa: BLE001 - honest record, not fatal
             emb["harrier_error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
         if not emb["harrier"]:
             try:
                 from codatiel_i2.semdup_vendored.semdup import embed as GCB
-                GCB.build_index(paths["db"], paths["gcb"])
+                with perf.stage("embeddings_fallback"):
+                    rep = EC.build_sidecar(paths["db"], paths["gcb"],
+                                           channel="gcb",
+                                           model=GCB.DEFAULT_MODEL,
+                                           state_dir=state_dir, perf=perf)
                 emb["gcb"] = paths["gcb"].exists()
+                emb["gcb_report"] = {k: rep.get(k) for k in
+                                     ("units", "reused", "embedded",
+                                      "encode_wall_s", "cached",
+                                      "cache_evicted")}
             except Exception as exc:  # noqa: BLE001
                 emb["gcb_error"] = (f"{type(exc).__name__}: "
                                     f"{str(exc)[:160]}")
@@ -130,7 +156,8 @@ def ensure_base_index(repo_path: Path, repo: str, rev: str,
                         ("status", "files_eligible", "files_parsed",
                          "files_failed", "units_indexed", "units_searched",
                          "files_deferred_by_language")},
-            "embeddings": emb, "built_ts": time.time()}
+            "embeddings": emb, "built_ts": time.time(),
+            "perf": perf.summary()}
     paths["meta"].write_text(json.dumps(meta, indent=1, default=str))
     return {"reused": False, "present": True, "meta": meta,
             "harrier": emb["harrier"], "gcb": emb["gcb"]}
@@ -146,13 +173,15 @@ def build_overlay(repo_path: Path, repo: str, pr: int, base_rev: str,
     `overlay_status`, never assumed.
     """
     from codatiel_i2.semdup_vendored.semdup import overlay as OV
+    perf = _perf.PerfLog()
     dest = overlay_path(state_dir, repo, pr, head_rev)
     if dest.exists():
         shutil.rmtree(dest)
     with tempfile.TemporaryDirectory(prefix="semdup-head-") as tmp:
         tree = Path(tmp) / "tree"
         try:
-            materialize(head_rev, repo_path, tree)
+            with perf.stage("materialize_head"):
+                materialize(head_rev, repo_path, tree)
         except subprocess.CalledProcessError as exc:
             return {"ok": False,
                     "reason": f"cannot materialize head rev {head_rev[:12]}: {exc}"}
@@ -161,7 +190,10 @@ def build_overlay(repo_path: Path, repo: str, pr: int, base_rev: str,
             # vectors-only (no ids) and raw-text (not the base sidecar
             # format). The adapter builds id-keyed, base-format sidecars
             # below so base + overlay vectors fuse exactly.
-            stats = OV.build_overlay(base_db, tree, dest, embed=False)
+            # trace=False: scratch retrieval totals are never consumed.
+            with perf.stage("overlay_index"):
+                stats = OV.build_overlay(base_db, tree, dest, embed=False,
+                                         trace=False)
         except Exception as exc:  # noqa: BLE001
             return {"ok": False,
                     "reason": f"overlay build failed: {type(exc).__name__}: {str(exc)[:200]}"}
@@ -170,23 +202,38 @@ def build_overlay(repo_path: Path, repo: str, pr: int, base_rev: str,
     if allow_embeddings and scratch.exists():
         try:
             from codatiel_i2.semdup_vendored.semdup import harrier as HAR
-            HAR.build_index(scratch, dest / "overlay_harrier_ids.npz")
+            with perf.stage("overlay_embeddings"):
+                rep = EC.build_sidecar(scratch, dest / "overlay_harrier_ids.npz",
+                                       channel="harrier", model=HAR.MODEL_ID,
+                                       state_dir=state_dir, perf=perf)
             emb["harrier"] = True
+            emb["harrier_report"] = {k: rep.get(k) for k in
+                                     ("units", "reused", "embedded",
+                                      "encode_wall_s", "cached",
+                                      "cache_evicted")}
         except Exception as exc:  # noqa: BLE001
             emb["harrier_error"] = (f"{type(exc).__name__}: "
                                     f"{str(exc)[:160]}")
         if not emb["harrier"]:
             try:
                 from codatiel_i2.semdup_vendored.semdup import embed as GCB
-                GCB.build_index(scratch, dest / "overlay_gcb_ids.npz")
+                with perf.stage("overlay_embeddings_fallback"):
+                    rep = EC.build_sidecar(scratch, dest / "overlay_gcb_ids.npz",
+                                           channel="gcb",
+                                           model=GCB.DEFAULT_MODEL,
+                                           state_dir=state_dir, perf=perf)
                 emb["gcb"] = True
+                emb["gcb_report"] = {k: rep.get(k) for k in
+                                     ("units", "reused", "embedded",
+                                      "encode_wall_s", "cached",
+                                      "cache_evicted")}
             except Exception as exc:  # noqa: BLE001
                 emb["gcb_error"] = (f"{type(exc).__name__}: "
                                     f"{str(exc)[:160]}")
     record = {"repo": repo, "pr": pr, "base_rev": base_rev,
               "base_db_sha256": _sha_file(base_db), "head_rev": head_rev,
               "built_ts": time.time(), "stats": stats,
-              "embeddings": emb}
+              "embeddings": emb, "perf": perf.summary()}
     (dest / "base_snapshot.json").write_text(json.dumps(record, indent=1,
                                                         default=str))
     return {"ok": True, "overlay_dir": str(dest), "record": record}

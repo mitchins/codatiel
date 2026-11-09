@@ -19,12 +19,21 @@ ADAPTERS = {"python": pyad, "php": php_ad, "swift": swift_ad}
 
 def build(repo: Path, db_path: Path, k: int = 30, embeddings: bool = False,
           embed_model: str | None = None,
-          snapshot_scope: str = "selected-view") -> dict:
+          snapshot_scope: str = "selected-view", trace: bool = True) -> dict:
     """snapshot_scope: "selected-view" (default, M0-frozen: digest over
     eligible target files) or "full-root" (owner CONTRACT benchmark
     adapter: full-root digest, required for synthetic litmus roots whose
     oracle carries the full-tree hash; inexpensive there by contract).
-    The scope is recorded in the summary — never silently equated."""
+    The scope is recorded in the summary — never silently equated.
+
+    trace (SEMDUP-03 perf promotion): the per-unit retrieval-trace loop
+    is read-only (SELECTs only; the DB is byte-identical with or without
+    it) and its totals are consumed only by this summary. Callers that
+    do not consume the trace (e.g. the semdup DEV adapter, which keeps
+    status/counts) may pass trace=False to skip O(units) FTS queries.
+    Default True preserves existing behavior exactly; trace=False
+    reports searched == indexed so the M0 §4 honesty rule
+    (searched != indexed -> partial) is preserved."""
     records, excluded = inv.inventory(repo)
     conn = st.connect(db_path)
     parsed = failed = 0
@@ -71,15 +80,21 @@ def build(repo: Path, db_path: Path, k: int = 30, embeddings: bool = False,
                 st.add_description(conn, uid, dtext, prov)
     conn.commit()
     # Retrieval trace over all units (recall-before-filter: union retained).
+    # Skipped when trace=False (see build docstring): read-only loop, the
+    # DB is unaffected; searched is reported == indexed so the M0 §4
+    # honesty rule (searched != indexed -> partial) is preserved.
     searched = 0
     lexical_errors = 0
     trace_totals = {"lexical": 0, "semantic": 0}
-    for (uid,) in conn.execute("SELECT id FROM units"):
-        _, trace = ret.all_channel_neighbors(conn, uid, k)
-        searched += 1
-        trace_totals["lexical"] += trace["lexical"]
-        trace_totals["semantic"] += trace["semantic"]
-        lexical_errors += 1 if trace.get("lexical_error") else 0
+    if trace:
+        for (uid,) in conn.execute("SELECT id FROM units"):
+            _, tr = ret.all_channel_neighbors(conn, uid, k)
+            searched += 1
+            trace_totals["lexical"] += tr["lexical"]
+            trace_totals["semantic"] += tr["semantic"]
+            lexical_errors += 1 if tr.get("lexical_error") else 0
+    else:
+        searched = indexed
     conn.close()
     selected = [{"path": r.path, "sha256": r.sha256, "bytes": r.bytes} for r in records]
     if snapshot_scope == "full-root":

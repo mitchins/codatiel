@@ -40,6 +40,7 @@ class SemdupDevConfig:
     max_targets_per_delta: int = MAX_TARGETS_PER_DELTA
     neighbors_k: int = NEIGHBORS_K
     allow_embeddings: bool = True
+    advisory_enabled: bool = True
     notify_to: list[str] = field(default_factory=list)
     notify_sender: str = ""
 
@@ -84,6 +85,10 @@ def config_from_env() -> SemdupDevConfig:
     if max_targets <= 0 or neighbors_k <= 0:
         raise SemdupConfigError("target/neighbor budgets must be positive")
     allow_embeddings = os.environ.get("SEMDUP_ALLOW_EMBEDDINGS",
+                                       "1").strip() not in ("0", "no", "false")
+    # Independently switchable advisory layer: 0 degrades to no
+    # semantic-duplication advisory without affecting ordinary reviewing.
+    advisory_enabled = os.environ.get("SEMDUP_ADVISORY",
                                       "1").strip() not in ("0", "no", "false")
     return SemdupDevConfig(
         env=env, state_dir=state_dir, repos=repos,
@@ -93,5 +98,6 @@ def config_from_env() -> SemdupDevConfig:
         challenger_expected=ch_expected, api_key=api_key,
         max_targets_per_delta=max_targets, neighbors_k=neighbors_k,
         allow_embeddings=allow_embeddings,
+        advisory_enabled=advisory_enabled,
         notify_to=_env_list("CODATIEL_DEV_TO"),
         notify_sender=os.environ.get("CODATIEL_DEV_SENDER", ""))

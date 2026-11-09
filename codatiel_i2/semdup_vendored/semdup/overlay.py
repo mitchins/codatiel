@@ -53,8 +53,12 @@ def diff_branch(base_db: Path, branch_root: Path,
 
 
 def build_overlay(base_db: Path, branch_root: Path, overlay_dir: Path,
-                  embed: bool = True) -> dict:
-    """Build transient overlay. Returns stats (wall, units, vectors, disk)."""
+                  embed: bool = True, trace: bool = True) -> dict:
+    """Build transient overlay. Returns stats (wall, units, vectors, disk).
+
+    trace (SEMDUP-03 perf promotion): forwarded to the scratch index
+    build; the loop is read-only and its totals are not consumed by
+    overlay consumers. Default True preserves existing behavior exactly."""
     import time as _t
     from . import index_cmd as IC
     t0 = _t.monotonic()
@@ -83,7 +87,7 @@ def build_overlay(base_db: Path, branch_root: Path, overlay_dir: Path,
         dest = tmp_root / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(branch_root / rel, dest)
-    IC.build(tmp_root, scratch)
+    IC.build(tmp_root, scratch, trace=trace)
     sconn = sqlite3.connect(str(scratch))
     scols = [r[1] for r in sconn.execute("PRAGMA table_info(units)").fetchall()]
     shared = [c for c in cols if c in scols]

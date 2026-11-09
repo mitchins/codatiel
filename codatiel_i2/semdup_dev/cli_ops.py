@@ -30,6 +30,7 @@ def cmd_config_check(args) -> dict:
             "max_targets_per_delta": cfg.max_targets_per_delta,
             "neighbors_k": cfg.neighbors_k,
             "allow_embeddings": cfg.allow_embeddings,
+            "advisory_enabled": cfg.advisory_enabled,
             "notify_to": cfg.notify_to,
             "notify_sender": cfg.notify_sender,
             "qualified_default": C.QUALIFIED_MODEL_ID}
@@ -109,10 +110,17 @@ def cmd_process_event(args) -> dict:
 
 
 def render_digest(run_dir: Path) -> str:
+    from codatiel_i2.semdup_dev import advisory as AV
     data = json.loads((run_dir / "findings.json").read_text())
     run = {}
     try:
         run = json.loads((run_dir / "run.json").read_text())
+    except (OSError, ValueError):
+        pass
+    advisories = []
+    try:
+        advisories = json.loads(
+            (run_dir / "advisories.json").read_text()).get("advisories", [])
     except (OSError, ValueError):
         pass
     lines = ["Codatiel DEV semdup digest (report-only; no PR comments)",
@@ -132,6 +140,13 @@ def render_digest(run_dir: Path) -> str:
             f"counterparts={r.get('counterparts')}")
         if r.get("reason"):
             lines.append(f"  reason: {r.get('reason')}: {r.get('detail', '')}")
+    shown = [a for a in advisories if not a.get("suppressed")]
+    if shown:
+        lines.append("")
+        lines.append("Advisories (inspectable suspicions, not verdicts):")
+        for a in shown:
+            lines.append("")
+            lines.append(AV.render_markdown(a))
     return "\n".join(lines)
 
 
