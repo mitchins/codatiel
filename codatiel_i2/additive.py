@@ -99,12 +99,30 @@ def _read_span(base_dir: Path, head_dir: Path, path: str, revision: str,
 def _quoted_segments(evidence: str) -> list[str]:
     """Double-quoted substrings: the model's verbatim excerpts.
 
-    Quotes are unescaped first (JSON blocks often carry \"...\").
-    Only segments of 9+ chars count; surrounding prose is ignored.
+    Quotes are unescaped first (JSON blocks often carry "...").
+    Spans containing backticks are citations (file references), not
+    excerpts. Only segments of 9+ chars count; surrounding prose is
+    ignored.
     """
     unesc = str(evidence or "").replace('\\"', '"').replace("\\'", "'")
-    return [s.strip() for s in re.findall(r'"([^"]{9,})"', unesc)
+    return [s.strip() for s in re.findall(r'"([^"`]{9,})"', unesc)
             if s.strip()]
+
+
+def _cited_files(evidence: str, head_dir: Path,
+                 anchor_path: str) -> list[Path]:
+    """Repo files explicitly cited in the evidence (path:line refs)."""
+    out = []
+    for m in re.finditer(
+            r"[`\"']?((?:src|probes|tools|tests|servers|Sources|Tests)/"
+            r"[A-Za-z0-9_./-]+\.(?:py|js|swift|cfg|conf|vcl|yaml|yml|toml))",
+            str(evidence or "")):
+        p = head_dir / m.group(1)
+        if p.is_file() and str(p) != str(head_dir / anchor_path):
+            out.append(p)
+        if len(out) >= 3:
+            break
+    return out
 
 
 def _evidence_lines_present(evidence: str, text: str) -> tuple[bool, str]:
@@ -155,20 +173,33 @@ def validate_anchor(finding: dict, base_dir: Path,
         # JSON blocks often add escape/outer quotes. A span miss with
         # file-level hits is recorded with a note, not lost.
         try:
-            full = (base_dir if str(finding.get("revision", "head")) == "base"
-                    else head_dir).joinpath(
-                        str(finding["path"])).read_text(
-                            encoding="utf-8", errors="replace")
+            use_base = str(finding.get("revision", "head")) == "base"
+            full_path = (base_dir if use_base else head_dir).joinpath(
+                str(finding["path"]))
+            full = full_path.read_text(encoding="utf-8", errors="replace")
+            src_dir = base_dir if use_base else head_dir
         except OSError:
             return False, "evidence not in anchored span"
         flat = _norm(full)
         segs = _quoted_segments(finding["evidence"])
         if segs:
             hits = sum(1 for s in segs if _norm(s) in flat)
+            missing = [s for s in segs if _norm(s) not in flat]
+            if missing:
+                # Supporting excerpts may come from explicitly cited
+                # repo files (e.g. the pipeline the anchor calls into).
+                cited = _cited_files(finding["evidence"], src_dir,
+                                     str(finding["path"]))
+                for s in list(missing):
+                    ns = _norm(s)
+                    if any(ns in _norm(p.read_text(
+                            encoding="utf-8", errors="replace"))
+                            for p in cited):
+                        hits += 1
             need = max(1, math.ceil(len(segs) * 0.6))
             if hits >= need:
                 return True, (f"evidence quoted excerpts {hits}/{len(segs)}"
-                              f" in file, outside anchored span")
+                              f" in file/cited sources, outside span")
             return False, (f"evidence not found at pinned revision "
                            f"(only {hits}/{len(segs)} quoted excerpts)")
         ok, note = _evidence_lines_present(finding["evidence"], full)

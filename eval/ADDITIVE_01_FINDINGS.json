@@ -1,0 +1,89 @@
+{
+ "n": 7,
+ "instances": [
+  {
+   "rc": "RC-FW3-MEDIAN",
+   "severity": "P3",
+   "case": "FW3",
+   "rep": 1
+  },
+  {
+   "rc": "RC-L10-CODABLE",
+   "severity": "P2",
+   "case": "L10",
+   "rep": 1
+  },
+  {
+   "rc": "RC-L10-CODABLE",
+   "severity": "P2",
+   "case": "L10",
+   "rep": 2
+  },
+  {
+   "rc": "RC-Y15-RECAP",
+   "severity": "P3",
+   "case": "D01-Y15",
+   "rep": 1
+  },
+  {
+   "rc": "RC-Y15-DISK",
+   "severity": "P3",
+   "case": "D01-Y15",
+   "rep": 1
+  },
+  {
+   "rc": "RC-Y15-DISK",
+   "severity": "P3",
+   "case": "D01-Y15",
+   "rep": 2
+  },
+  {
+   "rc": "RC-Y15-SAVETEST",
+   "severity": "P2",
+   "case": "D01-Y15",
+   "rep": 2
+  }
+ ],
+ "rcs": [
+  {
+   "rc": "RC-FW3-MEDIAN",
+   "severity": "P3",
+   "n": 1,
+   "cases": [
+    "FW3"
+   ]
+  },
+  {
+   "rc": "RC-L10-CODABLE",
+   "severity": "P2",
+   "n": 2,
+   "cases": [
+    "L10"
+   ]
+  },
+  {
+   "rc": "RC-Y15-DISK",
+   "severity": "P3",
+   "n": 2,
+   "cases": [
+    "D01-Y15"
+   ]
+  },
+  {
+   "rc": "RC-Y15-RECAP",
+   "severity": "P3",
+   "n": 1,
+   "cases": [
+    "D01-Y15"
+   ]
+  },
+  {
+   "rc": "RC-Y15-SAVETEST",
+   "severity": "P2",
+   "n": 1,
+   "cases": [
+    "D01-Y15"
+   ]
+  }
+ ]
+}

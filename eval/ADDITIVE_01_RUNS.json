@@ -1,0 +1,282 @@
+{
+ "n": 12,
+ "runs": [
+  {
+   "role": "luna",
+   "case": "D01-Y15",
+   "rep": 1,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 7,
+   "terra_rcs": [
+    "RC-Y15-CLIIDENT",
+    "RC-Y15-COOKIE",
+    "RC-Y15-DEFAULTMODEL",
+    "RC-Y15-DISK",
+    "RC-Y15-RECAP",
+    "RC-Y15-SAVETEST",
+    "RC-Y15-SESSION"
+   ],
+   "added": [
+    {
+     "rc": "RC-Y15-RECAP",
+     "severity": "P3",
+     "title": "Source reprocessing loses the manual-caption exemption",
+     "provenance": "luna-blind-sweep",
+     "validation_note": null
+    },
+    {
+     "rc": "RC-Y15-DISK",
+     "severity": "P3",
+     "title": "Readiness failures leave newly submitted sources and uploads behind",
+     "provenance": "luna-blind-sweep",
+     "validation_note": null
+    }
+   ],
+   "duplicates": 0,
+   "rejected": 0,
+   "parent_usd": 0.19241675
+  },
+  {
+   "role": "luna",
+   "case": "D01-Y15",
+   "rep": 2,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 6,
+   "terra_rcs": [
+    "RC-Y15-CAPFLAG",
+    "RC-Y15-CLIIDENT",
+    "RC-Y15-IDENTITY",
+    "RC-Y15-SAVETEST",
+    "RC-Y15-SESSION",
+    "UNMAPPED"
+   ],
+   "added": [
+    {
+     "rc": "RC-Y15-DISK",
+     "severity": "P3",
+     "title": "Rejected submissions can leave uploaded sources persisted without a job",
+     "provenance": "luna-blind-sweep",
+     "validation_note": "evidence quoted excerpts 3/3 in file/cited sources, outside span"
+    },
+    {
+     "rc": "RC-Y15-SAVETEST",
+     "severity": "P2",
+     "title": "Guided setup reports an endpoint was not saved when it was saved",
+     "provenance": "luna-blind-sweep",
+     "validation_note": "evidence quoted excerpts 3/4 in file/cited sources, outside span"
+    }
+   ],
+   "duplicates": 0,
+   "rejected": 0,
+   "parent_usd": 0.19530789999999998
+  },
+  {
+   "role": "luna",
+   "case": "D01-Y22",
+   "rep": 1,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 2,
+   "terra_rcs": [
+    "RC-Y22-404",
+    "UNMAPPED"
+   ],
+   "added": [],
+   "duplicates": 0,
+   "rejected": 0,
+   "parent_usd": 0.058123949999999994
+  },
+  {
+   "role": "luna",
+   "case": "D01-Y22",
+   "rep": 2,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 2,
+   "terra_rcs": [
+    "RC-Y22-400",
+    "RC-Y22-SCHEMA"
+   ],
+   "added": [],
+   "duplicates": 0,
+   "rejected": 0,
+   "parent_usd": 0.06618525
+  },
+  {
+   "role": "luna",
+   "case": "FW3",
+   "rep": 1,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 4,
+   "terra_rcs": [
+    "RC-FW3-MIGRATION",
+    "RC-FW3-OBSERVE",
+    "RC-FW3-RESTART",
+    "UNMAPPED"
+   ],
+   "added": [
+    {
+     "rc": "RC-FW3-MEDIAN",
+     "severity": "P3",
+     "title": "Report median is incorrect for an even number of outages",
+     "provenance": "luna-blind-sweep",
+     "validation_note": "evidence quoted excerpts 2/2 in file/cited sources, outside span"
+    }
+   ],
+   "duplicates": 0,
+   "rejected": 0,
+   "parent_usd": 0.09966
+  },
+  {
+   "role": "luna",
+   "case": "FW3",
+   "rep": 2,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 5,
+   "terra_rcs": [
+    "RC-FW3-LATCHED-COUNT",
+    "RC-FW3-MIGRATION",
+    "RC-FW3-OBSERVE",
+    "RC-FW3-RESTART",
+    "UNMAPPED"
+   ],
+   "added": [],
+   "duplicates": 2,
+   "rejected": 0,
+   "parent_usd": 0.11004644999999999
+  },
+  {
+   "role": "luna",
+   "case": "L08",
+   "rep": 1,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 4,
+   "terra_rcs": [
+    "RC-L08-ACL",
+    "RC-L08-COOKIEMASK",
+    "RC-L08-EPCORE",
+    "RC-L08-LMS"
+   ],
+   "added": [],
+   "duplicates": 1,
+   "rejected": 0,
+   "parent_usd": 0.21107795000000004
+  },
+  {
+   "role": "luna",
+   "case": "L08",
+   "rep": 2,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 4,
+   "terra_rcs": [
+    "RC-L08-ACL",
+    "RC-L08-COOKIEMASK",
+    "RC-L08-LMS",
+    "UNMAPPED"
+   ],
+   "added": [],
+   "duplicates": 0,
+   "rejected": 1,
+   "parent_usd": 0.255706
+  },
+  {
+   "role": "luna",
+   "case": "L10",
+   "rep": 1,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 6,
+   "terra_rcs": [
+    "RC-L10-CLIPATH",
+    "RC-L10-MATCHER",
+    "RC-L10-STORE02",
+    "RC-L10-STORE79",
+    "UNMAPPED"
+   ],
+   "added": [
+    {
+     "rc": "RC-L10-CODABLE",
+     "severity": "P2",
+     "title": "Adding evidence_tier breaks decoding of existing result JSON",
+     "provenance": "luna-blind-sweep",
+     "validation_note": "evidence quoted excerpts 1/1 in file/cited sources, outside span"
+    }
+   ],
+   "duplicates": 0,
+   "rejected": 0,
+   "parent_usd": 0.14112305
+  },
+  {
+   "role": "luna",
+   "case": "L10",
+   "rep": 2,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 5,
+   "terra_rcs": [
+    "RC-L10-CLIPATH",
+    "RC-L10-MATCHER",
+    "RC-L10-STORE02",
+    "RC-L10-STORE79",
+    "UNMAPPED"
+   ],
+   "added": [
+    {
+     "rc": "RC-L10-CODABLE",
+     "severity": "P2",
+     "title": "New required Codable field breaks decoding of previously encoded results",
+     "provenance": "luna-blind-sweep",
+     "validation_note": null
+    }
+   ],
+   "duplicates": 0,
+   "rejected": 0,
+   "parent_usd": 0.15176920000000002
+  },
+  {
+   "role": "luna",
+   "case": "P15",
+   "rep": 1,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 8,
+   "terra_rcs": [
+    "RC-P15-ENVASR",
+    "RC-P15-RECQUAL",
+    "RC-P15-SCHEME",
+    "RC-P15-SESSION",
+    "UNMAPPED"
+   ],
+   "added": [],
+   "duplicates": 0,
+   "rejected": 1,
+   "parent_usd": 0.15805024999999998
+  },
+  {
+   "role": "luna",
+   "case": "P15",
+   "rep": 2,
+   "status": "complete",
+   "mode": "additive",
+   "terra_findings": 7,
+   "terra_rcs": [
+    "RC-P15-CAPFLAG",
+    "RC-P15-ENVASR",
+    "RC-P15-ORDER",
+    "RC-P15-SAVETEST",
+    "RC-P15-SESSION",
+    "UNMAPPED"
+   ],
+   "added": [],
+   "duplicates": 1,
+   "rejected": 0,
+   "parent_usd": 0.21167825000000004
+  }
+ ]
+}
