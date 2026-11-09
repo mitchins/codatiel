@@ -115,6 +115,62 @@ def build_parser() -> argparse.ArgumentParser:
                          help="settle-override: who requested it (required)")
     watcher.add_argument("--reason", default="",
                          help="settle-override: why now (required)")
+
+    events = sub.add_parser("events", help="Event-driven incremental review pipeline (TEST/DEV operational verification).")
+    events.add_argument("op", choices=["enable", "ingest", "status",
+                                      "dashboard", "reset-spend", "recover",
+                                      "review"],
+                        help="enable: watermark + grandfather open PRs (no "
+                             "inference); ingest: process one webhook payload; "
+                             "status/dashboard: operational state; "
+                             "reset-spend: zero env ledger (no auto-backlog); "
+                             "recover: mark stale in-flight interrupted; "
+                             "review: operator-explicit single re-drive")
+    events.add_argument("--payload", default="",
+                        help="ingest: webhook JSON body file")
+    events.add_argument("--delivery-id", default="",
+                        help="ingest: X-GitHub-Delivery value")
+    events.add_argument("--signature", default="",
+                        help="ingest: X-Hub-Signature-256 value")
+    events.add_argument("--pr", default="",
+                        help="review: explicit PR number re-drive")
+    events.add_argument("--head", default="",
+                        help="review: explicit head SHA re-drive")
+    events.add_argument("--base", default="",
+                        help="review: explicit base SHA re-drive")
+    events.add_argument("--stale-after", type=float, default=-1.0,
+                        help="recover: in-flight age seconds to mark "
+                             "interrupted (-1: env/default 3600)")
+    semdup = sub.add_parser("semdup", help="DEV semantic-duplication shadow worker (report-only; TEST/Production untouched).")
+    semdup.add_argument("op", choices=["config-check", "build-base",
+                                       "process-event", "report"],
+                        help="config-check: validate DEV semdup env (no "
+                             "secrets echoed); build-base: synchronous "
+                             "persistent base-index build; process-event: "
+                             "process one PR delta; report: render latest "
+                             "run (optionally digest it)")
+    semdup.add_argument("--payload", default="",
+                        help="process-event: delta JSON file "
+                             "{repo, pr, base_rev, head_rev, action?}")
+    semdup.add_argument("--delivery-id", default="",
+                        help="process-event: stable delivery identity "
+                             "(replays never repeat inference)")
+    semdup.add_argument("--repo-path", default="",
+                        help="build-base/process-event: local git checkout "
+                             "of the repo")
+    semdup.add_argument("--repo", default="",
+                        help="build-base/report: repository full name")
+    semdup.add_argument("--pr", default="", help="report: PR number")
+    semdup.add_argument("--rev", default="",
+                        help="build-base: base revision SHA")
+    semdup.add_argument("--head", default="",
+                        help="report: restrict to head SHA prefix")
+    semdup.add_argument("--grandfather", action="store_true",
+                        help="process-event: PR predates DEV enable; "
+                             "baseline only, no inference")
+    semdup.add_argument("--send", action="store_true",
+                        help="report: digest to the configured DEV "
+                             "destination only (never a PR comment)")
     return parser
 
 
@@ -151,6 +207,30 @@ def main(argv: list[str] | None = None) -> int:
                                               "duplicate-suppressed",
                                               "paused", "resumed",
                                               "override-set") else 1
+    if args.cmd == "events":
+        payload = cmd_events(args)
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 0 if payload.get("status") in ("ok", "completed",
+                                              "skipped", "queued",
+                                              "needs_attention", "failed") else 1
+    if args.cmd == "semdup":
+        from codatiel_i2.semdup_dev import cli_ops as semdup_ops
+        if args.op == "config-check":
+            payload = semdup_ops.cmd_config_check(args)
+        elif args.op == "build-base":
+            payload = semdup_ops.cmd_build_base(args)
+        elif args.op == "process-event":
+            payload = semdup_ops.cmd_process_event(args)
+        elif args.op == "report":
+            payload = semdup_ops.cmd_report(args)
+        else:
+            payload = {"status": "failed", "stage": "config",
+                       "error": f"unknown semdup op {args.op!r}"}
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 0 if payload.get("status") in ("ok", "complete", "completed",
+                                              "partial", "skipped",
+                                              "grandfathered", "deferred",
+                                              "indexing") else 1
     return 1
 
 
@@ -892,6 +972,260 @@ def cmd_deliver_shadow(args) -> dict:
     except Exception as exc:
         return {"status": "failed", "stage": "delivery",
                 "error": f"{type(exc).__name__}: {exc}"}
+
+
+    sender = args.sender.strip()
+    transport = None
+    if args.transport == "fixture":
+        sent: list[dict] = []
+
+        def transport(to_addrs: list[str], subject: str,
+                      body: str) -> dict:
+            sent.append({"to": to_addrs, "subject": subject,
+                         "body": body})
+            return {"accepted_by_transport": True, "parsed": True,
+                    "fixture": True, "succeeded": len(to_addrs),
+                    "failed": 0, "email_id": "fixture-no-send"}
+    elif args.transport != "smtp2go":
+        return {"status": "failed", "stage": "delivery",
+                "error": f"unknown transport {args.transport!r}: "
+                         "smtp2go|fixture"}
+    try:
+        return service_mod.deliver_shadow(
+            args.run_dir, to=to, sender=sender, transport=transport)
+
+    except Exception as exc:
+        return {"status": "failed", "stage": "delivery",
+                "error": f"{type(exc).__name__}: {exc}"}
+
+
+def cmd_events(args) -> dict:
+    """Event-driven incremental review pipeline (TEST/DEV)."""
+    import os
+    from codatiel_i2 import event_pipeline as pipe_mod
+    from codatiel_i2 import event_store as store_mod
+
+    try:
+        cfg = pipe_mod.config_from_env()
+    except store_mod.StoreError as exc:
+        return {"status": "failed", "stage": "config", "error": str(exc)}
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        store = store_mod.Store(cfg.state_dir / "events.sqlite")
+    except store_mod.StoreError as exc:
+        return {"status": "failed", "stage": "store", "error": str(exc)}
+    try:
+        op = args.op
+        if op == "enable":
+            try:
+                return {"status": "ok",
+                        **pipe_mod.enable(cfg=cfg, store=store)}
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "enable",
+                        "error": str(exc)}
+        if op == "status":
+            try:
+                return {"status": "ok",
+                        **pipe_mod.status(cfg=cfg, store=store)}
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "status",
+                        "error": str(exc)}
+        if op == "dashboard":
+            try:
+                return {"status": "ok",
+                        **pipe_mod.dashboard(cfg=cfg, store=store)}
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "dashboard",
+                        "error": str(exc)}
+        if op == "reset-spend":
+            try:
+                return {"status": "ok",
+                        **pipe_mod.reset_spend(store=store)}
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "reset-spend",
+                        "error": str(exc)}
+        if op == "recover":
+            if args.stale_after is not None and args.stale_after >= 0:
+                cfg.stale_after_s = float(args.stale_after)
+            try:
+                return {"status": "ok",
+                        **pipe_mod.recover(cfg=cfg, store=store)}
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "recover",
+                        "error": str(exc)}
+        if op == "review":
+            # Operator-explicit single re-drive for one PR head.
+            if not args.pr or not args.head or not cfg.repos:
+                return {"status": "failed", "stage": "review",
+                        "error": "review needs --pr, --head and a "
+                                 "single configured repository"}
+            if len(cfg.repos) != 1:
+                return {"status": "failed", "stage": "review",
+                        "error": "review needs exactly one configured "
+                                 "repository"}
+            try:
+                number = int(args.pr)
+            except (TypeError, ValueError):
+                return {"status": "failed", "stage": "review",
+                        "error": "--pr must be numeric"}
+            repo = cfg.repos[0]
+            cp = store.checkpoint_get(repo, number)
+            if cp is None:
+                return {"status": "failed", "stage": "review",
+                        "error": f"unknown PR {repo}#{number}; ingest an "
+                                 "event first"}
+            if cp.get("status") not in ("interrupted", "failed",
+                                        "reviewed", "grandfathered",
+                                        "draft"):
+                return {"status": "failed", "stage": "review",
+                        "error": f"PR status {cp.get('status')!r} is not "
+                                 "explicitly re-drivable"}
+            try:
+                head = args.head.strip()
+                base = (args.base or "").strip() or None
+                from codatiel_i2 import event_pipeline as _pm
+                access, err = _pm.resolve_access(cfg, repo)
+                if access is None:
+                    return {"status": "failed", "stage": "repo_access",
+                            "error": err}
+                anchor = (cp.get("last_reviewed_head")
+                          or cp.get("baseline_head") or "")
+                use_base = base or anchor or head
+                info, cerr = access.compare(use_base, head,
+                                            file_limit=cfg.compare_file_limit)
+                if info is None:
+                    return {"status": "needs_attention",
+                            "decision": "needs_attention",
+                            "reason": cerr}
+                if info["empty"]:
+                    return {"status": "skipped", "decision": "skipped",
+                            "reason": "empty diff; no inference"}
+                totals = store.spend_totals()
+                if (totals["settled_usd"] + totals["reserved_usd"] +
+                        cfg.reserve_usd > cfg.spend_cap_usd):
+                    return {"status": "skipped",
+                            "decision": "skipped:ceiling",
+                            "reason": "spend cap reached"}
+                claim = store.claim_for_review(repo, number, base=use_base,
+                                               head=head)
+                if claim != "claimed":
+                    return {"status": "queued", "decision": "queued",
+                            "reason": f"claim returned {claim}"}
+                store.reserve(cfg.reserve_usd)
+                transport = os.environ.get(
+                    "CODATIEL_EVENTS_TRANSPORT", "fixture")
+                result = _pm.run_review_for_range(
+                    cfg=cfg, repo=repo, pr=number, base=use_base,
+                    head=head,
+                    kind=("incremental" if anchor else "full"),
+                    repo_path=access.path,
+                    runs_root=cfg.state_dir / "runs",
+                    work_root=cfg.state_dir / "work")
+                cost = result.get("cost_usd")
+                unknown = bool(result.get("cost_unknown")) or cost is None
+                store.settle(cfg.reserve_usd,
+                             None if unknown else float(cost or 0.0))
+                store.complete_review(
+                    repo, number, base=use_base, head=head,
+                    diff_sha=info["diff_sha"], files=info["files"],
+                    terra_findings=int(result.get("terra_findings") or 0),
+                    luna_added=int(result.get("added") or 0),
+                    cost_usd=cost, cost_unknown=unknown,
+                    run_dir=result.get("run_dir") or "",
+                    result=result["status"])
+                store.review_record(
+                    repo=repo, pr=number,
+                    kind=("incremental" if anchor else "full"),
+                    base_sha=use_base, head_sha=head,
+                    diff_sha=info["diff_sha"], files=info["files"],
+                    pipeline=cfg.pipeline, status=result["status"],
+                    terra_findings=int(result.get("terra_findings") or 0),
+                    luna_added=int(result.get("added") or 0),
+                    cost_usd=cost, cost_unknown=unknown,
+                    run_dir=result.get("run_dir") or "")
+                return {"status": (result["status"]
+                                   if result["status"] in
+                                   ("complete", "incomplete",
+                                    "inconclusive") else "failed"),
+                        "decision": "completed", "mode": result.get("mode"),
+                        "terra_findings": result.get("terra_findings"),
+                        "luna_added": result.get("added"),
+                        "run_dir": result.get("run_dir")}
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "review",
+                        "error": str(exc)}
+        if op == "ingest":
+            if not args.payload:
+                return {"status": "failed", "stage": "ingest",
+                        "error": "ingest needs --payload file"}
+            if not args.delivery_id:
+                return {"status": "failed", "stage": "ingest",
+                        "error": "ingest needs --delivery-id "
+                                 "(X-GitHub-Delivery)"}
+            try:
+                raw_bytes = Path(args.payload).read_bytes()
+                raw = json.loads(raw_bytes.decode("utf-8"))
+            except Exception as exc:
+                return {"status": "failed", "stage": "ingest",
+                        "error": f"cannot read payload: {exc}"}
+            ok, why = pipe_mod.verify_signature(raw_bytes, args.signature)
+            if not ok:
+                return {"status": "failed", "stage": "signature",
+                        "error": why}
+            ev, err = pipe_mod.normalize_event(raw, args.delivery_id)
+            if ev is None:
+                return {"status": "failed", "stage": "normalize",
+                        "error": err}
+            if ev["repo"] not in cfg.repos:
+                return {"status": "failed", "stage": "config",
+                        "error": f"repo {ev['repo']!r} not in configured "
+                                 f"repositories {cfg.repos}"}
+            # Recover stale in-flight work before claiming anything.
+            try:
+                pipe_mod.recover(cfg=cfg, store=store)
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "recover",
+                        "error": str(exc)}
+            transport_kind = os.environ.get("CODATIEL_EVENTS_TRANSPORT",
+                                            "fixture")
+            transport = None
+            if transport_kind == "fixture":
+                def transport(to_addrs: list[str], subject: str,
+                              body: str) -> dict:
+                    return {"accepted_by_transport": True, "parsed": True,
+                            "fixture": True, "succeeded": len(to_addrs),
+                            "failed": 0, "email_id": "fixture-no-send"}
+            elif transport_kind == "smtp2go":
+                # transport=None selects the service default: real SMTP2GO
+                # delivery to the configured TEST/DEV destination only.
+                transport = None
+            else:
+                return {"status": "failed", "stage": "ingest",
+                        "error": f"unknown CODATIEL_EVENTS_TRANSPORT "
+                                 f"{transport_kind!r}: fixture|smtp2go"}
+            try:
+                row = pipe_mod.process_event(
+                    cfg=cfg, store=store, ev=ev, transport=transport)
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "process",
+                        "error": str(exc)}
+            decision = str(row.get("decision") or "")
+            if decision == "completed":
+                return {"status": "completed", **row}
+            if decision.startswith("skipped:") or decision in (
+                    "skipped", "queued"):
+                return {"status": ("queued" if decision == "queued"
+                                   else "skipped"), **row}
+            if decision.startswith("needs_attention:") or decision == \
+                    "failed":
+                return {"status": ("needs_attention"
+                                   if decision.startswith("needs")
+                                   else "failed"), **row}
+            return {"status": "ok", **row}
+        return {"status": "failed", "stage": "events",
+                "error": f"unknown op {op!r}"}
+    finally:
+        store.close()
 
 
 if __name__ == "__main__":
