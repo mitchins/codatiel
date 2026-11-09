@@ -1,0 +1,2242 @@
+{
+ "n": 68,
+ "runs": [
+  {
+   "arm": "A",
+   "case": "D01-N03",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 31,
+   "parent_usd": 0.1329,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1329,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "D01-N03",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 31,
+   "parent_usd": 0.1234,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1234,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "D01-Y15",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 29,
+   "parent_usd": 0.1488,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1488,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "D01-Y15",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 38,
+   "parent_usd": 0.2256,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.2256,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "D01-Y22",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 16,
+   "parent_usd": 0.0568,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.0568,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "D01-Y22",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 12,
+   "parent_usd": 0.052,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.052,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "D01-Y23",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 19,
+   "parent_usd": 0.1122,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1122,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "D01-Y23",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 21,
+   "parent_usd": 0.1147,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1147,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "D01-Y24",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 19,
+   "parent_usd": 0.1381,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1381,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "D01-Y24",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 21,
+   "parent_usd": 0.1333,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1333,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "D01-Y29",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 10,
+   "parent_usd": 0.0613,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.0613,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "D01-Y29",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 7,
+   "parent_usd": 0.0595,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.0595,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "FW3",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 30,
+   "parent_usd": 0.1186,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1186,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "FW3",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 19,
+   "parent_usd": 0.0886,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.0886,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "KL1",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 33,
+   "parent_usd": 0.1798,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1798,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "KL1",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 31,
+   "parent_usd": 0.1609,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1609,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "L06",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 33,
+   "parent_usd": 0.1071,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1071,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "L06",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 39,
+   "parent_usd": 0.1567,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1567,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "L08",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 33,
+   "parent_usd": 0.1697,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1697,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "L08",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 33,
+   "parent_usd": 0.1382,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1382,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "L10",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 39,
+   "parent_usd": 0.1841,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1841,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "L10",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 26,
+   "parent_usd": 0.156,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.156,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "P15",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 31,
+   "parent_usd": 0.1705,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1705,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "P15",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 32,
+   "parent_usd": 0.1737,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1737,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "PR25",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 16,
+   "parent_usd": 0.1659,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1659,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "PR25",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 20,
+   "parent_usd": 0.1792,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.1792,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "PR27",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 16,
+   "parent_usd": 0.132,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.132,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "PR27",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 18,
+   "parent_usd": 0.0885,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.0885,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "WT4",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 7,
+   "parent_usd": 0.0161,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.0161,
+   "delegation": {}
+  },
+  {
+   "arm": "A",
+   "case": "WT4",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 4,
+   "parent_usd": 0.0068,
+   "sub_usd": 0.0,
+   "sub_detail": {},
+   "usd_total": 0.0068,
+   "delegation": {}
+  },
+  {
+   "arm": "B",
+   "case": "D01-N03",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 25,
+   "parent_usd": 0.0999,
+   "sub_usd": 0.0142,
+   "sub_detail": {
+    "luna": 0.0142
+   },
+   "usd_total": 0.1141,
+   "delegation": {
+    "luna": {
+     "followups_used": 2,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.014159175000000001,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 56,
+       "resumption_ok": null,
+       "wall_seconds": 52.07,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 56,
+       "items_after": 73,
+       "resumption_ok": true,
+       "wall_seconds": 24.51,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 73,
+       "items_after": 92,
+       "resumption_ok": true,
+       "wall_seconds": 38.14,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "D01-N03",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 17,
+   "parent_usd": 0.0842,
+   "sub_usd": 0.0141,
+   "sub_detail": {
+    "luna": 0.0141
+   },
+   "usd_total": 0.0983,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.014067335000000004,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 60,
+       "resumption_ok": null,
+       "wall_seconds": 58.35,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 60,
+       "items_after": 78,
+       "resumption_ok": true,
+       "wall_seconds": 37.39,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "D01-Y15",
+   "rep": 1,
+   "status": "complete",
+   "stage": "budget_exhausted_final",
+   "parent_tool_calls": null,
+   "parent_usd": 0.2034,
+   "sub_usd": 0.0257,
+   "sub_detail": {
+    "luna": 0.0257
+   },
+   "usd_total": 0.2291,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.02573363,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 54,
+       "resumption_ok": null,
+       "wall_seconds": 51.57,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 54,
+       "items_after": 73,
+       "resumption_ok": true,
+       "wall_seconds": 52.91,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "D01-Y15",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 28,
+   "parent_usd": 0.1314,
+   "sub_usd": 0.027,
+   "sub_detail": {
+    "luna": 0.027
+   },
+   "usd_total": 0.1584,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.027046985,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 55,
+       "resumption_ok": null,
+       "wall_seconds": 54.63,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 55,
+       "items_after": 71,
+       "resumption_ok": true,
+       "wall_seconds": 21.71,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "D01-Y22",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 8,
+   "parent_usd": 0.2529,
+   "sub_usd": 0.0132,
+   "sub_detail": {
+    "luna": 0.0132
+   },
+   "usd_total": 0.2661,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 15,
+     "spend_usd": 0.013171364999999997,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 37,
+       "resumption_ok": null,
+       "wall_seconds": 47.13,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 37,
+       "items_after": 52,
+       "resumption_ok": true,
+       "wall_seconds": 33.97,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "D01-Y22",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 13,
+   "parent_usd": 0.0602,
+   "sub_usd": 0.0174,
+   "sub_detail": {
+    "luna": 0.0174
+   },
+   "usd_total": 0.0776,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 16,
+     "spend_usd": 0.017395564999999998,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 43,
+       "resumption_ok": null,
+       "wall_seconds": 46.49,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 43,
+       "items_after": 50,
+       "resumption_ok": true,
+       "wall_seconds": 17.9,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "D01-Y23",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 12,
+   "parent_usd": 0.0882,
+   "sub_usd": 0.015,
+   "sub_detail": {
+    "luna": 0.015
+   },
+   "usd_total": 0.1032,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 15,
+     "spend_usd": 0.015016785000000001,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 31,
+       "resumption_ok": null,
+       "wall_seconds": 28.02,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 31,
+       "items_after": 46,
+       "resumption_ok": true,
+       "wall_seconds": 29.88,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "D01-Y23",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 14,
+   "parent_usd": 0.0996,
+   "sub_usd": 0.0199,
+   "sub_detail": {
+    "luna": 0.0199
+   },
+   "usd_total": 0.1195,
+   "delegation": {
+    "luna": {
+     "followups_used": 2,
+     "sub_tool_calls": 17,
+     "spend_usd": 0.019890929999999998,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 44,
+       "resumption_ok": null,
+       "wall_seconds": 42.8,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 44,
+       "items_after": 61,
+       "resumption_ok": true,
+       "wall_seconds": 29.53,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 61,
+       "items_after": 64,
+       "resumption_ok": true,
+       "wall_seconds": 3.9,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "D01-Y24",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 15,
+   "parent_usd": 0.1076,
+   "sub_usd": 0.0159,
+   "sub_detail": {
+    "luna": 0.0159
+   },
+   "usd_total": 0.1235,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 15,
+     "spend_usd": 0.015927655,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 26,
+       "resumption_ok": null,
+       "wall_seconds": 34.99,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 26,
+       "items_after": 53,
+       "resumption_ok": true,
+       "wall_seconds": 52.49,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "D01-Y24",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 11,
+   "parent_usd": 0.0778,
+   "sub_usd": 0.0165,
+   "sub_detail": {
+    "luna": 0.0165
+   },
+   "usd_total": 0.0943,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.016543525000000003,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 54,
+       "resumption_ok": null,
+       "wall_seconds": 62.96,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 54,
+       "items_after": 71,
+       "resumption_ok": true,
+       "wall_seconds": 32.2,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "D01-Y29",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 12,
+   "parent_usd": 0.0652,
+   "sub_usd": 0.0117,
+   "sub_detail": {
+    "luna": 0.0117
+   },
+   "usd_total": 0.0769,
+   "delegation": {
+    "luna": {
+     "followups_used": 2,
+     "sub_tool_calls": 19,
+     "spend_usd": 0.011667199999999997,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 44,
+       "resumption_ok": null,
+       "wall_seconds": 22.65,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 44,
+       "items_after": 62,
+       "resumption_ok": true,
+       "wall_seconds": 26.25,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 62,
+       "items_after": 65,
+       "resumption_ok": true,
+       "wall_seconds": 5.63,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "D01-Y29",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 10,
+   "parent_usd": 0.0518,
+   "sub_usd": 0.0144,
+   "sub_detail": {
+    "luna": 0.0144
+   },
+   "usd_total": 0.0662,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 18,
+     "spend_usd": 0.014441905,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 41,
+       "resumption_ok": null,
+       "wall_seconds": 22.0,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 41,
+       "items_after": 61,
+       "resumption_ok": true,
+       "wall_seconds": 31.54,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "FW3",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 26,
+   "parent_usd": 0.1015,
+   "sub_usd": 0.0101,
+   "sub_detail": {
+    "luna": 0.0101
+   },
+   "usd_total": 0.1116,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.010088839999999998,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:ModelBehaviorError",
+       "items_before": 0,
+       "items_after": 49,
+       "resumption_ok": null,
+       "wall_seconds": 57.71,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "error:ModelBehaviorError",
+       "items_before": 49,
+       "items_after": 61,
+       "resumption_ok": true,
+       "wall_seconds": 38.63,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "FW3",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 26,
+   "parent_usd": 0.1106,
+   "sub_usd": 0.0139,
+   "sub_detail": {
+    "luna": 0.0139
+   },
+   "usd_total": 0.1245,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.013852260000000002,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 56,
+       "resumption_ok": null,
+       "wall_seconds": 53.81,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 56,
+       "items_after": 76,
+       "resumption_ok": true,
+       "wall_seconds": 44.23,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "KL1",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 24,
+   "parent_usd": 0.1273,
+   "sub_usd": 0.0187,
+   "sub_detail": {
+    "luna": 0.0187
+   },
+   "usd_total": 0.146,
+   "delegation": {
+    "luna": {
+     "followups_used": 2,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.018726235,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 56,
+       "resumption_ok": null,
+       "wall_seconds": 35.32,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 56,
+       "items_after": 78,
+       "resumption_ok": true,
+       "wall_seconds": 54.0,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 78,
+       "items_after": 97,
+       "resumption_ok": true,
+       "wall_seconds": 43.28,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "KL1",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 26,
+   "parent_usd": 0.1521,
+   "sub_usd": 0.0183,
+   "sub_detail": {
+    "luna": 0.0183
+   },
+   "usd_total": 0.1704,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.01827201,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 53,
+       "resumption_ok": null,
+       "wall_seconds": 34.52,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 53,
+       "items_after": 73,
+       "resumption_ok": true,
+       "wall_seconds": 50.88,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "L06",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 27,
+   "parent_usd": 0.0918,
+   "sub_usd": 0.0174,
+   "sub_detail": {
+    "luna": 0.0174
+   },
+   "usd_total": 0.1092,
+   "delegation": {
+    "luna": {
+     "followups_used": 2,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.017434345,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 56,
+       "resumption_ok": null,
+       "wall_seconds": 39.6,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 56,
+       "items_after": 65,
+       "resumption_ok": true,
+       "wall_seconds": 30.48,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 65,
+       "items_after": 80,
+       "resumption_ok": true,
+       "wall_seconds": 25.81,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "L06",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 27,
+   "parent_usd": 0.1262,
+   "sub_usd": 0.013,
+   "sub_detail": {
+    "luna": 0.013
+   },
+   "usd_total": 0.1392,
+   "delegation": {
+    "luna": {
+     "followups_used": 2,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.012962375000000002,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 52,
+       "resumption_ok": null,
+       "wall_seconds": 49.5,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "error:ModelBehaviorError",
+       "items_before": 52,
+       "items_after": 66,
+       "resumption_ok": true,
+       "wall_seconds": 33.86,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 66,
+       "items_after": 72,
+       "resumption_ok": true,
+       "wall_seconds": 20.43,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "L08",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 30,
+   "parent_usd": 0.2104,
+   "sub_usd": 0.0189,
+   "sub_detail": {
+    "luna": 0.0189
+   },
+   "usd_total": 0.2293,
+   "delegation": {
+    "luna": {
+     "followups_used": 2,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.01892057,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 52,
+       "resumption_ok": null,
+       "wall_seconds": 42.52,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 52,
+       "items_after": 64,
+       "resumption_ok": true,
+       "wall_seconds": 10.01,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 64,
+       "items_after": 87,
+       "resumption_ok": true,
+       "wall_seconds": 24.86,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "L08",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 25,
+   "parent_usd": 0.1457,
+   "sub_usd": 0.0148,
+   "sub_detail": {
+    "luna": 0.0148
+   },
+   "usd_total": 0.1605,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.014794924999999999,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 53,
+       "resumption_ok": null,
+       "wall_seconds": 38.87,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 53,
+       "items_after": 70,
+       "resumption_ok": true,
+       "wall_seconds": 17.58,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "L10",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 31,
+   "parent_usd": 0.1987,
+   "sub_usd": 0.0152,
+   "sub_detail": {
+    "luna": 0.0152
+   },
+   "usd_total": 0.2139,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.015245014999999999,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 64,
+       "resumption_ok": null,
+       "wall_seconds": 56.38,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 64,
+       "items_after": 81,
+       "resumption_ok": true,
+       "wall_seconds": 33.6,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "L10",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 26,
+   "parent_usd": 0.1193,
+   "sub_usd": 0.0151,
+   "sub_detail": {
+    "luna": 0.0151
+   },
+   "usd_total": 0.1344,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.015146470000000002,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 53,
+       "resumption_ok": null,
+       "wall_seconds": 51.13,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 53,
+       "items_after": 71,
+       "resumption_ok": true,
+       "wall_seconds": 42.49,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "P15",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 26,
+   "parent_usd": 0.1415,
+   "sub_usd": 0.0225,
+   "sub_detail": {
+    "luna": 0.0225
+   },
+   "usd_total": 0.164,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.022489045,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 60,
+       "resumption_ok": null,
+       "wall_seconds": 55.01,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 60,
+       "items_after": 77,
+       "resumption_ok": true,
+       "wall_seconds": 25.27,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "P15",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 28,
+   "parent_usd": 0.1283,
+   "sub_usd": 0.0255,
+   "sub_detail": {
+    "luna": 0.0255
+   },
+   "usd_total": 0.1538,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.025517524999999992,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 62,
+       "resumption_ok": null,
+       "wall_seconds": 97.73,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 62,
+       "items_after": 82,
+       "resumption_ok": true,
+       "wall_seconds": 42.1,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "PR25",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 14,
+   "parent_usd": 0.1648,
+   "sub_usd": 0.0307,
+   "sub_detail": {
+    "luna": 0.0307
+   },
+   "usd_total": 0.1955,
+   "delegation": {
+    "luna": {
+     "followups_used": 2,
+     "sub_tool_calls": 15,
+     "spend_usd": 0.030686554999999997,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 41,
+       "resumption_ok": null,
+       "wall_seconds": 55.45,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 41,
+       "items_after": 53,
+       "resumption_ok": true,
+       "wall_seconds": 21.76,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 53,
+       "items_after": 59,
+       "resumption_ok": true,
+       "wall_seconds": 7.11,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "PR25",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 10,
+   "parent_usd": 0.1543,
+   "sub_usd": 0.0288,
+   "sub_detail": {
+    "luna": 0.0288
+   },
+   "usd_total": 0.1831,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.028837005,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 54,
+       "resumption_ok": null,
+       "wall_seconds": 50.95,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 54,
+       "items_after": 65,
+       "resumption_ok": true,
+       "wall_seconds": 19.33,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "PR27",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 15,
+   "parent_usd": 0.0921,
+   "sub_usd": 0.016,
+   "sub_detail": {
+    "luna": 0.016
+   },
+   "usd_total": 0.1081,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 15,
+     "spend_usd": 0.015975865,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 38,
+       "resumption_ok": null,
+       "wall_seconds": 35.63,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 38,
+       "items_after": 60,
+       "resumption_ok": true,
+       "wall_seconds": 50.07,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "PR27",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 17,
+   "parent_usd": 0.1018,
+   "sub_usd": 0.0173,
+   "sub_detail": {
+    "luna": 0.0173
+   },
+   "usd_total": 0.1191,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.017301099999999996,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 51,
+       "resumption_ok": null,
+       "wall_seconds": 39.08,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 51,
+       "items_after": 74,
+       "resumption_ok": true,
+       "wall_seconds": 47.12,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "WT4",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 4,
+   "parent_usd": 0.0082,
+   "sub_usd": 0.0022,
+   "sub_detail": {
+    "luna": 0.0022
+   },
+   "usd_total": 0.0104,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 11,
+     "spend_usd": 0.002230265,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 17,
+       "resumption_ok": null,
+       "wall_seconds": 9.52,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 17,
+       "items_after": 32,
+       "resumption_ok": true,
+       "wall_seconds": 17.18,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "B",
+   "case": "WT4",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 4,
+   "parent_usd": 0.0084,
+   "sub_usd": 0.0021,
+   "sub_detail": {
+    "luna": 0.0021
+   },
+   "usd_total": 0.0105,
+   "delegation": {
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 9,
+     "spend_usd": 0.002126205,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 13,
+       "resumption_ok": null,
+       "wall_seconds": 7.93,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 13,
+       "items_after": 29,
+       "resumption_ok": true,
+       "wall_seconds": 17.77,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "case": "D01-Y15",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 39,
+   "parent_usd": 0.1848,
+   "sub_usd": 0.2254,
+   "sub_detail": {
+    "haiku": 0.1961,
+    "luna": 0.0293
+   },
+   "usd_total": 0.4102,
+   "delegation": {
+    "haiku": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.19608535500000002,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 43,
+       "resumption_ok": null,
+       "wall_seconds": 144.44,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 43,
+       "items_after": 45,
+       "resumption_ok": true,
+       "wall_seconds": 35.4,
+       "tool_calls": null
+      }
+     ]
+    },
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.02928987,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 56,
+       "resumption_ok": null,
+       "wall_seconds": 63.02,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 56,
+       "items_after": 79,
+       "resumption_ok": true,
+       "wall_seconds": 56.57,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "case": "D01-Y15",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 39,
+   "parent_usd": 1.7141,
+   "sub_usd": 0.2197,
+   "sub_detail": {
+    "haiku": 0.1963,
+    "luna": 0.0234
+   },
+   "usd_total": 1.9338,
+   "delegation": {
+    "haiku": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.196256235,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 45,
+       "resumption_ok": null,
+       "wall_seconds": 190.25,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 45,
+       "items_after": 47,
+       "resumption_ok": true,
+       "wall_seconds": 24.33,
+       "tool_calls": null
+      }
+     ]
+    },
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.023438149999999998,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 58,
+       "resumption_ok": null,
+       "wall_seconds": 46.27,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 58,
+       "items_after": 78,
+       "resumption_ok": true,
+       "wall_seconds": 35.24,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "case": "D01-Y22",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 15,
+   "parent_usd": 0.2809,
+   "sub_usd": 0.0362,
+   "sub_detail": {
+    "haiku": 0.023,
+    "luna": 0.0132
+   },
+   "usd_total": 0.3171,
+   "delegation": {
+    "haiku": {
+     "followups_used": 1,
+     "sub_tool_calls": 16,
+     "spend_usd": 0.023046795,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 39,
+       "resumption_ok": null,
+       "wall_seconds": 44.34,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 39,
+       "items_after": 47,
+       "resumption_ok": true,
+       "wall_seconds": 23.66,
+       "tool_calls": null
+      }
+     ]
+    },
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 15,
+     "spend_usd": 0.013181545,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 35,
+       "resumption_ok": null,
+       "wall_seconds": 32.4,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 35,
+       "items_after": 51,
+       "resumption_ok": true,
+       "wall_seconds": 21.42,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "case": "D01-Y22",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 18,
+   "parent_usd": 0.0668,
+   "sub_usd": 0.2551,
+   "sub_detail": {
+    "haiku": 0.2424,
+    "luna": 0.0127
+   },
+   "usd_total": 0.3219,
+   "delegation": {
+    "haiku": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.242376575,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 51,
+       "resumption_ok": null,
+       "wall_seconds": 72.31,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 51,
+       "items_after": 57,
+       "resumption_ok": true,
+       "wall_seconds": 44.95,
+       "tool_calls": null
+      }
+     ]
+    },
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 14,
+     "spend_usd": 0.012743875,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 25,
+       "resumption_ok": null,
+       "wall_seconds": 22.16,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 25,
+       "items_after": 47,
+       "resumption_ok": true,
+       "wall_seconds": 47.56,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "case": "FW3",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 29,
+   "parent_usd": 0.1013,
+   "sub_usd": 0.0542,
+   "sub_detail": {
+    "haiku": 0.0318,
+    "luna": 0.0223
+   },
+   "usd_total": 0.1555,
+   "delegation": {
+    "haiku": {
+     "followups_used": 1,
+     "sub_tool_calls": 17,
+     "spend_usd": 0.03184621,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 35,
+       "resumption_ok": null,
+       "wall_seconds": 118.72,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 35,
+       "items_after": 43,
+       "resumption_ok": true,
+       "wall_seconds": 16.66,
+       "tool_calls": null
+      }
+     ]
+    },
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.02231882,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 64,
+       "resumption_ok": null,
+       "wall_seconds": 66.81,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 64,
+       "items_after": 89,
+       "resumption_ok": true,
+       "wall_seconds": 62.37,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "case": "FW3",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 27,
+   "parent_usd": 0.1254,
+   "sub_usd": 0.0463,
+   "sub_detail": {
+    "haiku": 0.0294,
+    "luna": 0.0169
+   },
+   "usd_total": 0.1717,
+   "delegation": {
+    "haiku": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.029400475000000002,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 43,
+       "resumption_ok": null,
+       "wall_seconds": 138.1,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 43,
+       "items_after": 54,
+       "resumption_ok": true,
+       "wall_seconds": 22.72,
+       "tool_calls": null
+      }
+     ]
+    },
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.016920835000000002,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 51,
+       "resumption_ok": null,
+       "wall_seconds": 53.05,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 51,
+       "items_after": 70,
+       "resumption_ok": true,
+       "wall_seconds": 36.78,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "case": "KL1",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 13,
+   "parent_usd": 0.0824,
+   "sub_usd": 0.0875,
+   "sub_detail": {
+    "haiku": 0.0568,
+    "luna": 0.0307
+   },
+   "usd_total": 0.1699,
+   "delegation": {
+    "haiku": {
+     "followups_used": 1,
+     "sub_tool_calls": 17,
+     "spend_usd": 0.05678657,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "error:MaxTurnsExceeded",
+       "items_before": 0,
+       "items_after": 43,
+       "resumption_ok": null,
+       "wall_seconds": 40.21,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 43,
+       "items_after": 52,
+       "resumption_ok": true,
+       "wall_seconds": 16.79,
+       "tool_calls": null
+      }
+     ]
+    },
+    "luna": {
+     "followups_used": 2,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.030721985,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 67,
+       "resumption_ok": null,
+       "wall_seconds": 64.7,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 67,
+       "items_after": 80,
+       "resumption_ok": true,
+       "wall_seconds": 51.27,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 80,
+       "items_after": 95,
+       "resumption_ok": true,
+       "wall_seconds": 63.29,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "arm": "C",
+   "case": "KL1",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "parent_tool_calls": 17,
+   "parent_usd": 0.1101,
+   "sub_usd": 0.0441,
+   "sub_detail": {
+    "haiku": 0.0157,
+    "luna": 0.0284
+   },
+   "usd_total": 0.1542,
+   "delegation": {
+    "haiku": {
+     "followups_used": 1,
+     "sub_tool_calls": 15,
+     "spend_usd": 0.015684435,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 27,
+       "resumption_ok": null,
+       "wall_seconds": 31.85,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 27,
+       "items_after": 46,
+       "resumption_ok": true,
+       "wall_seconds": 19.64,
+       "tool_calls": null
+      }
+     ]
+    },
+    "luna": {
+     "followups_used": 1,
+     "sub_tool_calls": 20,
+     "spend_usd": 0.02841663,
+     "calls": [
+      {
+       "kind": "sweep",
+       "status": "ok",
+       "items_before": 0,
+       "items_after": 65,
+       "resumption_ok": null,
+       "wall_seconds": 70.2,
+       "tool_calls": null
+      },
+      {
+       "kind": "followup",
+       "status": "ok",
+       "items_before": 65,
+       "items_after": 88,
+       "resumption_ok": true,
+       "wall_seconds": 46.86,
+       "tool_calls": null
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

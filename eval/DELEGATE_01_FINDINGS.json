@@ -1,0 +1,1289 @@
+{
+ "n": 56,
+ "findings": [
+  {
+   "rc": "RC-FW3-MIGRATION",
+   "severity": "P1",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "FW3",
+      "rep": 1
+     },
+     {
+      "case": "FW3",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "FW3",
+      "rep": 1
+     },
+     {
+      "case": "FW3",
+      "rep": 2
+     }
+    ],
+    "C": [
+     {
+      "case": "FW3",
+      "rep": 1
+     },
+     {
+      "case": "FW3",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 6,
+   "note": "Frozen RC inherited: named volume without /data migration; 6 instances A/B/C."
+  },
+  {
+   "rc": "RC-L08-EPCORE",
+   "severity": "P1",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L08",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "Frozen RC inherited: no matching epcore vhost; validated P1 in COMPLEMENT-02."
+  },
+  {
+   "rc": "RC-L08-LMS",
+   "severity": "P1",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L08",
+      "rep": 1
+     },
+     {
+      "case": "L08",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "L08",
+      "rep": 1
+     },
+     {
+      "case": "L08",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "Frozen RC inherited: :443 backend vs :9443 vhost; LMS unreachable; 4 instances."
+  },
+  {
+   "rc": "RC-FW3-REBOOTS",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "FW3",
+      "rep": 1
+     }
+    ],
+    "B": [
+     {
+      "case": "FW3",
+      "rep": 1
+     },
+     {
+      "case": "FW3",
+      "rep": 2
+     }
+    ],
+    "C": [
+     {
+      "case": "FW3",
+      "rep": 1
+     },
+     {
+      "case": "FW3",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 5,
+   "note": "Frozen RC inherited: NULL/UNREACHABLE/crash-window rows counted as sent; 5 instances. Trace diff confirms unconditional += 1."
+  },
+  {
+   "rc": "RC-KL1-UUID",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "KL1",
+      "rep": 1
+     },
+     {
+      "case": "KL1",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "KL1",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 3,
+   "note": "Same RC-KL1-UUID (lifecycle-registry file variant; 2 instances)."
+  },
+  {
+   "rc": "RC-L06-GUARD",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L06",
+      "rep": 1
+     },
+     {
+      "case": "L06",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "L06",
+      "rep": 1
+     },
+     {
+      "case": "L06",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "Frozen RC inherited: guard cleared before async StoreKit completes; overlapping discoveries race; 4 instances."
+  },
+  {
+   "rc": "RC-L06-STALE",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L06",
+      "rep": 1
+     }
+    ],
+    "B": [
+     {
+      "case": "L06",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "Frozen RC inherited: failed/empty refresh leaves stale purchasable options; 2 instances."
+  },
+  {
+   "rc": "RC-L06-TRIM",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L06",
+      "rep": 1
+     },
+     {
+      "case": "L06",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "L06",
+      "rep": 1
+     },
+     {
+      "case": "L06",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "Frozen RC inherited: trimmed request IDs vs raw-ID join lookup; 4 instances."
+  },
+  {
+   "rc": "RC-L08-COOKIEMASK",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L08",
+      "rep": 1
+     },
+     {
+      "case": "L08",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "L08",
+      "rep": 1
+     },
+     {
+      "case": "L08",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "Frozen RC inherited (was Terra-exclusive): self-settable substring bypasses admin/login limiter; 4 instances."
+  },
+  {
+   "rc": "RC-L10-CODABLE",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "B": [
+     {
+      "case": "L10",
+      "rep": 1
+     },
+     {
+      "case": "L10",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "NEW: non-optional evidenceTier breaks decode of previously valid persisted results; no migration path."
+  },
+  {
+   "rc": "RC-L10-COVERAGE",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L10",
+      "rep": 1
+     },
+     {
+      "case": "L10",
+      "rep": 1
+     },
+     {
+      "case": "L10",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "L10",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "NEW: ingestion prints OK while pending/skipped obligations invisible; 4-instance corroborated family (dev requiredVariants hard-codes 5 cases; excluded targets never reconciled)."
+  },
+  {
+   "rc": "RC-L10-MATCHER",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L10",
+      "rep": 1
+     },
+     {
+      "case": "L10",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "L10",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 3,
+   "note": "Frozen RC inherited: lax .integration arm accepts pure results; 3 instances."
+  },
+  {
+   "rc": "RC-P15-CLIIDENT",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "P15",
+      "rep": 1
+     },
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "P15",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 3,
+   "note": "Frozen RC inherited: new 3-tuple gate vs pre-existing CLI raw record; 2 instances."
+  },
+  {
+   "rc": "RC-P15-ENVASR",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "P15",
+      "rep": 1
+     },
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "P15",
+      "rep": 1
+     },
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "Frozen RC inherited: env ASR marked Ready unprobed; default Compose always sets URL; 4 instances."
+  },
+  {
+   "rc": "RC-P15-IDENTITY",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "P15",
+      "rep": 1
+     }
+    ],
+    "B": [
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "NEW: same test-then-save prune mechanism as RC-Y15-IDENTITY, bitten in the P15 branch too: UI fills post-test, server prunes as mismatch; 1 instance."
+  },
+  {
+   "rc": "RC-P15-SAVETEST",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "P15",
+      "rep": 1
+     },
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 3,
+   "note": "Frozen RC inherited: save-test persists before probing while UI says Not saved; 2 instances."
+  },
+  {
+   "rc": "RC-P15-SESSION",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "P15",
+      "rep": 1
+     },
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "P15",
+      "rep": 1
+     },
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "Frozen RC inherited: sessions survive password change; 4 instances."
+  },
+  {
+   "rc": "RC-Y15-CLIIDENT",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ],
+    "C": [
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 3,
+   "note": "Same mechanism as frozen P15-CLIIDENT: CLI record lacks model/key-env; 2 instances."
+  },
+  {
+   "rc": "RC-Y15-DENO",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "C": [
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "Same hygiene issue as frozen P15-DENO (kept P2: undigested executable fetch runs at build; 1 instance)."
+  },
+  {
+   "rc": "RC-Y15-IDENTITY",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ],
+    "C": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "NEW: verified provider_status prunes on 3-tuple mismatch while UI fills model post-test and says 'Test recorded'; advertised test-then-save flow broken until retest. 4 instances."
+  },
+  {
+   "rc": "RC-Y15-LOGIN",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "C": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "Same calibration as frozen P15-LOGIN (kept P2): verified no throttling/lockout on operator login; 2 instances, both ARM-Z."
+  },
+  {
+   "rc": "RC-Y15-SAVETEST",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ],
+    "C": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "Same mechanism as frozen P15-SAVETEST: save-test writes before probing; 1 instance."
+  },
+  {
+   "rc": "RC-Y15-SESSION",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ],
+    "C": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 5,
+   "note": "Same mechanism as frozen P15-SESSION but PR-introduced here (base has no session persistence, verified): rotation does not revoke. 3 instances."
+  },
+  {
+   "rc": "RC-Y22-404",
+   "severity": "P2",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "C": [
+     {
+      "case": "D01-Y22",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "NEW: verified unmatched section_id serves secs[0] with 200 against documented 404; wrong-section frames to API clients."
+  },
+  {
+   "rc": "RC-FW3-BIND",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "C": [
+     {
+      "case": "FW3",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "Same RC-FW3-BIND (variant wording)."
+  },
+  {
+   "rc": "RC-FW3-LATCHED-COUNT",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "C": [
+     {
+      "case": "FW3",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "Frozen RC inherited: resolved disappear from retained count."
+  },
+  {
+   "rc": "RC-FW3-MEDIAN",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "C": [
+     {
+      "case": "FW3",
+      "rep": 1
+     },
+     {
+      "case": "FW3",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "NEW: verified in trace diff (durations[len//2]); even-n median overstates. 2 instances."
+  },
+  {
+   "rc": "RC-FW3-RESTART",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "FW3",
+      "rep": 1
+     },
+     {
+      "case": "FW3",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "FW3",
+      "rep": 1
+     },
+     {
+      "case": "FW3",
+      "rep": 2
+     },
+     {
+      "case": "FW3",
+      "rep": 2
+     }
+    ],
+    "C": [
+     {
+      "case": "FW3",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 6,
+   "note": "Same RC-FW3-RESTART (first-sample clears flag wording)."
+  },
+  {
+   "rc": "RC-KL1-CRC",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "KL1",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "NEW: doc claims per-entry/per-member CRC scope; code CRCs qualification/payload.bin only. Docs precision."
+  },
+  {
+   "rc": "RC-KL1-SCORM",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "B": [
+     {
+      "case": "KL1",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "NEW: fixture ignores getter errors; failed reads look like valid empty state. Test gap."
+  },
+  {
+   "rc": "RC-L06-CALLBACK",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L06",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "L06",
+      "rep": 1
+     },
+     {
+      "case": "L06",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 3,
+   "note": "NEW: scene callbacks drop URL-opening metadata (empty options to Facebook handler); exact SDK impact unverified by claimants; 3 instances."
+  },
+  {
+   "rc": "RC-L06-DUPKEY",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L06",
+      "rep": 1
+     },
+     {
+      "case": "L06",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "Frozen RC inherited: lenient decode + first-match resolution; needs backend misconfig; 2 instances."
+  },
+  {
+   "rc": "RC-L08-ACL",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L08",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "NEW: absolute-path ACL files with no provisioning step in bundle; deploy-time failure if absent (presence unestablished). Nonprod."
+  },
+  {
+   "rc": "RC-L08-PROTO",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L08",
+      "rep": 1
+     }
+    ],
+    "B": [
+     {
+      "case": "L08",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "Frozen RC inherited: no WP HTTPS fixup behind TLS-terminating proxy; nonprod."
+  },
+  {
+   "rc": "RC-L08-SHIELD",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L08",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "NEW: runbook requires observe-only until repo-managed deployment scripts exist (verified quote); bundle adds blocking without them."
+  },
+  {
+   "rc": "RC-L08-VARNISH",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L08",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "NEW: public path proxies to event Apache directly, bypassing candidate cache layer; anonymous traffic to 4-worker FPM pool."
+  },
+  {
+   "rc": "RC-L08-VCL",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L08",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "NEW: verified 60s first-byte timeout vs 300s FPM pool in trace evidence; conditional on candidate in path."
+  },
+  {
+   "rc": "RC-L10-CLIPATH",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "L10",
+      "rep": 1
+     },
+     {
+      "case": "L10",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "L10",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 3,
+   "note": "Frozen RC inherited: fixed /usr/bin/sqlite3 breaks no-IO contracts; 3 instances."
+  },
+  {
+   "rc": "RC-L10-XUNIT",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "B": [
+     {
+      "case": "L10",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "NEW: required evidence matched by (function, module) only; conditional false-certification, no current duplicate established."
+  },
+  {
+   "rc": "RC-P15-CAPFLAG",
+   "severity": "P3",
+   "scope": "PRE_EXISTING",
+   "arms": {
+    "A": [
+     {
+      "case": "P15",
+      "rep": 1
+     },
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "Frozen RC inherited: probe-path flag always false; identical at base; low regression value."
+  },
+  {
+   "rc": "RC-P15-CURLDOC",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "NEW: verified POST-only route; documented curl GET returns method error instead of exercising the 401 guard."
+  },
+  {
+   "rc": "RC-P15-ORDER",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "Frozen RC inherited: readiness executes after upload copy + registration; doomed uploads stored."
+  },
+  {
+   "rc": "RC-P15-RECAP",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "B": [
+     {
+      "case": "P15",
+      "rep": 1
+     },
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "Frozen RC inherited: source reprocess drops has_captions; 2 instances."
+  },
+  {
+   "rc": "RC-P15-RECQUAL",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "P15",
+      "rep": 1
+     },
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "P15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 3,
+   "note": "Frozen RC inherited: P15-head record_qualified has no tested-identity guard (verified: no tested param, overwrites with saved); mid-test edit races; 3 instances."
+  },
+  {
+   "rc": "RC-P15-SCHEME",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "P15",
+      "rep": 1
+     }
+    ],
+    "B": [
+     {
+      "case": "P15",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "Frozen RC inherited: TLS-terminating proxy guidance omits Secure-cookie fixup; 2 instances."
+  },
+  {
+   "rc": "RC-PR27-DOCSTRING",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "PR27",
+      "rep": 1
+     },
+     {
+      "case": "PR27",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "PR27",
+      "rep": 1
+     },
+     {
+      "case": "PR27",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "Frozen RC inherited (revised COMPLEMENT-02): acquisition moves upload_path is_file-only; 3 instances."
+  },
+  {
+   "rc": "RC-Y15-ASRLEAK",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "C": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "Same family as frozen P15-SETTINGS (kept P3): internal URL in unauthenticated detail; credential exposure conditional only."
+  },
+  {
+   "rc": "RC-Y15-CAPFLAG",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ],
+    "C": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "Same mechanism as frozen P15-CAPFLAG but PR-introduced here (base lacks captions code, verified): probe flag always false. 4 instances."
+  },
+  {
+   "rc": "RC-Y15-COOKIE",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "C": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "Same mechanism as frozen P15-SCHEME: TLS-proxy guidance omits Secure-cookie fixup; 2 instances."
+  },
+  {
+   "rc": "RC-Y15-DEFAULTMODEL",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "C": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "NEW: verified probe falls back to models[0] while record binds empty configured model; gate approves inadequately-tested config; runtime impact conditional."
+  },
+  {
+   "rc": "RC-Y15-DISK",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     }
+    ],
+    "B": [
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ],
+    "C": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "Same mechanism as frozen P15-ORDER (P3 calibration kept): readiness after upload copy; rejected uploads linger. 2 instances."
+  },
+  {
+   "rc": "RC-Y15-RECAP",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "D01-Y15",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y15",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "Same mechanism as frozen P15-RECAP: source reprocess drops caption flag."
+  },
+  {
+   "rc": "RC-Y22-400",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "B": [
+     {
+      "case": "D01-Y22",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y22",
+      "rep": 2
+     }
+    ],
+    "C": [
+     {
+      "case": "D01-Y22",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y22",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 4,
+   "note": "NEW: verified File(...) required; missing file yields 422 before handler, contradicting 400 doc; 4 instances."
+  },
+  {
+   "rc": "RC-Y22-SCHEMA",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "D01-Y22",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y22",
+      "rep": 2
+     }
+    ],
+    "B": [
+     {
+      "case": "D01-Y22",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y22",
+      "rep": 2
+     }
+    ],
+    "C": [
+     {
+      "case": "D01-Y22",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 5,
+   "note": "NEW: verified description-only declarations; generated clients cannot model error bodies; 4 instances."
+  },
+  {
+   "rc": "RC-Y23-RELEASE",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "A": [
+     {
+      "case": "D01-Y23",
+      "rep": 1
+     },
+     {
+      "case": "D01-Y23",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 2,
+   "note": "NEW: verified docstring guarantee false; try/finally without except preserves masking (adjacent _discard shows the known pattern); behavior novelty is the guarantee, 2 instances."
+  },
+  {
+   "rc": "RC-Y24-ANNOT",
+   "severity": "P3",
+   "scope": "PR_INTRODUCED",
+   "arms": {
+    "B": [
+     {
+      "case": "D01-Y24",
+      "rep": 2
+     }
+    ]
+   },
+   "instances": 1,
+   "note": "NEW: verified annotation (-> list) contradicts tuple return; caller unpacks correctly; docs/type precision only."
+  }
+ ]
+}
