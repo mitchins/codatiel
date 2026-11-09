@@ -67,6 +67,16 @@ def test_validate_anchor_ok_and_bad(two_commit_repo, tmp_path):
     bad_sev = dict(good, severity="P9")
     ok, _ = additive_mod.validate_anchor(bad_sev, repo, repo)
     assert not ok
+    # Excerpt-assembled evidence (non-adjacent lines) validates with note.
+    asm = dict(good, path="src/new_feature.py", line_start=1, line_end=2,
+               evidence="def new_fn\n    return 2")
+    ok, note = additive_mod.validate_anchor(asm, repo, repo)
+    assert ok and "assembled" in note, (ok, note)
+    # Mostly-fabricated evidence still rejected.
+    fab = dict(good, path="src/new_feature.py", line_start=1, line_end=2,
+               evidence="def new_fn\n    launch_missiles\n    delete_all\n    return 2")
+    ok, reason = additive_mod.validate_anchor(fab, repo, repo)
+    assert not ok, reason
 
 
 def test_is_duplicate():

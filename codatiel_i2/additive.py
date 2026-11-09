@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 import time
 from pathlib import Path
@@ -95,6 +96,28 @@ def _read_span(base_dir: Path, head_dir: Path, path: str, revision: str,
     return span, ""
 
 
+def _evidence_lines_present(evidence: str, text: str) -> tuple[bool, str]:
+    """Per-line evidence check for excerpt-assembled quotes.
+
+    Subagents legitimately quote several non-adjacent lines. Require a
+    majority of substantive evidence lines verbatim (whitespace-folded)
+    in the text; single-line evidence must match exactly.
+    """
+    lines = [l.strip() for l in str(evidence or "").splitlines()
+             if len(l.strip()) > 8]
+    if not lines:
+        return False, "empty evidence"
+    flat = _norm(text)
+    hits = sum(1 for l in lines if _norm(l) in flat)
+    if len(lines) == 1:
+        return (hits == 1, "" if hits == 1 else
+                "single-line evidence not found")
+    need = max(1, math.ceil(len(lines) * 0.6))
+    if hits >= need:
+        return True, f"{hits}/{len(lines)} evidence lines present"
+    return False, f"only {hits}/{len(lines)} evidence lines present"
+
+
 def validate_anchor(finding: dict, base_dir: Path,
                     head_dir: Path) -> tuple[bool, str]:
     """Anchor + evidence check against the pinned snapshot."""
@@ -116,7 +139,9 @@ def validate_anchor(finding: dict, base_dir: Path,
     ev = _norm(finding["evidence"])
     if not ev or _norm(span).find(ev[:120]) < 0 and ev not in _norm(span):
         # Evidence must appear verbatim (modulo whitespace) in the span;
-        # fall back to whole-file presence with a note-worthy weakness.
+        # fall back to file-level per-line matching: subagents legitimately
+        # assemble quotes from non-adjacent lines. A span miss with
+        # file-level hits is recorded with a note, not lost.
         try:
             full = (base_dir if str(finding.get("revision", "head")) == "base"
                     else head_dir).joinpath(
@@ -124,9 +149,10 @@ def validate_anchor(finding: dict, base_dir: Path,
                             encoding="utf-8", errors="replace")
         except OSError:
             return False, "evidence not in anchored span"
-        if ev not in _norm(full):
-            return False, "evidence not found at pinned revision"
-        return True, "evidence in file, outside anchored span"
+        ok, note = _evidence_lines_present(finding["evidence"], full)
+        if ok:
+            return True, f"evidence assembled excerpts ({note})"
+        return False, f"evidence not found at pinned revision ({note})"
     return True, ""
 
 
