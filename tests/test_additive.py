@@ -77,6 +77,21 @@ def test_validate_anchor_ok_and_bad(two_commit_repo, tmp_path):
                evidence="def new_fn\n    launch_missiles\n    delete_all\n    return 2")
     ok, reason = additive_mod.validate_anchor(fab, repo, repo)
     assert not ok, reason
+    # Composite quotes ("..."-joined excerpts + prose) validate per segment.
+    comp = dict(good, path="src/new_feature.py", line_start=1, line_end=2,
+                evidence='"def new_fn():" ... "return 2"; the function is tiny')
+    ok, note = additive_mod.validate_anchor(comp, repo, repo)
+    assert ok and "quoted excerpts" in note, (ok, note)
+    # Outer-quoted single excerpt validates after unescaping.
+    outer = dict(good, path="src/new_feature.py", line_start=1, line_end=2,
+                 evidence='"def new_fn():"')
+    ok, _ = additive_mod.validate_anchor(outer, repo, repo)
+    assert ok
+    # Invented quoted excerpts still rejected.
+    inv = dict(good, path="src/new_feature.py", line_start=1, line_end=2,
+               evidence='"def new_fn():" ... "launch_missiles()"')
+    ok, reason = additive_mod.validate_anchor(inv, repo, repo)
+    assert not ok, reason
 
 
 def test_is_duplicate():

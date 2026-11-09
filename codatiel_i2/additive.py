@@ -96,6 +96,17 @@ def _read_span(base_dir: Path, head_dir: Path, path: str, revision: str,
     return span, ""
 
 
+def _quoted_segments(evidence: str) -> list[str]:
+    """Double-quoted substrings: the model's verbatim excerpts.
+
+    Quotes are unescaped first (JSON blocks often carry \"...\").
+    Only segments of 9+ chars count; surrounding prose is ignored.
+    """
+    unesc = str(evidence or "").replace('\\"', '"').replace("\\'", "'")
+    return [s.strip() for s in re.findall(r'"([^"]{9,})"', unesc)
+            if s.strip()]
+
+
 def _evidence_lines_present(evidence: str, text: str) -> tuple[bool, str]:
     """Per-line evidence check for excerpt-assembled quotes.
 
@@ -139,8 +150,9 @@ def validate_anchor(finding: dict, base_dir: Path,
     ev = _norm(finding["evidence"])
     if not ev or _norm(span).find(ev[:120]) < 0 and ev not in _norm(span):
         # Evidence must appear verbatim (modulo whitespace) in the span;
-        # fall back to file-level per-line matching: subagents legitimately
-        # assemble quotes from non-adjacent lines. A span miss with
+        # fall back to segment/line matching: subagents legitimately quote
+        # several excerpts ("..."-joined or multi-line) plus prose, and
+        # JSON blocks often add escape/outer quotes. A span miss with
         # file-level hits is recorded with a note, not lost.
         try:
             full = (base_dir if str(finding.get("revision", "head")) == "base"
@@ -149,6 +161,16 @@ def validate_anchor(finding: dict, base_dir: Path,
                             encoding="utf-8", errors="replace")
         except OSError:
             return False, "evidence not in anchored span"
+        flat = _norm(full)
+        segs = _quoted_segments(finding["evidence"])
+        if segs:
+            hits = sum(1 for s in segs if _norm(s) in flat)
+            need = max(1, math.ceil(len(segs) * 0.6))
+            if hits >= need:
+                return True, (f"evidence quoted excerpts {hits}/{len(segs)}"
+                              f" in file, outside anchored span")
+            return False, (f"evidence not found at pinned revision "
+                           f"(only {hits}/{len(segs)} quoted excerpts)")
         ok, note = _evidence_lines_present(finding["evidence"], full)
         if ok:
             return True, f"evidence assembled excerpts ({note})"
