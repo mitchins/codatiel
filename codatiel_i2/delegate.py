@@ -116,7 +116,9 @@ class SubagentSession:
                  artifact_dir: Path, repo: str, base_sha: str, head_sha: str,
                  base_dir: Path, head_dir: Path, diff_repo: Path,
                  model: Any, model_settings: Any, rate: dict[str, Any],
-                 rate_status: str, spec: dict[str, Any]) -> None:
+                 rate_status: str, spec: dict[str, Any],
+                 instructions: str | None = None,
+                 fresh: bool = True) -> None:
         from codatiel_i2 import runtime_sdk
 
         agents = runtime_sdk.require_sdk()
@@ -131,11 +133,14 @@ class SubagentSession:
         self.session_id = f"d01-{tag}-{role}"
         # Fresh session per run: remove any stale DB from a previous
         # attempt with the same tag so a retry never inherits context.
-        try:
-            if self.session_path.exists():
-                self.session_path.unlink()
-        except OSError:
-            pass
+        # fresh=False preserves the DB so a later process can continue
+        # the same PR-scoped thread (additive post-seal follow-ups).
+        if fresh:
+            try:
+                if self.session_path.exists():
+                    self.session_path.unlink()
+            except OSError:
+                pass
         self.session = agents.SQLiteSession(
             self.session_id, db_path=str(self.session_path))
         self.ctx = runtime_sdk.ReviewContext(
@@ -143,7 +148,7 @@ class SubagentSession:
             base_dir=base_dir, head_dir=head_dir, diff_repo=diff_repo,
             tool_budget=int(spec["sweep_tool_budget"]))
         self.tools = runtime_sdk.build_i2_tools(self.ctx)
-        self.instructions = (SWEEP_INSTRUCTIONS if role == "luna"
+        self.instructions = (instructions if instructions is not None
                              else SWEEP_INSTRUCTIONS)
         self.agent = agents.Agent(
             name=f"codatiel-i2-sub-{role}", instructions=self.instructions,
