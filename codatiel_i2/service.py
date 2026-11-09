@@ -165,7 +165,8 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                  variant: str = "baseline",
                  playbook_name: str | None = None,
                  playbook_text: str | None = None,
-                 inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False) -> dict[str, Any]:
+                 inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False,
+                 delegation: Any | None = None) -> dict[str, Any]:
     """Run one canonical review over a local repository revision pair."""
     ws = prepare_local_workspace(Path(repo_root), base, head,
                                  Path(work_root))
@@ -181,7 +182,8 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                        playbook_name=playbook_name,
                        playbook_text=playbook_text,
                        inventory_strategy=inventory_strategy,
-                       enable_final=enable_final)
+                       enable_final=enable_final,
+                       delegation=delegation)
 
 
 def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
@@ -197,7 +199,8 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                expected_head: str | None = None,
                playbook_name: str | None = None,
                playbook_text: str | None = None,
-               inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False) -> dict[str, Any]:
+               inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False,
+               delegation: Any | None = None) -> dict[str, Any]:
     """Run one canonical review over a GitHub PR (base/head from the PR).
 
     When ``expected_base``/``expected_head`` are given (frozen roster SHAs),
@@ -235,7 +238,8 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                        playbook_name=playbook_name,
                        playbook_text=playbook_text,
                        inventory_strategy=inventory_strategy,
-                       enable_final=enable_final)
+                       enable_final=enable_final,
+                       delegation=delegation)
 
 
 def _collect_provider_termination(model: Any) -> dict[str, str]:
@@ -318,10 +322,12 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                variant: str = "baseline",
                playbook_name: str | None = None,
                playbook_text: str | None = None,
-               inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False) -> dict[str, Any]:
+               inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False,
+               delegation: Any | None = None) -> dict[str, Any]:
     import os
 
     from codatiel_i2 import providers as providers_mod
+    from codatiel_i2 import delegate as delegate_mod
     from codatiel_i2 import runtime_sdk
 
     runtime_sdk.ensure_local_tracing()
@@ -426,6 +432,28 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 "service_version": SERVICE_VERSION}
     user_input = ("Review this change between BASE and HEAD. "
                   f"Repository: {ws.repo}. {inventory}")
+    # REVIEW-DELEGATE-01: optional bounded multi-agent arm. Subagent
+    # sweeps run here (blind: the lead has not run yet), then the lead
+    # gains one delegation tool per subagent plus a prompt addendum.
+    # Budgets are unchanged for the lead; subagents carry their own.
+    delegation_state: dict[str, Any] | None = None
+    if delegation is not None:
+        try:
+            delegation_state = delegate_mod.build_delegation(
+                ws=ws, diff_repo=diff_repo, inventory=inventory,
+                spec=delegation, parent_ctx=ctx)
+        except Exception as exc:
+            return {"status": "failed", "stage": "delegation_setup",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "service_version": SERVICE_VERSION}
+        tools = list(tools) + list(delegation_state.get("tools", []))
+        base_label = str(instructions_version)
+        sub_names = "-".join(getattr(delegation, "subs", ("sub",)))
+        instructions = instructions + "\n\n" + delegation_state.get(
+            "addendum", "")
+        instructions_id = instructions_id_for(
+            f"{base_label}+delegate-{sub_names}", instructions)
+        instructions_version = instructions_id
     ceiling = max_usd_per_review
     if ceiling is None:
         try:
@@ -467,6 +495,15 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 "error": f"durable spend sink unavailable: {ledger.sink_error}",
                 "service_version": SERVICE_VERSION}
     recorded_model = runtime_sdk.UsageRecordingModel(model, ledger)
+
+    def _delegation_summary() -> dict[str, Any] | None:
+        """Subagent summary at handler time (follow-ups happen mid-run)."""
+        if delegation_state is None:
+            return None
+        try:
+            return delegate_mod.delegation_summary(delegation_state)
+        except Exception:
+            return {"error": "summary_failed"}
     # CACHE-01: stable per-review OpenAI prompt-cache partition for Luna.
     # The SDK default mints a fresh key per Runner invocation, which
     # guarantees zero cross-turn cache reuse. The key is metadata only;
@@ -544,7 +581,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                             user_input=user_input, playbook_name=playbook_name,
                             playbook_text=playbook_text,
                             inventory_strategy_name=inventory_strategy_name,
-                            pr_number=pr_number)
+                            pr_number=pr_number,
+                            delegation_summary=_delegation_summary())
                 except Exception:
                     pass
             partial_result = getattr(exc, "run_data", None)
@@ -560,7 +598,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 user_input=user_input, playbook_name=playbook_name,
                 playbook_text=playbook_text,
                 inventory_strategy_name=inventory_strategy_name,
-                pr_number=pr_number)
+                pr_number=pr_number,
+                delegation_summary=_delegation_summary())
         # R1.1 pricing halts are controlled incomplete states with the same
         # partial-trace preservation. PricingUnbounded: the ledger holds a
         # PRICING_PARTIAL request whose true cost is unbounded above, so no
@@ -583,7 +622,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 user_input=user_input, playbook_name=playbook_name,
                 playbook_text=playbook_text,
                 inventory_strategy_name=inventory_strategy_name,
-                pr_number=pr_number)
+                pr_number=pr_number,
+                delegation_summary=_delegation_summary())
         is_budget_ceiling = type(exc).__name__ == "BudgetCeilingExceeded"
         if is_budget_ceiling:
             partial_result = getattr(exc, "run_data", None)
@@ -598,7 +638,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 user_input=user_input, playbook_name=playbook_name,
                 playbook_text=playbook_text,
                 inventory_strategy_name=inventory_strategy_name,
-                pr_number=pr_number)
+                pr_number=pr_number,
+                delegation_summary=_delegation_summary())
         # For other agent failures, try to preserve partial trace if available
         partial_result = getattr(exc, "run_data", None)
         return _write_failed_run(
@@ -611,7 +652,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
             user_input=user_input, playbook_name=playbook_name,
             playbook_text=playbook_text,
             inventory_strategy_name=inventory_strategy_name,
-            pr_number=pr_number)
+            pr_number=pr_number,
+            delegation_summary=_delegation_summary())
 
     tool_evidence = _harvest_tool_evidence(result)
     # CONTEXT-01 arm C: the bundle's citable line evidence was returned
@@ -725,6 +767,9 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 "variant": variant}
     if bundle_meta is not None:
         metrics["bundle"] = bundle_meta
+    if delegation_state is not None:
+        metrics["delegation"] = delegate_mod.delegation_summary(
+            delegation_state)
     _ft = None
     if 'final_tag' in locals() and locals().get('final_tag'):
         _ft = locals().get('final_tag')
@@ -1339,9 +1384,10 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                       inventory: str | None = None,
                       user_input: str | None = None,
                       playbook_name: str | None = None,
-                      playbook_text: str | None = None,
-                      inventory_strategy_name: str | None = None,
-                      pr_number: int | None = None) -> dict[str, Any]:
+               playbook_text: str | None = None,
+               inventory_strategy_name: str | None = None,
+               pr_number: int | None = None,
+               delegation_summary: dict[str, Any] | None = None) -> dict[str, Any]:
     """Minimal immutable record for runs that die before disposition.
 
     When a partial trace is available (e.g., MaxTurnsExceeded with tool calls
@@ -1417,6 +1463,8 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
         metrics["evidence_count"] = len(tool_evidence)
     # Preserve provider termination reasons even on failed runs
     termination_by_response = _collect_provider_termination(model_obj)
+    if delegation_summary is not None:
+        metrics["delegation"] = delegation_summary
     _finalize_spend_ledger(active, run_dir)
 
     pr_url = (f"https://github.com/{ws.repo}/pull/{pr_number}"

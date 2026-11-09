@@ -1068,8 +1068,15 @@ def _merge_same_role(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def run_review(*, instructions: str, user_input: str, tools: list[Any],
                model: Any, max_turns: int = 12,
                model_settings: Any = None,
-               usage_ledger: SpendLedger | None = None) -> Any:
-    """Run one bounded agentic review through the canonical SDK runtime."""
+               usage_ledger: SpendLedger | None = None,
+               session: Any | None = None) -> Any:
+    """Run one bounded agentic review through the canonical SDK runtime.
+
+    ``session`` is an optional SDK persistent session (REVIEW-DELEGATE-01):
+    when given, the run continues that session's thread instead of
+    starting a fresh conversation. ``None`` preserves the exact
+    standalone behavior.
+    """
     ensure_local_tracing()
     agents = require_sdk()
     if model_settings is None:
@@ -1087,8 +1094,11 @@ def run_review(*, instructions: str, user_input: str, tools: list[Any],
         active_model = UsageRecordingModel(model, usage_ledger)
     agent = agents.Agent(name="codatiel-i2", instructions=instructions,
                          tools=tools, model=active_model, model_settings=model_settings)
+    run_kwargs: dict[str, Any] = {"max_turns": max_turns}
+    if session is not None:
+        run_kwargs["session"] = session
     result = asyncio.run(
-        agents.Runner.run(agent, user_input, max_turns=max_turns))
+        agents.Runner.run(agent, user_input, **run_kwargs))
     # M9.2 P1: capture the exact instructions object the SDK received, at
     # the SDK boundary, so the run record can prove its stored hash matches
     # what was actually passed to Agent — not just what the service claims.
