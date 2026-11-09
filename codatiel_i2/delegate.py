@@ -39,6 +39,7 @@ DEFAULT_SPEC = {
     "followup_tool_budget": 15,
     "max_followups": 3,
     "sub_ceiling_usd": 0.25,
+    "sub_max_tokens": 8000,
     "tool_timeout_s": 600.0,
     "followup_timeout_s": 300.0,
 }
@@ -171,21 +172,22 @@ class SubagentSession:
             pass
 
     async def sweep(self, user_input: str, ledger: Any) -> dict[str, Any]:
-        """Independent blind sweep (first use of the session)."""
+        """Independent blind sweep (first use of the session).
+
+        Pure coroutine: awaited in the review's single event loop. Never
+        run this in an executor + inner asyncio.run (that strands the
+        SDK's shared HTTP pool on a dead loop).
+        """
         from codatiel_i2 import runtime_sdk
 
+        agents = runtime_sdk.require_sdk()
         before = await self._item_count()
         started = time.time()
         try:
             result = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(
-                    None, lambda: runtime_sdk.run_review(
-                        instructions=self.instructions,
-                        user_input=user_input, tools=self.tools,
-                        model=self.model, max_turns=int(self.spec["sweep_max_turns"]),
-                        model_settings=self.model_settings,
-                        usage_ledger=ledger,
-                        session=self.session)),
+                agents.Runner.run(
+                    self.agent, user_input, session=self.session,
+                    max_turns=int(self.spec["sweep_max_turns"])),
                 timeout=float(self.spec["tool_timeout_s"]))
             status, text = "ok", str(getattr(result, "final_output", "") or "")
         except Exception as exc:  # never fail the lead on a sub error
@@ -203,9 +205,15 @@ class SubagentSession:
 
     async def ask(self, question: str, hypothesis: str, scope: str,
                   ledger: Any) -> dict[str, Any]:
-        """Directed follow-up in the SAME session (context retained)."""
+        """Directed follow-up in the SAME session (context retained).
+
+        Pure coroutine: awaited (via the lead's delegation tool) in the
+        review's single event loop, so the subagent's HTTP pool stays
+        valid. Never executor-wrapped.
+        """
         from codatiel_i2 import runtime_sdk
 
+        agents = runtime_sdk.require_sdk()
         async with self._lock:
             if self.followups_used >= int(self.spec["max_followups"]):
                 return {"status": "cap_refused", "text": "",
@@ -221,15 +229,9 @@ class SubagentSession:
             started = time.time()
             try:
                 inner = await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(
-                        None, lambda: runtime_sdk.run_review(
-                            instructions=self.instructions,
-                            user_input=prompt, tools=self.tools,
-                            model=self.model,
-                            max_turns=int(self.spec["followup_max_turns"]),
-                            model_settings=self.model_settings,
-                            usage_ledger=ledger,
-                            session=self.session)),
+                    agents.Runner.run(
+                        self.agent, prompt, session=self.session,
+                        max_turns=int(self.spec["followup_max_turns"])),
                     timeout=float(self.spec["followup_timeout_s"]))
                 status = "ok"
                 text = str(getattr(inner, "final_output", "") or "")
@@ -249,15 +251,15 @@ class SubagentSession:
             return {"status": status, "text": text, "entry": entry}
 
 
-def build_delegation(*, ws: Any, diff_repo: Path, inventory: str,
-                     spec: DelegationSpec, parent_ctx: Any | None = None,
-                     models: dict[str, tuple[Any, Any]] | None = None) -> dict[str, Any]:
-    """Create subagent sessions, run blind sweeps, build lead tools.
+def prepare_delegation(*, ws: Any, diff_repo: Path, inventory: str,
+                       spec: DelegationSpec, parent_ctx: Any | None = None,
+                       models: dict[str, tuple[Any, Any]] | None = None
+                       ) -> dict[str, Any]:
+    """Synchronous half: create subagent sessions, ledgers and lead tools.
 
-    Returns {"tools": [...], "addendum": str, "sessions": [...],
-    "ledgers": {...}, "sweeps": [...]}. Sweeps run BEFORE the lead, so
-    they are blind to the lead's findings by construction.
-
+    Runs NO inference (safe in sync service code). The returned state's
+    ``"sweeps"`` list is filled by ``arun_sweeps`` inside the review's
+    single event loop; the lead tools are usable once sweeps complete.
     ``models`` optionally overrides ``{role: (model, settings)}`` for
     tests (scripted models, no inference); production passes None.
     """
@@ -268,9 +270,18 @@ def build_delegation(*, ws: Any, diff_repo: Path, inventory: str,
     agents = runtime_sdk.require_sdk()
     artifact_dir = Path(spec.artifact_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    # Fresh attempt = fresh ledger: stale sweep/ledger/spend files from a
+    # previous attempt with the same tag are removed (already checkpointed
+    # in traces/ by the runner). The session DB is reset per session.
+    for stale in (list(artifact_dir.glob("ledger.jsonl")) +
+                  list(artifact_dir.glob("sweep-*.txt")) +
+                  list(artifact_dir.glob("spend-*.jsonl"))):
+        try:
+            stale.unlink()
+        except OSError:
+            pass
     sessions: list[SubagentSession] = []
     ledgers: dict[str, Any] = {}
-    sweeps: list[dict[str, Any]] = []
     tools: list[Any] = []
     tool_names: list[str] = []
     sweep_input = ("Review this change between BASE and HEAD. "
@@ -283,7 +294,9 @@ def build_delegation(*, ws: Any, diff_repo: Path, inventory: str,
             model, settings = providers_mod.build_model(role)
             if role == "luna":
                 from agents.model_settings import ModelSettings
-                settings = ModelSettings(store=False, max_tokens=3000)
+                settings = ModelSettings(
+                    store=False,
+                    max_tokens=int(rsp.get("sub_max_tokens", 8000)))
         rsp = spec.role_spec(role)
         sub_ledger = SpendLedger(
             rate=resolved["rate_usd_per_mtok"],
@@ -303,45 +316,98 @@ def build_delegation(*, ws: Any, diff_repo: Path, inventory: str,
             model_settings=settings,
             rate=resolved["rate_usd_per_mtok"],
             rate_status=resolved["rate_status"], spec=rsp)
-        sweep = asyncio.run(_run_sweep(sess, sweep_input, sub_ledger))
         sessions.append(sess)
         ledgers[role] = sub_ledger
-        sweeps.append({"role": role, "status": sweep["status"],
-                       "chars": len(sweep["text"]),
-                       "tool_calls": sweep["entry"].get("tool_calls", 0)})
         tools.append(_delegation_tool(agents, sess, sub_ledger, role,
-                                        parent_ctx))
+                                      parent_ctx))
         tool_names.append(tools[-1].name if hasattr(tools[-1], "name")
                           else f"delegate_{role}")
-        # Keep the full sweep text in the artifact ledger for
-        # attribution analysis (never shown to the lead unabridged beyond
-        # the tool summaries below; the lead sees them via ledger file).
+    return {"tools": tools, "tool_names": tool_names,
+            "sessions": sessions, "ledgers": ledgers,
+            "sweeps": [], "sweep_input": sweep_input, "spec": spec,
+            "repo": ws.repo, "base_sha": ws.base_sha,
+            "head_sha": ws.head_sha}
+
+
+async def arun_sweeps(state: dict[str, Any]) -> dict[str, Any]:
+    """Async half: run each subagent's blind sweep (single event loop).
+
+    Must run BEFORE the lead: sweeps stay blind to the lead's findings
+    by construction. Fills ``state["sweeps"]``, writes per-role sweep
+    texts to the artifact dir, and finalizes the lead addendum.
+    """
+    from codatiel_i2 import runtime_sdk  # noqa: F401 (keeps SDK bound)
+
+    spec = state["spec"]
+    sweep_input = state["sweep_input"]
+    artifact_dir = Path(spec.artifact_dir)
+    sweeps: list[dict[str, Any]] = []
+    for sess in state["sessions"]:
+        sweep = await sess.sweep(sweep_input, state["ledgers"][sess.role])
+        sweeps.append({"role": sess.role, "status": sweep["status"],
+                       "chars": len(sweep["text"]),
+                       "tool_calls": sweep["entry"].get("tool_calls", 0)})
         try:
-            with open(artifact_dir / f"sweep-{role}.txt", "w",
+            with open(artifact_dir / f"sweep-{sess.role}.txt", "w",
                        encoding="utf-8") as fh:
                 fh.write(sweep["text"])
         except OSError:
             pass
+    state["sweeps"] = sweeps
     # The lead sees concise sweep digests, not raw dumps: full texts stay
-    # in the artifact dir for attribution.
-    digest_lines = []
-    for s, sess in zip(sweeps, sessions):
-        digest_lines.append(
-            f"[{s['role']} sweep: {s['status']}, "
-            f"{s['tool_calls']} tool calls; full text in "
-            f"{spec.tag}/sweep-{s['role']}.txt]")
-    max_fu = max(int(spec.role_spec(r)["max_followups"]) for r in spec.subs)
-    addendum = (LEAD_ADDENDUM.format(
-        n_sub=len(sessions), tools=", ".join(tool_names),
-        max_fu=max_fu) + "\nSubagent sweep digests:\n" +
-        "\n".join(digest_lines))
-    return {"tools": tools, "addendum": addendum, "sessions": sessions,
-            "ledgers": ledgers, "sweeps": sweeps}
+    # in the artifact dir for attribution analysis.
+    digest_lines = [
+        f"[{s['role']} sweep: {s['status']}, "
+        f"{s['tool_calls']} tool calls; full text in "
+        f"{spec.tag}/sweep-{s['role']}.txt" for s in sweeps]
+    max_fu = max(int(spec.role_spec(r)["max_followups"])
+                 for r in spec.subs)
+    state["addendum"] = (
+        LEAD_ADDENDUM.format(
+            n_sub=len(state["sessions"]),
+            tools=", ".join(state["tool_names"]), max_fu=max_fu) +
+        "\nSubagent sweep digests:\n" + "\n".join(digest_lines))
+    return state
 
 
-async def _run_sweep(sess: SubagentSession, user_input: str,
-                     ledger: Any) -> dict[str, Any]:
-    return await sess.sweep(user_input, ledger)
+async def arun_delegated(*, instructions: str, user_input: str,
+                         tools: list[Any], model: Any, max_turns: int,
+                         model_settings: Any, usage_ledger: Any,
+                         model_name: str, state: dict[str, Any],
+                         instructions_label: str) -> tuple[Any, dict[str, Any]]:
+    """Run sweeps + lead review in ONE event loop (single HTTP pool).
+
+    Finalizes the lead instructions (base + addendum with sweep digests),
+    applies the Luna prompt-cache partition when relevant, and awaits the
+    parent review. Follow-up delegation tools await nested subagent runs
+    in this same loop. Returns (result, state).
+    """
+    from codatiel_i2 import runtime_sdk
+    from codatiel_i2 import service as _service
+
+    await arun_sweeps(state)
+    final_instructions = (instructions + "\n\n" +
+                          state.get("addendum", ""))
+    final_id = _service.instructions_id_for(
+        f"{instructions_label}+delegate-{'-'.join(state['spec'].subs)}",
+        final_instructions)
+    settings_eff = model_settings
+    cache_key = None
+    if str(model_name or "").startswith("luna:"):
+        cache_key = runtime_sdk.prompt_cache_key_for(
+            repo=state.get("repo", ""), base_sha=state.get("base_sha", ""),
+            head_sha=state.get("head_sha", ""),
+            instructions_id=final_id, model_name=model_name)
+        settings_eff = runtime_sdk.with_prompt_cache_key(
+            model_settings, cache_key)
+    result = await runtime_sdk.arun_review(
+        instructions=final_instructions, user_input=user_input,
+        tools=tools, model=model, max_turns=max_turns,
+        model_settings=settings_eff, usage_ledger=usage_ledger)
+    state["instructions_final"] = final_instructions
+    state["instructions_id_final"] = final_id
+    state["prompt_cache_key"] = cache_key
+    return result, state
 
 
 def _delegation_tool(agents: Any, sess: SubagentSession, ledger: Any,

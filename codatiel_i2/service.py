@@ -437,9 +437,10 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
     # gains one delegation tool per subagent plus a prompt addendum.
     # Budgets are unchanged for the lead; subagents carry their own.
     delegation_state: dict[str, Any] | None = None
+    delegation_label = ""
     if delegation is not None:
         try:
-            delegation_state = delegate_mod.build_delegation(
+            delegation_state = delegate_mod.prepare_delegation(
                 ws=ws, diff_repo=diff_repo, inventory=inventory,
                 spec=delegation, parent_ctx=ctx)
         except Exception as exc:
@@ -447,13 +448,10 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                     "error": f"{type(exc).__name__}: {exc}",
                     "service_version": SERVICE_VERSION}
         tools = list(tools) + list(delegation_state.get("tools", []))
-        base_label = str(instructions_version)
-        sub_names = "-".join(getattr(delegation, "subs", ("sub",)))
-        instructions = instructions + "\n\n" + delegation_state.get(
-            "addendum", "")
-        instructions_id = instructions_id_for(
-            f"{base_label}+delegate-{sub_names}", instructions)
-        instructions_version = instructions_id
+        delegation_label = str(instructions_version)
+        # Lead instructions are finalized (base + sweep-digest addendum)
+        # inside the single-loop delegated run below, so provenance stays
+        # bound to the exact submitted bytes.
     ceiling = max_usd_per_review
     if ceiling is None:
         try:
@@ -518,11 +516,28 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
         model_settings = runtime_sdk.with_prompt_cache_key(
             model_settings, prompt_cache_key)
     try:
-        result = runtime_sdk.run_review(
-            instructions=instructions,
-            user_input=user_input,
-            tools=tools, model=recorded_model, max_turns=max_turns,
-            model_settings=model_settings, usage_ledger=ledger)
+        if delegation_state is not None:
+            # Single event loop for sweeps + lead + follow-ups: the SDK
+            # shares one HTTP pool per loop, so splitting across loops
+            # strands connections on dead loops ("Event loop is closed").
+            import asyncio as _asyncio
+            result, delegation_state = _asyncio.run(
+                delegate_mod.arun_delegated(
+                    instructions=instructions, user_input=user_input,
+                    tools=tools, model=recorded_model, max_turns=max_turns,
+                    model_settings=model_settings, usage_ledger=ledger,
+                    model_name=model_name, state=delegation_state,
+                    instructions_label=delegation_label))
+            instructions = delegation_state["instructions_final"]
+            instructions_id = instructions_version = delegation_state[
+                "instructions_id_final"]
+            prompt_cache_key = delegation_state.get("prompt_cache_key")
+        else:
+            result = runtime_sdk.run_review(
+                instructions=instructions,
+                user_input=user_input,
+                tools=tools, model=recorded_model, max_turns=max_turns,
+                model_settings=model_settings, usage_ledger=ledger)
         boundary_sha256 = getattr(
             result, "sdk_boundary_instructions_sha256", None)
     except Exception as exc:

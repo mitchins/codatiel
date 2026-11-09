@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import threading
 from pathlib import Path
 
 import pytest
@@ -161,45 +160,46 @@ def test_followup_cap_refuses_without_inference(two_commit_repo, tmp_path):
 
 def test_subagent_timeout_surfaces_error(two_commit_repo, tmp_path,
                                          monkeypatch):
-    import time
+    import asyncio as _aio
 
-    def _sleep(*a, **k):
-        time.sleep(3)
+    async def _slow(*a, **k):
+        await _aio.sleep(30)
         raise AssertionError("should have timed out")
-    monkeypatch.setattr(runtime_sdk, "run_review", _sleep)
+    agents = runtime_sdk.require_sdk()
+    monkeypatch.setattr(agents.Runner, "run", staticmethod(_slow))
     model = _scripted_pair([], "unused")
     sess, ledger = _sub_session(two_commit_repo, tmp_path, "to-r1", model,
                                  followup_timeout_s=0.2)
-    out = asyncio.run(sess.ask("q?", "h", "", ledger))
+    out = asyncio.run(sess.ask("q?", "h?", "", ledger))
     assert out["status"].startswith("error:")
     assert "imeout" in out["status"] or "imeout" in out["text"]
 
 
 def test_interruption_leaves_no_partial_entry(two_commit_repo, tmp_path,
                                               monkeypatch):
-    started = asyncio.Event()
-    release = threading.Event()
+    import asyncio as _aio
+    started = _aio.Event()
 
-    def _hang(*a, **k):
+    async def _hang(*a, **k):
         started.set()
-        release.wait(timeout=3)
+        await _aio.sleep(60)
         return None
-    monkeypatch.setattr(runtime_sdk, "run_review", _hang)
+    agents = runtime_sdk.require_sdk()
+    monkeypatch.setattr(agents.Runner, "run", staticmethod(_hang))
     model = _scripted_pair([], "unused")
     sess, ledger = _sub_session(two_commit_repo, tmp_path, "int-r1", model,
                                  followup_timeout_s=30.0)
     async def _main():
-        task = asyncio.create_task(
-            sess.ask("q?", "h", "", ledger))
+        task = _aio.create_task(
+            sess.ask("q?", "h?", "", ledger))
         await started.wait()
         task.cancel()
-        with pytest.raises(asyncio.CancelledError):
+        with pytest.raises(_aio.CancelledError):
             await task
     asyncio.run(_main())
     # No partial ledger entry was recorded; session still queryable.
     assert asyncio.run(sess._item_count()) >= 0
     assert len(sess.calls) == 0
-    release.set()
 
 
 def test_lead_wiring_end_to_end_scripted(two_commit_repo, tmp_path,
