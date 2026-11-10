@@ -31,6 +31,9 @@ def cmd_config_check(args) -> dict:
             "neighbors_k": cfg.neighbors_k,
             "allow_embeddings": cfg.allow_embeddings,
             "advisory_enabled": cfg.advisory_enabled,
+            "editorial_shadow": cfg.editorial_shadow,
+            "editorial_max_pairs": cfg.editorial_max_pairs,
+            "editorial_ceiling_usd": cfg.editorial_ceiling_usd,
             "notify_to": cfg.notify_to,
             "notify_sender": cfg.notify_sender,
             "qualified_default": C.QUALIFIED_MODEL_ID}

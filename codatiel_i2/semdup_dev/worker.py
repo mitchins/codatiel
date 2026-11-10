@@ -39,6 +39,7 @@ from codatiel_i2.semdup_dev import SEMDUP_DEV_KIND
 from codatiel_i2.semdup_dev import advisory as AV
 from codatiel_i2.semdup_dev import config as C
 from codatiel_i2.semdup_dev import delta as D
+from codatiel_i2.semdup_dev import editorial_shadow as ES
 from codatiel_i2.semdup_dev import findings as F
 from codatiel_i2.semdup_dev import index_state as IX
 from codatiel_i2.semdup_dev import merged_view as MV
@@ -186,6 +187,26 @@ def _process(cfg, store, repo_path, repo, pr, base_rev, head_rev,
         return {"status": "skipped",
                 "reason": "delta fingerprint already processed"}
     targets = _select_targets(classification, cfg.max_targets_per_delta)
+    # Subsequent deltas examine only newly introduced or changed
+    # material: restrict targets to the incrementally changed file set
+    # measured from the last processed head. (First review: from_head is
+    # the PR base, so the restriction is a no-op.) Rebase/force-push
+    # histories are safe: the window always spans last_head..head, so
+    # previously examined units are not re-investigated.
+    if prev is not None:
+        changed_set = set(ch["files"] or [])
+        kept = [t for t in targets["selected"]
+                if t["path"] in changed_set]
+        if len(kept) < len(targets["selected"]) or not kept:
+            import logging as _logging
+            _logging.getLogger("semdup-dev").info(
+                "incremental filter: %d/%d targets in changed set",
+                len(kept), len(targets["selected"]))
+        targets = {"selected": kept, "deferred": targets["deferred"],
+                   "moved_skipped": targets["moved_skipped"]}
+        if not kept and not targets["deferred"]:
+            return {"status": "skipped",
+                    "reason": "no new material since last processed head"}
     # One head-tree materialization per delta (was: one per target).
     # Read-only shared state; per-target investigations run sequentially
     # and open their own sqlite connections (target_workers stays 1:
@@ -213,7 +234,6 @@ def _process(cfg, store, repo_path, repo, pr, base_rev, head_rev,
         status = "partial" if summary["actionable"] or any(
             r["status"] == "finding" for r in records) else "deferred"
     run_id = f"semdup-dev-{head_rev[:12]}-{fp}"
-    perf_summary = perf.summary()
     # Advisory layer: outward-facing classification built from stored
     # evidence only (no inference). Failure degrades to no advisory —
     # the engine disposition above is unaffected.
@@ -224,29 +244,6 @@ def _process(cfg, store, repo_path, repo, pr, base_rev, head_rev,
     except Exception:  # noqa: BLE001 - never fail a run for advisories
         advisories = []
     emitted = [a for a in advisories if not a.get("suppressed")]
-    (run_dir / "run.json").write_text(json.dumps(
-        {"run_id": run_id, "detector": "semdup-dev-01", "repo": repo,
-         "pr": pr, "base_sha": base_rev, "head_sha": head_rev,
-         "from_head": from_head, "delta_fingerprint": fp,
-         "config": {"model": cfg.investigator_model,
-                    "expected_model": cfg.investigator_expected,
-                    "advisory_enabled": cfg.advisory_enabled},
-         "perf": perf_summary,
-         "advisory": {"emitted": len(emitted),
-                      "suppressed": len(advisories) - len(emitted)},
-         "status": status}, indent=1))
-    (run_dir / "shadow_result.json").write_text(json.dumps(
-        {"status": status,
-         "counts": {"records": len(records), **summary["by_status"]},
-         "advisory": [
-             {"detector": r.get("detector"),
-              "changed_anchor": {"path": (r.get("target") or {}).get("path"),
-                                 "line_start": (r.get("target") or {}).get("start_line")},
-              "finding_id": f"{r.get('target', {}).get('path', '?')}::"
-                            f"{r.get('target', {}).get('symbol', '?')}",
-              "substantive_assessment": r.get("recommended_action")}
-             for r in records if r.get("status") == "finding"]},
-        indent=1, default=str))
     (run_dir / "findings.json").write_text(
         json.dumps({"records": records, "summary": summary,
                     "classification": units,
@@ -258,6 +255,74 @@ def _process(cfg, store, repo_path, repo, pr, base_rev, head_rev,
                     "note": "Outward-facing layer only; engine records in "
                             "findings.json are preserved unchanged."},
                    indent=1, default=str))
+    # Parallel editorial shadow (SEMDUP-07 Track A): Terra-propose /
+    # Luna-edit on the same delta, persisted separately. Any editorial
+    # failure degrades to a recorded outcome; the engine disposition
+    # and advisories above are unaffected.
+    editorial: dict = {"enabled": bool(cfg.editorial_shadow)}
+    if cfg.editorial_shadow:
+        base_tree: str | None = None
+        try:
+            base_tree = _materialize_head(repo_path, base_rev)
+            editorial = ES.run_editorial(
+                cfg=cfg, repo_path=repo_path, merged_db=Path(merged["db"]),
+                base_rev=base_rev, head_rev=head_rev, records=records,
+                run_dir=run_dir,
+                head_tree=Path(head_tree) if head_tree else None,
+                base_tree=Path(base_tree) if base_tree else None)
+        except Exception as exc:  # noqa: BLE001 - never fail a run
+            editorial = {"enabled": True, "ok": False,
+                         "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
+        finally:
+            if base_tree is not None:
+                import shutil as _shutil2
+                _shutil2.rmtree(str(Path(base_tree).parent),
+                                ignore_errors=True)
+    try:
+        (run_dir / "editorial.json").write_text(
+            json.dumps(editorial, indent=1, default=str))
+    except Exception:  # noqa: BLE001 - editorial persistence is best-effort
+        pass
+    ed_pub = len((editorial or {}).get("published", []))
+    ed_sup = len((editorial or {}).get("suppressed", []))
+    if isinstance(editorial, dict) and editorial.get("enabled"):
+        perf.count("editorial_published", ed_pub)
+    perf_summary = perf.summary()
+    (run_dir / "run.json").write_text(json.dumps(
+        {"run_id": run_id, "detector": "semdup-dev-01", "repo": repo,
+         "pr": pr, "base_sha": base_rev, "head_sha": head_rev,
+         "from_head": from_head, "delta_fingerprint": fp,
+         "files_changed": len(ch["files"]),
+         "config": {"model": cfg.investigator_model,
+                    "expected_model": cfg.investigator_expected,
+                    "advisory_enabled": cfg.advisory_enabled,
+                    "editorial_shadow": bool(cfg.editorial_shadow)},
+         "perf": perf_summary,
+         "advisory": {"emitted": len(emitted),
+                      "suppressed": len(advisories) - len(emitted)},
+         "editorial": {
+             "enabled": bool((editorial or {}).get("enabled", False)),
+             "ok": bool((editorial or {}).get("ok", False)),
+             "published": ed_pub, "suppressed": ed_sup,
+             "spend_usd": (editorial or {}).get("spend_usd", 0.0)},
+         "status": status}, indent=1))
+    (run_dir / "shadow_result.json").write_text(json.dumps(
+        {"status": status,
+         "counts": {"records": len(records), **summary["by_status"]},
+         "editorial": {
+             "enabled": bool((editorial or {}).get("enabled", False)),
+             "ok": bool((editorial or {}).get("ok", False)),
+             "published": ed_pub, "suppressed": ed_sup,
+             "spend_usd": (editorial or {}).get("spend_usd", 0.0)},
+         "advisory": [
+              {"detector": r.get("detector"),
+               "changed_anchor": {"path": (r.get("target") or {}).get("path"),
+                                  "line_start": (r.get("target") or {}).get("start_line")},
+               "finding_id": f"{r.get('target', {}).get('path', '?')}::"
+                             f"{r.get('target', {}).get('symbol', '?')}",
+               "substantive_assessment": r.get("recommended_action")}
+              for r in records if r.get("status") == "finding"]},
+        indent=1, default=str))
     store.review_record(repo=repo, pr=pr, kind=SEMDUP_DEV_KIND,
                         base_sha=base_rev, head_sha=head_rev, diff_sha=fp,
                         files=len(ch["files"]), pipeline="semdup-dev-01",
@@ -270,6 +335,11 @@ def _process(cfg, store, repo_path, repo, pr, base_rev, head_rev,
             "summary": summary,
             "advisory": {"emitted": len(emitted),
                          "suppressed": len(advisories) - len(emitted)},
+            "editorial": {
+                "enabled": bool((editorial or {}).get("enabled", False)),
+                "ok": bool((editorial or {}).get("ok", False)),
+                "published": ed_pub, "suppressed": ed_sup,
+                "spend_usd": (editorial or {}).get("spend_usd", 0.0)},
             "records": records}
 
 

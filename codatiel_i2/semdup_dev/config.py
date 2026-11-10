@@ -41,6 +41,9 @@ class SemdupDevConfig:
     neighbors_k: int = NEIGHBORS_K
     allow_embeddings: bool = True
     advisory_enabled: bool = True
+    editorial_shadow: bool = True
+    editorial_max_pairs: int = 4
+    editorial_ceiling_usd: float = 0.20
     notify_to: list[str] = field(default_factory=list)
     notify_sender: str = ""
 
@@ -90,6 +93,23 @@ def config_from_env() -> SemdupDevConfig:
     # semantic-duplication advisory without affecting ordinary reviewing.
     advisory_enabled = os.environ.get("SEMDUP_ADVISORY",
                                       "1").strip() not in ("0", "no", "false")
+    # Parallel editorial shadow (SEMDUP-07 Track A): Terra-propose /
+    # Luna-edit runs alongside the existing findings+advisories path on
+    # the same delta, persisted separately. 0 disables the editorial
+    # pass only; engine and advisory behaviour is unchanged.
+    editorial_shadow = os.environ.get("SEMDUP_EDITORIAL_SHADOW",
+                                      "1").strip() not in ("0", "no", "false")
+    try:
+        editorial_max_pairs = int(os.environ.get(
+            "SEMDUP_EDITORIAL_MAX_PAIRS", "4"))
+        editorial_ceiling_usd = float(os.environ.get(
+            "SEMDUP_EDITORIAL_CEILING_USD", "0.20"))
+    except ValueError:
+        raise SemdupConfigError("SEMDUP_EDITORIAL_MAX_PAIRS / "
+                                "SEMDUP_EDITORIAL_CEILING_USD must be numeric")
+    if editorial_max_pairs <= 0 or editorial_ceiling_usd <= 0:
+        raise SemdupConfigError("editorial pair/ceiling budgets must be "
+                                "positive")
     return SemdupDevConfig(
         env=env, state_dir=state_dir, repos=repos,
         investigator_url=inv_url, investigator_model=inv_model,
@@ -99,5 +119,8 @@ def config_from_env() -> SemdupDevConfig:
         max_targets_per_delta=max_targets, neighbors_k=neighbors_k,
         allow_embeddings=allow_embeddings,
         advisory_enabled=advisory_enabled,
+        editorial_shadow=editorial_shadow,
+        editorial_max_pairs=editorial_max_pairs,
+        editorial_ceiling_usd=editorial_ceiling_usd,
         notify_to=_env_list("CODATIEL_DEV_TO"),
         notify_sender=os.environ.get("CODATIEL_DEV_SENDER", ""))
