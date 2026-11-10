@@ -71,6 +71,9 @@ def build_parser() -> argparse.ArgumentParser:
                          help="envelope sender address (required; no default is assumed)")
     deliver.add_argument("--transport", default="smtp2go",
                          help="smtp2go (ops) or fixture (tests/gates)")
+    deliver.add_argument("--context", default="",
+                         help="event label added to the digest header "
+                              "(e.g. dev:owner/repo#123); evidence untouched")
 
     watcher = sub.add_parser("watcher", help="v0.1.0 continuous shadow-review watcher.")
     watcher.add_argument("op", choices=["activate", "run-once", "daemon",
@@ -967,7 +970,9 @@ def cmd_deliver_shadow(args) -> dict:
                          "smtp2go|fixture"}
     try:
         return service_mod.deliver_shadow(
-            args.run_dir, to=to, sender=sender, transport=transport)
+            args.run_dir, to=to, sender=sender, transport=transport,
+            context=(args.context.strip() or None)
+            if hasattr(args, "context") else None)
 
     except Exception as exc:
         return {"status": "failed", "stage": "delivery",

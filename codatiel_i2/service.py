@@ -1544,10 +1544,85 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
             "service_version": SERVICE_VERSION}
 
 
+def _semdup_digest_lines(run_dir: Path) -> list[str]:
+    """Consolidated duplication section for the default digest email.
+
+    Returns [] when the integrated stage did not run (no semdup.json)
+    or the record is unreadable: output is then byte-identical to
+    before. Never claims a clean scan when the stage could not
+    operate: unavailable/degraded statuses are stated explicitly.
+    """
+    try:
+        sem = json.loads((run_dir / "semdup.json").read_text(
+            encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(sem, dict):
+        return []
+    status = str(sem.get("status") or "unknown")
+    reason = str(sem.get("reason") or "")[:200]
+    if sem.get("spend_unknown"):
+        spend_s = "unknown"
+    else:
+        try:
+            spend_s = f"${float(sem.get('spend_usd', 0.0)):.4f}"
+        except (TypeError, ValueError):
+            spend_s = "unknown"
+    lines = [f"semdup: {status} ({reason}; spend {spend_s}; "
+             f"coverage {sem.get('coverage', 'unknown')})"]
+    if status != "ok":
+        lines.append("semdup did not complete: no reuse claim is made; "
+                     "ordinary review findings above stand on their own")
+        return lines
+    published = [p for p in (sem.get("published") or [])
+                 if isinstance(p, dict)]
+    lines.append(f"Possible existing functionality ({len(published)}):")
+    for p in published:
+        ta = ((p.get("anchors") or {}).get("target") or {})
+        ca = ((p.get("anchors") or {}).get("counterpart") or {})
+        tgt = p.get("target") or {}
+        cpt = p.get("counterpart") or {}
+        tref = (f"{ta.get('path') or tgt.get('path')}"
+                f":{ta.get('start_line')}-{ta.get('end_line')}")
+        cref = (f"{ca.get('path') or cpt.get('path')}"
+                f":{ca.get('start_line')}-{ca.get('end_line')}")
+        lines.append(
+            f"- {tref} `{tgt.get('symbol', '')}` may reuse "
+            f"{cref} `{cpt.get('symbol', '')}` "
+            f"[{p.get('decision', '')}]")
+        comment = str(p.get("revised_comment") or "").strip()
+        if comment:
+            flat = " ".join(comment.split())
+            lines.append(f"  {flat[:280]}")
+        diffs = ((p.get("reason") or "") or "")
+        if diffs and diffs != comment:
+            lines.append(f"  note: {' '.join(str(diffs).split())[:280]}")
+    dropped = [s for s in (sem.get("suppressed") or [])
+               if isinstance(s, dict)]
+    if dropped:
+        lines.append(f"dropped semdup candidates ({len(dropped)}, "
+                     "reasons preserved in semdup.json):")
+        for s in dropped[:6]:
+            t, c = s.get("target") or {}, s.get("counterpart") or {}
+            lines.append(
+                f"- {t.get('path')}::{t.get('symbol')} -> "
+                f"{c.get('path')}::{c.get('symbol')}: "
+                f"{s.get('reason', '')}")
+    skipped = [s for s in (sem.get("skipped") or [])
+               if isinstance(s, dict)]
+    if skipped:
+        lines.append(f"semdup not examined ({len(skipped)}; see "
+                     "semdup.json):")
+        for s in skipped[:6]:
+            lines.append(f"- {s.get('unit', '?')}: {s.get('reason', '')}")
+    return lines
+
+
 def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
                    transport: Any = None,
                    subject: str | None = None,
-                   text_body: str | None = None) -> dict[str, Any]:
+                   text_body: str | None = None,
+                   context: str | None = None) -> dict[str, Any]:
     """Deliver the shadow digest for a completed run. No PR comments ever:
     the only outbound channel is the digest transport (SMTP2GO in ops,
     fixture transport in tests/gates).
@@ -1560,7 +1635,13 @@ def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
     shadow = json.loads((run_dir / "shadow_result.json").read_text(
         encoding="utf-8"))
     lines = ["Codatiel I2 shadow digest",
-             f"repo: {run.get('repo')}",
+             f"repo: {run.get('repo')}"]
+    if context is not None:
+        # Operator-supplied event label (e.g. "dev:owner/repo#123"):
+        # identifies which PR the local checkout review belongs to.
+        # Evidence records are untouched; None keeps output identical.
+        lines.append(f"event: {context}")
+    lines += [
              f"base: {run.get('base_sha', '')[:12]} head: {run.get('head_sha', '')[:12]}",
              f"run: {run.get('run_id')} status: {shadow.get('status')}",
              f"model: {run.get('config', {}).get('model', '? ')}"
@@ -1581,6 +1662,11 @@ def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
     if shadow.get("silence"):
         lines.append(f"- silence: {shadow['silence'].get('summary', '')} "
                      f"({shadow['silence'].get('tool_calls', 0)} tool calls)")
+    if text_body is None:
+        # Default digest path only (DEV/TEST): approved duplication
+        # findings merge into the one consolidated email. The NORMAL
+        # watcher passes an exact pre-rendered body and is untouched.
+        lines.extend(_semdup_digest_lines(run_dir))
     text = "\n".join(lines)
     subj = subject or (f"[codatiel-shadow] {run.get('repo')} "
                        f"{run.get('head_sha', '')[:8]} {shadow.get('status')}")

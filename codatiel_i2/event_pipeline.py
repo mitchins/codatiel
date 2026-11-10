@@ -78,6 +78,12 @@ class EventConfig:
     stale_after_s: float = 3600.0
     repo_paths: dict[str, str] = field(default_factory=dict)
     clock: Callable[[], float] = time.time
+    # Integrated semantic-duplication stage (SEMDUP-08, DEV-only).
+    # TEST keeps the pipeline exactly as before (forced off below).
+    semdup_enabled: bool = False
+    semdup_ceiling_usd: float = 0.20
+    semdup_max_pairs: int = 4
+    semdup_allow_embeddings: bool = True
 
 
 def _env_list(name: str) -> list[str]:
@@ -123,6 +129,27 @@ def config_from_env() -> EventConfig:
         raise store_mod.StoreError(
             f"REVIEW_PIPELINE must be one of {PIPELINE_MODES}; "
             f"got {pipeline!r}")
+    # Integrated semdup stage: DEV-only, TEST forced off (unchanged).
+    semdup_enabled, semdup_ceiling = False, 0.20
+    semdup_max_pairs, semdup_allow_emb = 4, True
+    if env == "dev":
+        if (os.environ.get("CODATIEL_DEV_SEMDUP", "1") or "").strip() == "1":
+            try:
+                semdup_ceiling = float(os.environ.get(
+                    "CODATIEL_DEV_SEMDUP_CEILING_USD", "0.20"))
+                semdup_max_pairs = int(os.environ.get(
+                    "CODATIEL_DEV_SEMDUP_MAX_PAIRS", "4"))
+            except ValueError:
+                raise store_mod.StoreError(
+                    "CODATIEL_DEV_SEMDUP_CEILING_USD / "
+                    "CODATIEL_DEV_SEMDUP_MAX_PAIRS must be numeric")
+            if semdup_ceiling <= 0 or semdup_max_pairs <= 0:
+                raise store_mod.StoreError(
+                    "semdup ceiling and max pairs must be positive")
+            semdup_enabled = True
+            semdup_allow_emb = (
+                os.environ.get("CODATIEL_DEV_SEMDUP_ALLOW_EMBEDDINGS",
+                               "1") or "").strip() != "0"
     repo_paths: dict[str, str] = {}
     for pair in _env_list(prefix + "REPO_PATHS"):
         if "=" not in pair:
@@ -135,7 +162,11 @@ def config_from_env() -> EventConfig:
         spend_cap_usd=cap, project_cap_usd=project_cap,
         notify_to=_env_list(prefix + "TO"),
         notify_sender=(os.environ.get(prefix + "SENDER", "") or "").strip(),
-        repo_paths=repo_paths)
+        repo_paths=repo_paths,
+        semdup_enabled=semdup_enabled,
+        semdup_ceiling_usd=semdup_ceiling,
+        semdup_max_pairs=semdup_max_pairs,
+        semdup_allow_embeddings=semdup_allow_emb)
 
 
 def verify_signature(payload_bytes: bytes,
@@ -441,6 +472,55 @@ def _read_spend_usd(run_dir: str | None) -> float | None:
     return (metrics.get("spend", {}) or {}).get("usd_estimate")
 
 
+def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
+                        base: str, head: str, repo_path: Path,
+                        runs_root: Path, run_dir: str | None,
+                        result: dict) -> dict:
+    """Integrated duplication stage (SEMDUP-08): direct retrieval into
+    Terra/Luna after the standard review completes. DEV-only, bounded,
+    never raises, never changes the standard review's status: standard
+    findings stand even when the stage is unavailable.
+    """
+    result["semdup_status"] = "off"
+    result["semdup_published"] = 0
+    result["semdup_spend_usd"] = 0.0
+    if cfg.env != "dev" or not cfg.semdup_enabled or not run_dir:
+        return result
+    try:
+        from codatiel_i2.semdup_dev import stage as stage_mod
+        sem = stage_mod.run_stage(
+            repo_path=repo_path, repo=repo, pr=pr, base_rev=base,
+            head_rev=head, run_dir=run_dir,
+            state_dir=cfg.state_dir,
+            max_pairs=cfg.semdup_max_pairs,
+            ceiling_usd=cfg.semdup_ceiling_usd,
+            allow_embeddings=cfg.semdup_allow_embeddings)
+    except Exception as exc:  # noqa: BLE001 - belt and braces; run_stage never raises
+        sem = {"status": "unavailable", "published": [],
+               "spend_usd": 0.0, "spend_unknown": True,
+               "reason": f"stage harness error: {type(exc).__name__}"}
+    spend = sem.get("spend_usd") or 0.0
+    try:
+        spend = float(spend)
+    except (TypeError, ValueError):
+        spend, sem_unknown = 0.0, True
+        sem["spend_unknown"] = True
+    else:
+        sem_unknown = bool(sem.get("spend_unknown"))
+    base_cost = result.get("cost_usd")
+    if isinstance(base_cost, (int, float)):
+        result["cost_usd"] = round(float(base_cost) + spend, 6)
+    elif spend:
+        result["cost_usd"] = round(spend, 6)
+    if sem_unknown:
+        result["cost_unknown"] = True
+    result["semdup_status"] = sem.get("status", "unavailable")
+    result["semdup_published"] = len(sem.get("published") or [])
+    result["semdup_spend_usd"] = round(spend, 6)
+    result["semdup_reason"] = str(sem.get("reason") or "")[:300]
+    return result
+
+
 def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
                          base: str, head: str, kind: str,
                          repo_path: Path,
@@ -479,11 +559,15 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
                     "terra_findings": 0, "added": 0, "cost_usd": None,
                     "cost_unknown": True}
         cost = _read_spend_usd(out.get("run_dir"))
-        return {"status": out["status"], "mode": "terra-only",
+        result = {"status": out["status"], "mode": "terra-only",
                 "run_dir": out["run_dir"],
                 "terra_findings": _count_terra(out["run_dir"]),
                 "added": 0, "cost_usd": cost,
                 "cost_unknown": cost is None}
+        return _maybe_semdup_stage(
+            cfg=cfg, repo=repo, pr=pr, base=base, head=head,
+            repo_path=repo_path, runs_root=runs_root,
+            run_dir=out.get("run_dir"), result=result)
     from codatiel_i2 import additive as additive_mod
     out = additive_mod.run_additive(
         mode="additive",
@@ -500,11 +584,15 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
                 "cost_unknown": True}
     parent = _read_spend_usd(out.get("run_dir")) or 0.0
     sub = out.get("sub_usd") or 0.0
-    return {"status": out["status"], "mode": out.get("mode"),
+    result = {"status": out["status"], "mode": out.get("mode"),
             "run_dir": out["run_dir"],
             "terra_findings": _count_terra(out["run_dir"]),
             "added": int(out.get("added") or 0),
             "cost_usd": round(parent + sub, 4), "cost_unknown": False}
+    return _maybe_semdup_stage(
+        cfg=cfg, repo=repo, pr=pr, base=base, head=head,
+        repo_path=repo_path, runs_root=runs_root,
+        run_dir=out.get("run_dir"), result=result)
 
 
 def _count_terra(run_dir: str) -> int:
@@ -665,12 +753,18 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         luna_added=int(result.get("added") or 0), cost_usd=cost,
         cost_unknown=unknown, run_dir=result.get("run_dir") or "")
     notified = _notify(cfg, result.get("run_dir") or "",
-                       result["status"], transport)
+                       result["status"], transport,
+                       context=(f"{cfg.env}:{ev['repo']}#{pr}"
+                                if cfg.env == "dev" else None))
+    semdup_bits = ""
+    if result.get("semdup_status", "off") != "off":
+        semdup_bits = (f", semdup {result.get('semdup_status')}/"
+                       f"{result.get('semdup_published', 0)}")
     final = _finalize_delivery(
         store, ev, "completed",
         f"{kind} review {result['status']} "
         f"(terra {result.get('terra_findings', 0)}, "
-        f"luna-exclusive {result.get('added', 0)}; "
+        f"luna-exclusive {result.get('added', 0)}{semdup_bits}; "
         f"notified={notified})", cost)
     # Drain a queued newer delta as its own run (separate evidence).
     if done.get("queued"):
@@ -742,7 +836,7 @@ def _remember_queued(store: store_mod.Store, ev: dict, cp: dict | None,
 
 
 def _notify(cfg: EventConfig, run_dir: str, status: str,
-            transport: Any) -> bool:
+            transport: Any, context: str | None = None) -> bool:
     """Private digest to the configured env destination ONLY.
 
     Refuses anything but the configured TEST/DEV recipient list. No PR
@@ -754,7 +848,7 @@ def _notify(cfg: EventConfig, run_dir: str, status: str,
         from codatiel_i2 import service as service_mod
         receipt = service_mod.deliver_shadow(
             run_dir, to=list(cfg.notify_to), sender=cfg.notify_sender,
-            transport=transport)
+            transport=transport, context=context)
         return bool(receipt)
     except Exception:
         return False

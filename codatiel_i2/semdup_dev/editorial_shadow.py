@@ -287,7 +287,10 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         ((ta.get("transcript") or {}).get("tool_calls", [])))
     if not ta.get("ok") or not (ta.get("terra") or {}).get("overlap"):
         row.update({"path": "suppressed", "reason": "terra_no_lead",
-                    "detail": ta.get("error", "")})
+                    "detail": ta.get("error", ""),
+                    "terra_note": str(
+                        (ta.get("transcript") or {}).get("final_text", "")
+                        or "")[:600]})
         return row
     terra = ta["terra"]
     row["terra"] = {k: terra.get(k) for k in
@@ -295,7 +298,9 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
                      "shared_component", "differences")}
     if terra.get("opportunity", "none") == "none":
         row.update({"path": "suppressed",
-                    "reason": "terra_no_opportunity"})
+                    "reason": "terra_no_opportunity",
+                    "terra_note": str(terra.get("shared_component", "")
+                                      or "")[:300]})
         return row
     proposed = ED.propose_comment(terra, ev)
     row["proposed_comment"] = proposed
@@ -362,5 +367,122 @@ def _suppressed_row(row: dict) -> dict:
         "reason": row.get("reason", ""),
         "detail": str(row.get("detail", "") or "")[:600],
         "terra": row.get("terra", {}),
+        "terra_note": str(row.get("terra_note", "") or "")[:600],
         "anchors": row.get("anchors", {}),
     }
+
+
+def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
+                           merged_db: Path, base_rev: str, head_rev: str,
+                           head_tree: Path | str | None,
+                           base_tree: Path | str | None,
+                           run_dir: Path, ceiling_usd: float,
+                           assess_fn: Callable | None = None,
+                           edit_fn: Callable | None = None) -> dict:
+    """Terra-propose / Luna-edit over directly-retrieved pairs.
+
+    SEMDUP-08 integrated stage: pairs come from deterministic retrieval
+    (`oai_dupe.retrieve_pairs`), NOT from M11/Gemma records. No Gemma
+    stage is invoked anywhere on this path; Terra and Luna are resolved
+    via the standard product backends. Every failure degrades to a
+    recorded row; this function never raises.
+
+    Returns {"ok", "models", "pairs", "published", "suppressed",
+    "skipped", "spend_usd", "spend_unknown", "wall_s", "stage"/"error"}.
+    """
+    from types import SimpleNamespace
+    t0 = time.monotonic()
+    outcome: dict[str, Any] = {
+        "enabled": True, "ok": False, "version": EDITORIAL_VERSION,
+        "head_rev": head_rev, "base_rev": base_rev,
+        "pairs": [], "published": [], "suppressed": [],
+        "skipped": [], "spend_usd": 0.0, "wall_s": 0.0,
+    }
+    try:
+        from codatiel_i2 import providers as P
+        from codatiel_i2 import runtime_sdk as R
+        from codatiel_i2.core.spend import SpendLedger
+        from codatiel_i2.semdup_dev import editor as ED
+        from codatiel_i2.semdup_dev import oai_dupe as OD
+    except Exception as exc:  # noqa: BLE001 - stack unavailable
+        outcome["ok"] = False
+        outcome["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+        outcome["wall_s"] = round(time.monotonic() - t0, 1)
+        return outcome
+    if head_tree is None or base_tree is None:
+        outcome["ok"] = True
+        outcome["stage"] = "no_head_tree"
+        outcome["skipped"] = [
+            {"unit": f"{p['target']['path']}::{p['target']['symbol']} -> "
+                     f"{p['counterpart']['path']}::"
+                     f"{p['counterpart']['symbol']}",
+             "reason": "head/base tree unavailable; candidates recorded, "
+                       "no inference attempted"} for p in pairs]
+        outcome["wall_s"] = round(time.monotonic() - t0, 1)
+        return outcome
+    try:
+        terra_res = P.resolve_backend("terra")
+        luna_res = P.resolve_backend("luna")
+    except Exception as exc:  # noqa: BLE001 - no credentials => no spend
+        outcome["ok"] = True
+        outcome["stage"] = "backends_unavailable"
+        outcome["skipped"] = [
+            {"unit": f"{p['target']['path']}::{p['target']['symbol']} -> "
+                     f"{p['counterpart']['path']}::"
+                     f"{p['counterpart']['symbol']}",
+             "reason": f"model backend unavailable: {exc}; no inference "
+                       "attempted"} for p in pairs]
+        outcome["wall_s"] = round(time.monotonic() - t0, 1)
+        return outcome
+    terra_model_id, terra_settings = P.build_model("terra")
+    luna_model_id, luna_settings = P.build_model("luna")
+    half = max(ceiling_usd / 2.0, 0.0)
+    # Each model ledger is capped at half the delta ceiling so the two
+    # together can never exceed ceiling_usd (preflight estimates stop
+    # well short of the ledger cap; the cap is the backstop).
+    terra_ledger = SpendLedger(rate=terra_res["rate_usd_per_mtok"],
+                               rate_status=terra_res["rate_status"],
+                               ceiling_usd=half)
+    luna_ledger = SpendLedger(rate=luna_res["rate_usd_per_mtok"],
+                              rate_status=luna_res["rate_status"],
+                              ceiling_usd=half)
+    try:
+        run_dir = Path(run_dir)
+        terra_ledger.attach_sink(run_dir / "spend_semdup_terra.jsonl")
+        luna_ledger.attach_sink(run_dir / "spend_semdup_luna.jsonl")
+    except Exception:  # noqa: BLE001 - sinks are best-effort
+        pass
+    outcome["models"] = {
+        "terra": {"model": terra_res.get("model"),
+                  "provider": terra_res.get("provider"),
+                  "instructions_id": OD.instructions_id(
+                      "terra", OD.TERRA_INSTRUCTIONS)},
+        "luna": {"model": luna_res.get("model"),
+                 "provider": luna_res.get("provider"),
+                 "instructions_id": ED.editor_instructions_id()},
+    }
+    cfg = SimpleNamespace(repos=[repo])
+    assess = assess_fn or OD.assess_pair
+    edit = edit_fn or ED.edit_pair
+    for pair in pairs:
+        row = _review_pair(
+            pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
+            base_rev=base_rev, head_rev=head_rev, head_tree=head_tree,
+            base_tree=base_tree, terra_res=terra_res, luna_res=luna_res,
+            terra_model_id=terra_model_id, terra_settings=terra_settings,
+            luna_model_id=luna_model_id, luna_settings=luna_settings,
+            terra_ledger=terra_ledger, luna_ledger=luna_ledger,
+            ceiling_usd=ceiling_usd, half=half, assess=assess, edit=edit,
+            OD=OD, ED=ED, R=R)
+        outcome["pairs"].append(row)
+        if row["path"] == "published":
+            outcome["published"].append(_public_row(row))
+        else:
+            outcome["suppressed"].append(_suppressed_row(row))
+    spent_t, spent_l = _spent(terra_ledger), _spent(luna_ledger)
+    outcome["spend_usd"] = round(
+        (spent_t or 0.0) + (spent_l or 0.0), 6)
+    outcome["spend_unknown"] = spent_t is None or spent_l is None
+    outcome["ok"] = True
+    outcome["wall_s"] = round(time.monotonic() - t0, 1)
+    return outcome
