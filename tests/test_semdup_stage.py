@@ -193,7 +193,12 @@ def test_run_stage_direct_pairs_judged(tmp_path: Path, dupe_repo: dict,
         allow_embeddings=False, assess_fn=_fake_assess,
         edit_fn=_fake_edit)
     assert out["status"] == "ok", out
-    assert out["coverage"].startswith("reduced")  # deterministic only
+    # Examination completeness is top-level; deterministic retrieval-only
+    # coverage lives in the detail record.
+    assert out["coverage"] == "full", out
+    assert out["coverage_detail"]["retrieval"]["coverage"].startswith(
+        "reduced")  # deterministic only
+    assert out["coverage_detail"]["examination"]["targets_examined"] >= 1
     assert len(out["targets"]) >= 1
     assert out["pairs_examined"] >= 1  # retrieval really ran
     assert len(out["published"]) <= ST.PR_FINDING_CAP
@@ -230,8 +235,8 @@ def test_run_stage_retrieval_failure_degraded(tmp_path: Path,
 
 
 def test_run_stage_target_kind_reaches_terra(tmp_path: Path,
-                                             dupe_repo: dict,
-                                             monkeypatch: pytest.MonkeyPatch):
+                                              dupe_repo: dict,
+                                              monkeypatch: pytest.MonkeyPatch):
     """The changed/introduced role is passed through, not defaulted."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
     seen: list = []
@@ -332,6 +337,9 @@ def _min_run(tmp_path: Path, sem: dict | None) -> Path:
         "config": {"model": "scripted:x"}}))
     (run_dir / "shadow_result.json").write_text(json.dumps({
         "status": "complete", "counts": {}, "advisory": []}))
+    (run_dir / "metrics.json").write_text(json.dumps({
+        "status": "complete", "model": "scripted:x",
+        "spend": {"usd_estimate": 0.0123}}))
     if sem is not None:
         (run_dir / "semdup.json").write_text(json.dumps(sem))
     return run_dir
@@ -341,7 +349,7 @@ def test_deliver_shadow_semdup_section(tmp_path: Path):
     run_dir = _min_run(tmp_path, {
         "version": ST.STAGE_VERSION, "status": "ok",
         "reason": "examined 1 targets, 1 pairs; 1 approved",
-        "coverage": "reduced", "spend_usd": 0.0,
+        "coverage": "full", "spend_usd": 0.0,
         "published": [{
             "target": {"path": "new.py", "symbol": "format_price"},
             "counterpart": {"path": "existing.py",
@@ -357,11 +365,18 @@ def test_deliver_shadow_semdup_section(tmp_path: Path):
         "suppressed": []})
     receipt = service_mod.deliver_shadow(
         run_dir, to=["t@example.com"], sender="s@example.com",
-        transport=lambda t, s, b: {"ok": True, "body": b})
+        transport=lambda t, s, b, h=None: {"ok": True, "body": b,
+                                           "html": h})
     body = receipt["transport_receipt"]["body"]
-    assert "Possible existing functionality (1):" in body
-    assert "new.py:4-8 `format_price` may reuse existing.py:4-8" in body
-    assert "semdup: ok" in body
+    assert "Possible existing functionality" in body
+    assert "new.py:4-8" in body and "format_price" in body
+    assert "existing.py" in body and "KEEP" in body
+    assert "reuse format_money" in body
+    assert "duplication check finished, complete coverage" in body
+    html = receipt["transport_receipt"]["html"]
+    assert html and "<html" in html and "format_price" in html
+    stored = json.loads((run_dir / "delivery.json").read_text())
+    assert stored["html_body"] == html and stored["html_sha256"]
 
 
 def test_deliver_shadow_unavailable_explicit(tmp_path: Path):
@@ -372,11 +387,11 @@ def test_deliver_shadow_unavailable_explicit(tmp_path: Path):
         "published": [], "suppressed": []})
     receipt = service_mod.deliver_shadow(
         run_dir, to=["t@example.com"], sender="s@example.com",
-        transport=lambda t, s, b: {"ok": True, "body": b})
+        transport=lambda t, s, b, h=None: {"ok": True, "body": b})
     body = receipt["transport_receipt"]["body"]
-    assert "semdup: unavailable" in body
-    assert "no reuse claim is made" in body
-    assert "Possible existing functionality (0)" not in body
+    assert "Did not complete (unavailable)" in body
+    assert "No reuse claim is made" in body
+    assert "may reuse" not in body
 
 
 def test_deliver_shadow_unknown_spend_honest(tmp_path: Path):
@@ -387,10 +402,13 @@ def test_deliver_shadow_unknown_spend_honest(tmp_path: Path):
         "published": [], "suppressed": []})
     receipt = service_mod.deliver_shadow(
         run_dir, to=["t@example.com"], sender="s@example.com",
-        transport=lambda t, s, b: {"ok": True, "body": b})
+        transport=lambda t, s, b, h=None: {"ok": True, "body": b})
     body = receipt["transport_receipt"]["body"]
     assert "spend unknown" in body
-    assert "$0.0000" not in body
+    # The unknown semdup spend is never rendered as $0.00; the ordinary
+    # review cost (from run metrics) is stated separately.
+    assert "duplication check finished, complete coverage, spend unknown" in body
+    assert "$0.0123" in body
 
 
 def test_notify_test_env_unchanged(tmp_path: Path):
@@ -402,7 +420,7 @@ def test_notify_test_env_unchanged(tmp_path: Path):
                       notify_to=["t@example.com"],
                       notify_sender="s@example.com"),
         str(run_dir), "complete",
-        transport=lambda t, s, b: sent.append(b) or {"ok": True},
+        transport=lambda t, s, b, h=None: sent.append(b) or {"ok": True},
         context=None)
     assert sent and "event:" not in sent[0]
     assert "semdup" not in sent[0]
@@ -412,15 +430,50 @@ def test_deliver_shadow_context_label(tmp_path: Path):
     run_dir = _min_run(tmp_path, None)
     receipt = service_mod.deliver_shadow(
         run_dir, to=["t@example.com"], sender="s@example.com",
-        transport=lambda t, s, b: {"ok": True, "body": b},
+        transport=lambda t, s, b, h=None: {"ok": True, "body": b,
+                                           "html": h},
         context="dev:o/r#1")
     body = receipt["transport_receipt"]["body"]
-    assert "event: dev:o/r#1" in body
-    # Without context the header is byte-identical to before.
+    # The event label now drives the human header + PR link, not a raw
+    # "event:" debug line.
+    assert "Codatiel review: o/r#1" in body
+    assert "https://github.com/o/r/pull/1" in body
+    assert "event:" not in body
+    # Without context the header names the repo with no PR link.
     plain = service_mod.deliver_shadow(
         run_dir, to=["t@example.com"], sender="s@example.com",
-        transport=lambda t, s, b: {"ok": True, "body": b})
-    assert "event:" not in plain["transport_receipt"]["body"]
+        transport=lambda t, s, b, h=None: {"ok": True, "body": b},
+        context=None, force=True)
+    assert "Codatiel review: o/r" in plain["transport_receipt"]["body"]
+    assert "github.com" not in plain["transport_receipt"]["body"]
+
+
+def test_deliver_shadow_duplicate_send_prevented(tmp_path: Path):
+    """An identical body with an accepted receipt is not re-sent."""
+    run_dir = _min_run(tmp_path, None)
+    calls: list = []
+
+    def _send(t, s, b, h=None):
+        calls.append(b)
+        return {"accepted_by_transport": True, "parsed": True,
+                "succeeded": 1, "failed": 0, "email_id": "e1"}
+
+    first = service_mod.deliver_shadow(
+        run_dir, to=["t@example.com"], sender="s@example.com",
+        transport=_send)
+    assert len(calls) == 1
+    second = service_mod.deliver_shadow(
+        run_dir, to=["t@example.com"], sender="s@example.com",
+        transport=_send)
+    assert len(calls) == 1
+    assert second.get("delivery") == "already-delivered"
+    assert second["body_sha256"] == first["body_sha256"]
+    # An explicit operator replay bypasses the guard.
+    third = service_mod.deliver_shadow(
+        run_dir, to=["t@example.com"], sender="s@example.com",
+        transport=_send, force=True)
+    assert len(calls) == 2
+    assert third.get("delivery") != "already-delivered"
 
 
 # -- pipeline invariance ------------------------------------------------
@@ -485,3 +538,66 @@ def test_pipeline_dev_opt_out_intact(tmp_path: Path, dupe_repo: dict,
         model_factory=_scripted_factory())
     assert result["status"] in ("complete", "inconclusive")
     assert result["semdup_status"] == "off"
+
+
+# -- honest coverage: partial is never reported as full ------------------
+
+def test_stage_pair_budget_partial_never_full(
+        tmp_path: Path, dupe_repo: dict, monkeypatch: pytest.MonkeyPatch):
+    """A delta with budget-skipped targets is partial, with reasons."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = ST.run_stage(
+        repo_path=dupe_repo["root"], repo=REPO, pr=1,
+        base_rev=dupe_repo["base"], head_rev=dupe_repo["head"],
+        run_dir=run_dir, state_dir=tmp_path / "state",
+        allow_embeddings=False, max_pairs=0,
+        assess_fn=_fake_assess, edit_fn=_fake_edit)
+    assert out["status"] == "ok", out
+    assert out["coverage"] == "partial", out
+    assert out["skipped"], out
+    assert all(s.get("reason") for s in out["skipped"])
+    assert "skipped" in out["reason"]
+    detail = out["coverage_detail"]["examination"]
+    assert detail["targets_examined"] == 0
+    assert detail["pairs_examined"] == 0
+    assert len(detail["skipped"]) == len(out["skipped"])
+
+
+def test_stage_selection_budget_recorded_not_dropped(
+        tmp_path: Path, dupe_repo: dict, monkeypatch: pytest.MonkeyPatch):
+    """Units beyond max_targets are listed as skipped, never silent."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = ST.run_stage(
+        repo_path=dupe_repo["root"], repo=REPO, pr=1,
+        base_rev=dupe_repo["base"], head_rev=dupe_repo["head"],
+        run_dir=run_dir, state_dir=tmp_path / "state",
+        allow_embeddings=False, max_targets=0,
+        assess_fn=_fake_assess, edit_fn=_fake_edit)
+    assert out["status"] == "ok", out
+    assert out["coverage"] == "partial", out
+    assert out["skipped"], out
+    assert any("target selection budget" in s.get("reason", "")
+               for s in out["skipped"])
+    assert "selection budget" in out["reason"]
+
+
+def test_stage_full_only_when_nothing_skipped(
+        tmp_path: Path, dupe_repo: dict, monkeypatch: pytest.MonkeyPatch):
+    """The clean fixture genuinely earns 'full' with empty skip lists."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = ST.run_stage(
+        repo_path=dupe_repo["root"], repo=REPO, pr=1,
+        base_rev=dupe_repo["base"], head_rev=dupe_repo["head"],
+        run_dir=run_dir, state_dir=tmp_path / "state",
+        allow_embeddings=False, assess_fn=_fake_assess,
+        edit_fn=_fake_edit)
+    assert out["status"] == "ok", out
+    assert out["coverage"] == "full", out
+    assert out["skipped"] == []
+    assert out["coverage_detail"]["retrieval"]["failures"] == 0

@@ -191,7 +191,7 @@ def cmd_report(args) -> dict:
         transport_kind = __import__("os").environ.get(
             "CODATIEL_EVENTS_TRANSPORT", "fixture")
         if transport_kind == "fixture":
-            def transport(to_addrs, subject, text):
+            def transport(to_addrs, subject, text, html=None):
                 return {"accepted_by_transport": True, "parsed": True,
                         "fixture": True, "succeeded": len(to_addrs),
                         "failed": 0, "email_id": "fixture-no-send"}

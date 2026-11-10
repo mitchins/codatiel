@@ -149,7 +149,9 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         return outcome
     if ch.get("empty"):
         outcome["status"] = "ok"
+        outcome["coverage"] = "full"
         outcome["reason"] = "no changes in range; nothing to examine"
+        outcome["coverage_detail"] = _empty_coverage_detail(merged)
         outcome["wall_s"] = round(time.monotonic() - t0, 1)
         _persist(run_dir, outcome)
         return outcome
@@ -158,18 +160,36 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     changed_set = set(ch.get("files") or [])
     targets = [t for t in selected["selected"]
                if t["path"] in changed_set]
+    # Targets beyond the selection budget are never examined. They are
+    # recorded as skipped (not silently dropped) so coverage below can
+    # never claim a partially examined delta is fully checked.
+    selection_deferred = [u for u in (selected.get("deferred") or [])
+                          if isinstance(u, str)]
+    for u in selection_deferred:
+        outcome["skipped"].append(
+            {"unit": u,
+             "reason": (f"target selection budget exhausted "
+                        f"(max_targets={max_targets}): not selected")})
     outcome["targets"] = [
         {"path": t["path"], "symbol": t["symbol"],
          "kind": WK._kind_of(classification, t)} for t in targets]
     if not targets:
         outcome["status"] = "ok"
-        outcome["reason"] = "no added/changed units in reviewed range"
+        outcome["coverage"] = ("partial" if selection_deferred else "full")
+        outcome["reason"] = ("no added/changed units in reviewed range"
+                             + (f"; {len(selection_deferred)} unit(s) "
+                                "deferred by target selection budget"
+                                if selection_deferred else ""))
+        outcome["coverage_detail"] = _empty_coverage_detail(
+            merged, deferred=len(selection_deferred),
+            skipped=list(outcome["skipped"]))
         outcome["wall_s"] = round(time.monotonic() - t0, 1)
         _persist(run_dir, outcome)
         return outcome
 
     head_tree = WK._materialize_head(repo_path, head_rev)
     base_tree = WK._materialize_head(repo_path, base_rev)
+    examined_targets = 0
     try:
         pairs: list[dict] = []
         retrieval_failures = 0
@@ -190,6 +210,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                      "reason": "retrieval failed",
                      "detail": f"{type(exc).__name__}: {str(exc)[:160]}"})
                 continue
+            examined_targets += 1
             kind = WK._kind_of(classification, target)
             for p in ret.get("pairs", []):
                 if len(pairs) >= max_pairs:
@@ -201,6 +222,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         outcome["retrieval_failures"] = retrieval_failures
         if head_tree is None or base_tree is None:
             outcome["status"] = "degraded"
+            outcome["coverage"] = "partial"
             outcome["reason"] = ("head/base tree unavailable; candidates "
                                  "recorded, no inference attempted")
             outcome["skipped"].extend([
@@ -208,6 +230,8 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                          f"{p['counterpart']['path']}::"
                          f"{p['counterpart']['symbol']}",
                  "reason": "tree unavailable"} for p in pairs])
+            outcome["coverage_detail"] = _empty_coverage_detail(
+                merged, skipped=list(outcome["skipped"]))
             outcome["wall_s"] = round(time.monotonic() - t0, 1)
             _persist(run_dir, outcome)
             return outcome
@@ -243,21 +267,51 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     suppressed = list(judged.get("suppressed", []))
     published, capped = _apply_pr_cap(published)
     suppressed.extend(capped)
+    # Honest coverage: four layers, each recorded. "full" requires every
+    # selected target examined, zero retrieval failures, and zero skips of
+    # any kind. Anything less is "partial": the email must never present
+    # a partially examined delta as completely checked for duplication.
+    examined_pairs = len(judged.get("pairs", []))
+    coverage_detail = {
+        "index": {"base": "present", "overlay": "ok"},
+        "retrieval": {"failures": retrieval_failures,
+                      "coverage": merged.get("retrieval_coverage",
+                                             "unknown")},
+        "examination": {
+            "targets_selected": len(targets),
+            "targets_examined": examined_targets,
+            "targets_selection_deferred": len(selection_deferred),
+            "pairs_examined": examined_pairs,
+            "skipped": list(outcome["skipped"]),
+        },
+        "editorial": {"published": len(published),
+                      "suppressed": len(suppressed),
+                      "models": judged.get("models", {})},
+    }
+    outcome["coverage_detail"] = coverage_detail
+    skip_summary = _skip_summary(outcome["skipped"])
     # Any retrieval failure means the delta was only partially examined:
     # degraded, never a clean-looking zero. Zero pairs with zero
     # failures is a genuine clean outcome (coverage stated above).
     if retrieval_failures:
         outcome["status"] = "degraded"
-        outcome["reason"] = (f"examined {len(targets)} targets, "
-                             f"{len(judged.get('pairs', []))} pairs; "
+        outcome["coverage"] = "partial"
+        outcome["reason"] = (f"examined {examined_targets} targets, "
+                             f"{examined_pairs} pairs; "
                              f"{len(published)} approved; "
                              f"{retrieval_failures} target(s) failed "
-                             "retrieval and were not examined")
+                             "retrieval and were not examined"
+                             f"{skip_summary}")
     else:
         outcome["status"] = "ok"
-        outcome["reason"] = (f"examined {len(targets)} targets, "
-                             f"{len(judged.get('pairs', []))} pairs; "
-                             f"{len(published)} approved")
+        if outcome["skipped"]:
+            outcome["coverage"] = "partial"
+        else:
+            outcome["coverage"] = "full"
+        outcome["reason"] = (f"examined {examined_targets} targets, "
+                             f"{examined_pairs} pairs; "
+                             f"{len(published)} approved"
+                             f"{skip_summary}")
     # Dedup against the ordinary review's advisory anchors.
     published, dups = _dedup(run_dir, published)
     suppressed.extend(dups)
@@ -348,6 +402,31 @@ def _dedup(run_dir: Path, published: list) -> tuple[list, list]:
         else:
             kept.append(row)
     return kept, dups
+
+
+def _skip_summary(skipped: list) -> str:
+    """Compact '; K skipped (reasons)' suffix for the reason line."""
+    if not skipped:
+        return ""
+    reasons = sorted({str(s.get("reason") or "") for s in skipped
+                      if isinstance(s, dict)})
+    return f"; {len(skipped)} skipped ({'; '.join(reasons)[:160]})"
+
+
+def _empty_coverage_detail(merged: dict, deferred: int = 0,
+                           skipped: list | None = None) -> dict:
+    return {
+        "index": {"base": "present", "overlay": "ok"},
+        "retrieval": {"failures": 0,
+                      "coverage": (merged or {}).get("retrieval_coverage",
+                                                     "unknown")},
+        "examination": {
+            "targets_selected": 0, "targets_examined": 0,
+            "targets_selection_deferred": deferred,
+            "pairs_examined": 0, "skipped": skipped or [],
+        },
+        "editorial": {"published": 0, "suppressed": 0, "models": {}},
+    }
 
 
 def _persist(run_dir: Path, outcome: dict) -> None:

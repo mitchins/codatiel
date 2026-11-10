@@ -166,8 +166,10 @@ def test_shadow_delivery_fixture_transport(repo: dict, tmp_path: Path):
         work_root=tmp_path / "work")
     sent: list[dict] = []
 
-    def fixture_transport(to: list[str], subject: str, body: str) -> dict:
-        sent.append({"to": to, "subject": subject, "body": body})
+    def fixture_transport(to: list[str], subject: str, body: str,
+                            html: str | None = None) -> dict:
+        sent.append({"to": to, "subject": subject, "body": body,
+                     "html": html})
         return {"accepted_by_transport": True, "parsed": True,
                 "fixture": True, "succeeded": len(to), "failed": 0,
                 "email_id": "fixture-no-send"}

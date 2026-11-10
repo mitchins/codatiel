@@ -1544,146 +1544,83 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
             "service_version": SERVICE_VERSION}
 
 
-def _semdup_digest_lines(run_dir: Path) -> list[str]:
-    """Consolidated duplication section for the default digest email.
-
-    Returns [] when the integrated stage did not run (no semdup.json)
-    or the record is unreadable: output is then byte-identical to
-    before. Never claims a clean scan when the stage could not
-    operate: unavailable/degraded statuses are stated explicitly.
-    """
+def _receipt_delivered(receipt: Any) -> bool:
+    """A transport receipt that proves the bytes were accepted."""
+    if not isinstance(receipt, dict):
+        return False
     try:
-        sem = json.loads((run_dir / "semdup.json").read_text(
-            encoding="utf-8"))
-    except Exception:
-        return []
-    if not isinstance(sem, dict):
-        return []
-    status = str(sem.get("status") or "unknown")
-    reason = str(sem.get("reason") or "")[:200]
-    if sem.get("spend_unknown"):
-        spend_s = "unknown"
-    else:
-        try:
-            spend_s = f"${float(sem.get('spend_usd', 0.0)):.4f}"
-        except (TypeError, ValueError):
-            spend_s = "unknown"
-    lines = [f"semdup: {status} ({reason}; spend {spend_s}; "
-             f"coverage {sem.get('coverage', 'unknown')})"]
-    if status != "ok":
-        lines.append("semdup did not complete: no reuse claim is made; "
-                     "ordinary review findings above stand on their own")
-        return lines
-    published = [p for p in (sem.get("published") or [])
-                 if isinstance(p, dict)]
-    lines.append(f"Possible existing functionality ({len(published)}):")
-    for p in published:
-        ta = ((p.get("anchors") or {}).get("target") or {})
-        ca = ((p.get("anchors") or {}).get("counterpart") or {})
-        tgt = p.get("target") or {}
-        cpt = p.get("counterpart") or {}
-        tref = (f"{ta.get('path') or tgt.get('path')}"
-                f":{ta.get('start_line')}-{ta.get('end_line')}")
-        cref = (f"{ca.get('path') or cpt.get('path')}"
-                f":{ca.get('start_line')}-{ca.get('end_line')}")
-        lines.append(
-            f"- {tref} `{tgt.get('symbol', '')}` may reuse "
-            f"{cref} `{cpt.get('symbol', '')}` "
-            f"[{p.get('decision', '')}]")
-        comment = str(p.get("revised_comment") or "").strip()
-        if comment:
-            flat = " ".join(comment.split())
-            lines.append(f"  {flat[:280]}")
-        diffs = ((p.get("reason") or "") or "")
-        if diffs and diffs != comment:
-            lines.append(f"  note: {' '.join(str(diffs).split())[:280]}")
-    dropped = [s for s in (sem.get("suppressed") or [])
-               if isinstance(s, dict)]
-    if dropped:
-        lines.append(f"dropped semdup candidates ({len(dropped)}, "
-                     "reasons preserved in semdup.json):")
-        for s in dropped[:6]:
-            t, c = s.get("target") or {}, s.get("counterpart") or {}
-            lines.append(
-                f"- {t.get('path')}::{t.get('symbol')} -> "
-                f"{c.get('path')}::{c.get('symbol')}: "
-                f"{s.get('reason', '')}")
-    skipped = [s for s in (sem.get("skipped") or [])
-               if isinstance(s, dict)]
-    if skipped:
-        lines.append(f"semdup not examined ({len(skipped)}; see "
-                     "semdup.json):")
-        for s in skipped[:6]:
-            lines.append(f"- {s.get('unit', '?')}: {s.get('reason', '')}")
-    return lines
+        if int(receipt.get("succeeded", 0)) > 0 and int(
+                receipt.get("failed", 0)) == 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return receipt.get("ok") is True
 
 
 def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
                    transport: Any = None,
                    subject: str | None = None,
                    text_body: str | None = None,
-                   context: str | None = None) -> dict[str, Any]:
+                   context: str | None = None,
+                   force: bool = False) -> dict[str, Any]:
     """Deliver the shadow digest for a completed run. No PR comments ever:
     the only outbound channel is the digest transport (SMTP2GO in ops,
     fixture transport in tests/gates).
 
-    `text_body`, when given, replaces the built-in terse digest with an
-    exact pre-rendered body (v0.1.0 watcher emails). The given bytes are
-    hashed and persisted pre-send exactly as with the default body."""
+    The default body is the consolidated review digest (DIGEST-01):
+    plain-text plus an HTML alternative rendered from the same
+    delivery-independent review model. `text_body`, when given, replaces
+    the built-in digest with an exact pre-rendered body (v0.1.0 watcher
+    emails): the given bytes are hashed and persisted pre-send exactly
+    as with the default body.
+
+    Re-delivering an identical body to an already-accepted receipt is a
+    no-op (returns the stored record marked already-delivered) unless
+    `force` is set for an explicit operator replay.
+    """
     run_dir = Path(run_dir)
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    shadow = json.loads((run_dir / "shadow_result.json").read_text(
-        encoding="utf-8"))
-    lines = ["Codatiel I2 shadow digest",
-             f"repo: {run.get('repo')}"]
-    if context is not None:
-        # Operator-supplied event label (e.g. "dev:owner/repo#123"):
-        # identifies which PR the local checkout review belongs to.
-        # Evidence records are untouched; None keeps output identical.
-        lines.append(f"event: {context}")
-    lines += [
-             f"base: {run.get('base_sha', '')[:12]} head: {run.get('head_sha', '')[:12]}",
-             f"run: {run.get('run_id')} status: {shadow.get('status')}",
-             f"model: {run.get('config', {}).get('model', '? ')}"
-             f"{' (SCRIPTED mock run — non-evidence)' if 'scripted:' in str(run.get('config', {}).get('model', '')) else ''}",
-              "channel: shadow-only; no PR comments; nothing published",
-              "assessment: advisory findings are unverified review candidates; "
-              "none is a confirmed defect",
-
-             f"counts: {json.dumps(shadow.get('counts', {}))}"]
-    for f in shadow.get("advisory", [])[:10]:
-        if not isinstance(f, dict):
-            continue
-        anchor = f.get("changed_anchor", {}) if isinstance(f.get("changed_anchor"), dict) else {}
-        lines.append(f"- unverified review candidate [{f.get('detector')}] "
-                     f"{anchor.get('path')}:{anchor.get('line_start')} "
-                     f"{f.get('finding_id')} "
-                     f"(substantive assessment: {f.get('substantive_assessment', 'UNASSESSED')})")
-    if shadow.get("silence"):
-        lines.append(f"- silence: {shadow['silence'].get('summary', '')} "
-                     f"({shadow['silence'].get('tool_calls', 0)} tool calls)")
     if text_body is None:
-        # Default digest path only (DEV/TEST): approved duplication
-        # findings merge into the one consolidated email. The NORMAL
-        # watcher passes an exact pre-rendered body and is untouched.
-        lines.extend(_semdup_digest_lines(run_dir))
-    text = "\n".join(lines)
-    subj = subject or (f"[codatiel-shadow] {run.get('repo')} "
-                       f"{run.get('head_sha', '')[:8]} {shadow.get('status')}")
-    if text_body is not None:
+        from codatiel_i2 import digest_model as _DM
+        _model = _DM.build_review_model(run_dir, context=context)
+        text = _DM.render_text(_model)
+        html_body: str | None = _DM.render_html(_model)
+    else:
         text = text_body
+        html_body = None
     import hashlib as _hashlib
 
     body_sha256 = _hashlib.sha256(text.encode("utf-8")).hexdigest()
-    # Durable pre-send record: the exact body and its hash are persisted
-    # BEFORE transport, so an accepted-but-unpreserved digest cannot recur.
+    html_sha256 = (_hashlib.sha256(html_body.encode("utf-8")).hexdigest()
+                   if html_body is not None else None)
+    subj = subject or (f"[codatiel-shadow] {run.get('repo')} "
+                       f"{run.get('head_sha', '')[:8]} "
+                       f"{json.loads((run_dir / 'shadow_result.json').read_text(encoding='utf-8')).get('status')}")
+    try:
+        existing = json.loads((run_dir / "delivery.json").read_text(
+            encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - no prior delivery on record
+        existing = None
+    if (not force and isinstance(existing, dict)
+            and existing.get("body_sha256") == body_sha256
+            and existing.get("html_sha256") == html_sha256
+            and _receipt_delivered(existing.get("transport_receipt"))):
+        existing = dict(existing)
+        existing["delivery"] = "already-delivered"
+        write_json(run_dir / "delivery.json", existing)
+        return existing
+    # Durable pre-send record: the exact bodies and their hashes are
+    # persisted BEFORE transport, so an accepted-but-unpreserved digest
+    # cannot recur.
     record = {"to": to, "sender": sender, "subject": subj,
               "run_id": run.get("run_id"), "repo": run.get("repo"),
               "body_sha256": body_sha256, "body": text,
+              "html_sha256": html_sha256, "html_body": html_body,
               "transport_receipt": None}
     write_json(run_dir / "delivery.json", record)
-    send = transport or (lambda t, s, b: _smtp2go_send(t, sender, s, b))
-    receipt = send(to, subj, text)
+    send = transport or (lambda t, s, b, h=None: _smtp2go_send(
+        t, sender, s, b, h))
+    receipt = send(to, subj, text, html_body)
     record["transport_receipt"] = receipt
     write_json(run_dir / "delivery.json", record)
     return record
@@ -1691,6 +1628,7 @@ def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
 
 
 def _smtp2go_send(to: list[str], sender: str, subject: str,
-                  text_body: str) -> dict:
+                  text_body: str, html_body: str | None = None) -> dict:
     from codatiel_i2.delivery.smtp2go import send_email
-    return send_email(to, sender, subject, text_body)
+    return send_email(to, sender, subject, text_body,
+                      html_body=html_body)

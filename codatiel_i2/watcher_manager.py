@@ -961,7 +961,8 @@ class Manager:
             record = S.deliver_shadow(
                 run_dir, to=self.cfg.recipients, sender=self.cfg.sender,
                 subject=subj, text_body=body,
-                transport=(lambda t, s, b: self.sender(run_dir, s, b))
+                transport=(lambda t, s, b, h=None: self.sender(
+                    run_dir, s, b))
                 if self.sender else None)
             receipt = record.get("transport_receipt", {})
         except Exception as exc:

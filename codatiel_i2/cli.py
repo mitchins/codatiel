@@ -958,9 +958,9 @@ def cmd_deliver_shadow(args) -> dict:
         sent: list[dict] = []
 
         def transport(to_addrs: list[str], subject: str,
-                      body: str) -> dict:
+                      body: str, html: str | None = None) -> dict:
             sent.append({"to": to_addrs, "subject": subject,
-                         "body": body})
+                         "body": body, "html": html})
             return {"accepted_by_transport": True, "parsed": True,
                     "fixture": True, "succeeded": len(to_addrs),
                     "failed": 0, "email_id": "fixture-no-send"}
@@ -985,9 +985,9 @@ def cmd_deliver_shadow(args) -> dict:
         sent: list[dict] = []
 
         def transport(to_addrs: list[str], subject: str,
-                      body: str) -> dict:
+                      body: str, html: str | None = None) -> dict:
             sent.append({"to": to_addrs, "subject": subject,
-                         "body": body})
+                         "body": body, "html": html})
             return {"accepted_by_transport": True, "parsed": True,
                     "fixture": True, "succeeded": len(to_addrs),
                     "failed": 0, "email_id": "fixture-no-send"}
@@ -1196,7 +1196,7 @@ def cmd_events(args) -> dict:
             transport = None
             if transport_kind == "fixture":
                 def transport(to_addrs: list[str], subject: str,
-                              body: str) -> dict:
+                              body: str, html: str | None = None) -> dict:
                     return {"accepted_by_transport": True, "parsed": True,
                             "fixture": True, "succeeded": len(to_addrs),
                             "failed": 0, "email_id": "fixture-no-send"}
