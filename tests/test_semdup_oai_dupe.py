@@ -51,8 +51,19 @@ def _units(target_text: str = TARGET_TEXT) -> tuple[dict, dict]:
 def _terra(**over) -> dict:
     base = {"overlap": True, "relationship": "equivalent",
             "strength": "likely", "shared_behavior": "sum line totals",
+            "shared_component": "line-total summation",
+            "opportunity": "direct_reuse",
             "differences": [], "wrapper_or_delegation": False,
             "ownership_lifecycle_difference": False, "uncertainty": "none"}
+    base.update(over)
+    return base
+
+
+def _luna(**over) -> dict:
+    base = {"verdict": "survives", "shared_component": "line-total summation",
+            "core_comparable": True, "replacement_unsafe_reasons": [],
+            "fatal_objections": [], "unknowns": [],
+            "responsibility_holds": True}
     base.update(over)
     return base
 
@@ -146,6 +157,13 @@ def test_model_inputs_contain_both_sources(tmp_path):
 
 def test_validate_terra_good():
     assert OD.validate_terra_output(_terra()) == []
+    assert OD.validate_terra_output(
+        _terra(opportunity="none", shared_component="")) == []
+    assert OD.validate_terra_output(
+        _terra(opportunity="partial_extraction")) == []
+    assert OD.validate_terra_output(_terra(opportunity="bogus")) != []
+    assert OD.validate_terra_output(
+        _terra(opportunity="direct_reuse", shared_component="")) != []
 
 
 def test_validate_terra_missing_and_enums():
@@ -219,25 +237,30 @@ def test_assess_pair_unparseable_and_invalid(tmp_path):
     assert out2["ok"] is False and "invalid" in out2["error"]
 
 
-# --- Luna challenge ---------------------------------------------------------------
+# --- Luna challenge (v2 semantics) -----------------------------------------------
 
 def _challenge_call(value: dict):
     return _fake_call(json.dumps(value))
 
 
-def test_challenge_upheld_characterises(tmp_path):
+def _v2_challenge(**over):
+    """Full new-schema Luna output."""
+    return _luna(**over)
+
+
+def test_challenge_survives_publishes(tmp_path):
     ev = _evidence_for_fake(tmp_path)
     out = OD.challenge_pair(
         evidence=ev, terra=_terra(), tools=[], model="m",
         model_settings=None, ledger=None,
-        call=_challenge_call({"fatal_objections": [], "unknowns": [],
-                              "responsibility_holds": True}))
+        call=_challenge_call(_v2_challenge()))
     assert out["ok"] is True and out["challenged"] is True
     assert out["assessment"]["validation"]["level"] == "characterised"
     assert out["fatal_claims"] == []
+    assert out["reconcile"]["decision"] == "publish"
 
 
-def test_challenge_behavioral_fatal_diverges(tmp_path):
+def test_challenge_behavioral_core_refutes(tmp_path):
     ev = _evidence_for_fake(tmp_path)
     objection = {"claim": "rounding differs on halves",
                  "span": "cases/case01/billing.py:4-21",
@@ -245,14 +268,71 @@ def test_challenge_behavioral_fatal_diverges(tmp_path):
     out = OD.challenge_pair(
         evidence=ev, terra=_terra(), tools=[], model="m",
         model_settings=None, ledger=None,
-        call=_challenge_call({"fatal_objections": [objection],
-                              "unknowns": [], "responsibility_holds": True}))
+        call=_challenge_call(_v2_challenge(
+            verdict="refuted", shared_component="",
+            fatal_objections=[objection], unknowns=[],
+            responsibility_holds=True)))
     assert out["assessment"]["relationship"] == "diverged"
     assert out["assessment"]["action"] == "investigate"
     assert out["assessment"]["validation"]["level"] == "unresolved"
+    assert out["reconcile"]["decision"] == "suppress"
 
 
-def test_challenge_uncited_span_fails_closed(tmp_path):
+def test_challenge_peripheral_survives_with_differences(tmp_path):
+    # The 03 pattern: real objection, but about replacement safety
+    # around a surviving shared core — published with disclosure.
+    ev = _evidence_for_fake(tmp_path)
+    objection = {"claim": "partial failure differs",
+                 "span": "cases/case01/billing.py:4-21",
+                 "kind": "behavioral", "resolved_by_proposal": False}
+    out = OD.challenge_pair(
+        evidence=ev, terra=_terra(opportunity="partial_extraction"), tools=[],
+        model="m", model_settings=None, ledger=None,
+        call=_challenge_call(_v2_challenge(
+            verdict="survives", fatal_objections=[objection],
+            replacement_unsafe_reasons=["do not swap wholesale"],
+            responsibility_holds=True)))
+    assert out["reconcile"]["decision"] == "publish"
+    assert out["assessment"]["validation"]["level"] == "characterised"
+    assert any("partial failure" in d
+               for d in out["assessment"]["observed_differences"])
+    assert any("do not swap" in d
+               for d in out["assessment"]["observed_differences"])
+
+
+def test_challenge_uncertain_comparable_preserves(tmp_path):
+    # The backoff pattern: speculative objection, comparable core.
+    ev = _evidence_for_fake(tmp_path)
+    out = OD.challenge_pair(
+        evidence=ev, terra=_terra(), tools=[], model="m",
+        model_settings=None, ledger=None,
+        call=_challenge_call(_v2_challenge(
+            verdict="uncertain", shared_component="",
+            unknowns=["vendoring unknown"],
+            responsibility_holds=True)))
+    assert out["reconcile"]["decision"] == "publish"
+    assert out["assessment"]["validation"]["level"] == "unresolved"
+    assert any("vendoring unknown" in d
+               for d in out["assessment"]["observed_differences"])
+
+
+def test_challenge_uncertain_uncomparable_suppresses(tmp_path):
+    # The 02b pattern: the unknown covers the core behavior itself.
+    ev = _evidence_for_fake(tmp_path)
+    out = OD.challenge_pair(
+        evidence=ev, terra=_terra(), tools=[], model="m",
+        model_settings=None, ledger=None,
+        call=_challenge_call(_v2_challenge(
+            verdict="uncertain", shared_component="",
+            core_comparable=False, unknowns=["values unseen"],
+            responsibility_holds=True)))
+    assert out["reconcile"]["decision"] == "suppress"
+    assert out["assessment"]["relationship"] == "unknown"
+
+
+def test_challenge_uncited_span_discarded_not_fatal(tmp_path):
+    # An objection citing evidence outside the pair is unsupported and
+    # discarded; the decision falls back to verdict + comparability.
     ev = _evidence_for_fake(tmp_path)
     objection = {"claim": "invented elsewhere",
                  "span": "elsewhere/evil.py:1-9",
@@ -260,9 +340,34 @@ def test_challenge_uncited_span_fails_closed(tmp_path):
     out = OD.challenge_pair(
         evidence=ev, terra=_terra(), tools=[], model="m",
         model_settings=None, ledger=None,
-        call=_challenge_call({"fatal_objections": [objection],
-                              "unknowns": [], "responsibility_holds": True}))
-    assert out["assessment"]["relationship"] == "unknown"
+        call=_challenge_call(_v2_challenge(
+            verdict="refuted", shared_component="",
+            fatal_objections=[objection], unknowns=[],
+            responsibility_holds=True)))
+    notes = out["reconcile"]["notes"]
+    assert notes["discarded_unsupported"] == ["invented elsewhere"]
+    # refuted solely on discarded evidence = unsubstantiated; a
+    # comparable core preserves the lead.
+    assert out["reconcile"]["decision"] == "publish"
+
+
+def test_challenge_unreadable_preserves_terra_lead(tmp_path):
+    ev = _evidence_for_fake(tmp_path)
+    out = OD.challenge_pair(
+        evidence=ev, terra=_terra(), tools=[], model="m",
+        model_settings=None, ledger=None,
+        call=_fake_call("not json at all"))
+    assert out["ok"] is False and out["challenged"] is False
+    assert out["assessment"]["validation"]["level"] == "source_supported"
+
+
+def test_challenge_invalid_schema_preserves_terra_lead(tmp_path):
+    ev = _evidence_for_fake(tmp_path)
+    out = OD.challenge_pair(
+        evidence=ev, terra=_terra(), tools=[], model="m",
+        model_settings=None, ledger=None,
+        call=_challenge_call({"verdict": "bogus"}))
+    assert out["ok"] is False and out["challenged"] is False
 
 
 def test_challenge_failure_falls_back_unchallenged(tmp_path):
@@ -364,22 +469,31 @@ def test_record_mapping_downgraded_suppresses_or_discloses(tmp_path):
     assert adv["suppressed"] is True  # diverged prelim cannot advise
 
 
-def test_record_mapping_diverged_honest_suppress(tmp_path):
-    # A Terra diverged-overlap keeps prelim investigate (honest) and the
-    # frozen contract suppresses it — the mechanism is principled, not a
-    # validation failure.
+def test_record_mapping_diverged_opportunity_paths(tmp_path):
+    # v2: opportunity drives prelim. Legacy diverged without annotation
+    # conservatively maps to none (suppress); an annotated partial
+    # extraction (the 02a path) maps to extract_shared_part (publishable).
     db = _db(tmp_path)
     ev = OD.build_pair_evidence(db, *_units())
-    rec = OD.to_engine_record(
-        repo="r", pr=1, base_rev="b", head_rev="h", from_head="h",
-        delta_fingerprint="fp", classification="introduced",
-        target=_units()[0], evidence=ev,
-        terra=_terra(relationship="diverged", strength="possible",
-                     differences=["half-up vs half-even"]),
-        challenge=None, retrieval_coverage="full", provenance=_prov())
-    assert rec["preliminary_action"] == "investigate"
-    adv = AV.classify_record(rec, db, "full")
-    assert adv["suppressed"] is True
+    kw = dict(repo="r", pr=1, base_rev="b", head_rev="h", from_head="h",
+              delta_fingerprint="fp", classification="introduced",
+              target=_units()[0], evidence=ev, challenge=None,
+              retrieval_coverage="full", provenance=_prov())
+    legacy_none = _terra(relationship="diverged", strength="possible",
+                         differences=["half-up vs half-even"])
+    del legacy_none["opportunity"]
+    rec_none = OD.to_engine_record(terra=legacy_none, **kw)
+    assert rec_none["preliminary_action"] == "keep_separate"
+    assert AV.classify_record(rec_none, db, "full")["suppressed"] is True
+    legacy = _terra(relationship="diverged", strength="possible",
+                    differences=["out-of-domain edge"])
+    del legacy["opportunity"]  # stored SEMDUP-04 outputs lack the field
+    legacy["annotated_opportunity"] = "partial_extraction"
+    rec_partial = OD.to_engine_record(terra=legacy, **kw)
+    assert rec_partial["preliminary_action"] == "extract_shared_part"
+    adv = AV.classify_record(rec_partial, db, "full")
+    assert adv["suppressed"] is False
+    assert adv["category"] == "possible_overlap"
 
 
 def test_deterministic_wrapper_hit():
@@ -405,3 +519,88 @@ def test_materialize_checkouts(two_commit_repo, tmp_path):
     assert out["ok"] is True
     assert (out["base_dir"] / "src" / "app.py").exists() or \
         list(out["base_dir"].iterdir())
+
+
+def test_validate_luna_output():
+    assert OD.validate_luna_output(_luna()) == []
+    assert OD.validate_luna_output(_luna(verdict="nope")) != []
+    assert OD.validate_luna_output(_luna(core_comparable="yes")) != []
+    assert OD.validate_luna_output(_luna(verdict="survives",
+                                         shared_component="")) != []
+    assert OD.validate_luna_output(_luna(
+        verdict="refuted", fatal_objections=[],
+        responsibility_holds=True)) != []
+    assert OD.validate_luna_output(_luna(
+        verdict="refuted", shared_component="",
+        fatal_objections=[{"claim": "x", "span": "a:1",
+                           "kind": "behavioral",
+                           "resolved_by_proposal": False}],
+        responsibility_holds=True)) == []
+
+
+def test_opportunity_of():
+    assert OD.opportunity_of(_terra()) == "direct_reuse"
+    assert OD.opportunity_of(_terra(opportunity="partial_extraction")) == \
+        "partial_extraction"
+    assert OD.opportunity_of({"relationship": "shared_part"}) == \
+        "partial_extraction"
+    assert OD.opportunity_of({"relationship": "diverged"}) == "none"
+    assert OD.opportunity_of({"relationship": "related_only"}) == "none"
+
+
+def test_check_process_claims():
+    # Confabulated failure with no tool calls -> flagged.
+    out = OD.check_process_claims(
+        "Source tools could not access the pinned revision.", [])
+    assert out["process_claim_unverified"] is True
+    out2 = OD.check_process_claims(
+        "The checkout did not match the claimed revision.", [])
+    assert out2["process_claim_unverified"] is True
+    # Honest non-use statements never match.
+    out3 = OD.check_process_claims(
+        "Callers and tests were not examined.", [])
+    assert out3["process_claim_unverified"] is False
+    # A real failure with real tool calls is not confabulation.
+    out4 = OD.check_process_claims(
+        "Source tools could not access the pinned revision.",
+        [{"tool": "read_file"}])
+    assert out4["claimed_tool_failure"] is True
+    assert out4["process_claim_unverified"] is False
+    # Real SEMDUP-04 uncertainty strings.
+    out5 = OD.check_process_claims(
+        "Source tools failed because the checkout did not match.", [])
+    assert out5["process_claim_unverified"] is True
+
+
+def test_render_simple_advisory(tmp_path):
+    db = _db(tmp_path)
+    ev = OD.build_pair_evidence(db, *_units())
+    rec = OD.to_engine_record(
+        repo="r", pr=1, base_rev="b", head_rev="h", from_head="h",
+        delta_fingerprint="fp", classification="introduced",
+        target=_units()[0], evidence=ev, terra=_terra(),
+        challenge=None, retrieval_coverage="full", provenance=_prov())
+    adv = AV.classify_record(rec, db, "full")
+    assert adv["suppressed"] is False
+    text = OD.render_simple_advisory(adv, rec)
+    assert text.startswith("**Possible existing functionality**")
+    assert "Likely duplication" not in text
+    assert "compute_invoice_total" in text
+    # Suppressed renders nothing.
+    assert OD.render_simple_advisory({"suppressed": True}, rec) == ""
+    # Unsafe reasons + open questions are sectioned, not hidden.
+    rec2 = dict(rec)
+    ch = dict(rec2["challenge"])
+    ch["replacement_unsafe_reasons"] = ["do not swap wholesale"]
+    ch["luna_unknowns"] = ["lifecycle unknown"]
+    rec2["challenge"] = ch
+    text2 = OD.render_simple_advisory(adv, rec2)
+    assert "Replacement risks identified:" in text2
+    assert "Open questions (not verified):" in text2
+    # Process-claim note appears only when flagged.
+    prov = dict(rec2.get("provenance") or {})
+    prov["process_claims"] = {"process_claim_unverified": True,
+                              "tool_calls_made": 0,
+                              "claimed_tool_failure": True}
+    rec2["provenance"] = prov
+    assert "Process note:" in OD.render_simple_advisory(adv, rec2)
