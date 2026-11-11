@@ -904,3 +904,111 @@ def test_continuation_ignores_mislabeled_refusals(tmp_path: Path):
                   "detail": ""}
     new_pairs, reused = S._partition_new([pair], known)
     assert new_pairs == [] and len(reused) == 1
+
+
+def test_validate_anchor_pins_ambiguous_unit(tmp_path: Path):
+    """Same (path, symbol) twice: bare lookup refuses, pinned resolves."""
+    import sqlite3
+    from codatiel_i2.semdup_dev import advisory as AV
+    db = tmp_path / "idx.sqlite"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE units (path TEXT, symbol TEXT, "
+                 "start_line INT, end_line INT, text TEXT)")
+    conn.execute("INSERT INTO units VALUES (?,?,?,?,?)",
+                 ("a.py", "run", 10, 15, "def run(): pass"))
+    conn.execute("INSERT INTO units VALUES (?,?,?,?,?)",
+                 ("a.py", "run", 40, 45, "def run(): stop"))
+    conn.commit()
+    conn.close()
+    assert AV.validate_anchor(db, "a.py", "run")["ok"] is False
+    good = AV.validate_anchor(db, "a.py", "run", 40)
+    assert good["ok"] and good["start_line"] == 40
+    assert "def run(): stop" in good["text"]
+    assert AV.validate_anchor(db, "a.py", "run", 999)["ok"] is False
+
+
+def test_pair_key_line_qualified():
+    from codatiel_i2.semdup_dev import stage as S
+    t = {"path": "a.py", "symbol": "run", "start_line": 10}
+    c = {"path": "b.py", "symbol": "run", "start_line": 40}
+    assert S._pair_key(t, c) == "a.py:10::run>>b.py:40::run"
+    legacy = S._pair_key({"path": "a.py", "symbol": "run"},
+                         {"path": "b.py", "symbol": "run"})
+    assert legacy != S._pair_key(t, c)
+
+
+def test_preflight_bounds_actual_spend(tmp_path: Path, dupe_repo: dict,
+                                       monkeypatch: pytest.MonkeyPatch):
+    """Preflight is a conservative upper bound, never below actuals."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = ST.run_stage(
+        repo_path=dupe_repo["root"], repo=REPO, pr=1,
+        base_rev=dupe_repo["base"], head_rev=dupe_repo["head"],
+        run_dir=run_dir, state_dir=tmp_path / "state",
+        allow_embeddings=False, assess_fn=_fake_assess,
+        edit_fn=_fake_edit)
+    assert out["status"] == "ok", out
+    assert out["preflight_usd"] is not None
+    assert out["preflight_usd"] >= out["spend_usd"]
+
+
+def test_resume_reuses_and_reports_spend(tmp_path: Path, dupe_repo: dict,
+                                        monkeypatch: pytest.MonkeyPatch):
+    """Operator resume: prior verdicts reused, spend reconciled."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    calls = {"n": 0}
+
+    def _count_assess(**kw):
+        calls["n"] += 1
+        return _fake_assess(**kw)
+
+    from codatiel_i2 import event_pipeline as P
+    cfg = P.EventConfig(env="dev", state_dir=tmp_path / "estate",
+                        repos=[REPO],
+                        repo_paths={REPO: str(dupe_repo["root"])},
+                        whole_pr_ceiling_usd=2.0, semdup_enabled=True)
+    run1 = tmp_path / "run1"
+    run1.mkdir()
+    first = ST.run_stage(
+        repo_path=dupe_repo["root"], repo=REPO, pr=1,
+        base_rev=dupe_repo["base"], head_rev=dupe_repo["head"],
+        run_dir=run1, state_dir=tmp_path / "estate",
+        allow_embeddings=False, ceiling_usd=0.0,
+        assess_fn=_count_assess, edit_fn=_fake_edit)
+    assert first["status"] == "ok", first
+    assert calls["n"] == 0  # ceiling zero: nothing judged
+    resumed = P.resume_semdup(
+        cfg=cfg, repo=REPO, pr=1, base=dupe_repo["base"],
+        head=dupe_repo["head"], run_dir=str(run1), ceiling_usd=2.0,
+        assess_fn=_count_assess, edit_fn=_fake_edit)
+    assert resumed["status"] == "ok", resumed
+    assert calls["n"] >= 1  # new ceiling judges the held pairs
+    assert resumed["prior_spend_usd"] == 0.0
+    assert resumed["published"] >= 1
+    # Second resume at the same ceiling repeats nothing.
+    n_after_first = calls["n"]
+    again = P.resume_semdup(
+        cfg=cfg, repo=REPO, pr=1, base=dupe_repo["base"],
+        head=dupe_repo["head"], run_dir=str(run1), ceiling_usd=2.0,
+        assess_fn=_count_assess, edit_fn=_fake_edit)
+    assert again["status"] == "ok", again
+    assert calls["n"] == n_after_first
+    assert again["new_spend_usd"] == 0.0
+
+
+def test_cli_resume_semdup_validates_args(tmp_path: Path,
+                                          monkeypatch: pytest.MonkeyPatch):
+    """Resume refuses incomplete operator input without side effects."""
+    from codatiel_i2.cli import build_parser, cmd_events
+    monkeypatch.setenv("CODATIEL_ENV", "dev")
+    monkeypatch.setenv("CODATIEL_DEV_STATE", str(tmp_path / "estate"))
+    monkeypatch.setenv("CODATIEL_DEV_REPOS", REPO)
+    monkeypatch.setenv("CODATIEL_DEV_SPEND_CAP_USD", "5")
+    monkeypatch.setenv("CODATIEL_DEV_TO", "t@example.com")
+    monkeypatch.setenv("CODATIEL_DEV_SENDER", "s@example.com")
+    args = build_parser().parse_args(["events", "resume-semdup"])
+    out = cmd_events(args)
+    assert out["status"] == "failed"
+    assert "needs --repo" in out["error"]

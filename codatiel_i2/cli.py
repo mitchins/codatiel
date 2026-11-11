@@ -121,14 +121,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     events = sub.add_parser("events", help="Event-driven incremental review pipeline (TEST/DEV operational verification).")
     events.add_argument("op", choices=["enable", "ingest", "status",
-                                      "dashboard", "reset-spend", "recover",
-                                      "review"],
+                                       "dashboard", "reset-spend", "recover",
+                                       "review", "resume-semdup"],
                         help="enable: watermark + grandfather open PRs (no "
                              "inference); ingest: process one webhook payload; "
                              "status/dashboard: operational state; "
                              "reset-spend: zero env ledger (no auto-backlog); "
                              "recover: mark stale in-flight interrupted; "
-                             "review: operator-explicit single re-drive")
+                             "review: operator-explicit single re-drive; "
+                             "resume-semdup: continue semdup for a pinned "
+                             "delta at an approved ceiling (no emails)")
     events.add_argument("--payload", default="",
                         help="ingest: webhook JSON body file")
     events.add_argument("--delivery-id", default="",
@@ -137,13 +139,22 @@ def build_parser() -> argparse.ArgumentParser:
                         help="ingest: X-Hub-Signature-256 value")
     events.add_argument("--pr", default="",
                         help="review: explicit PR number re-drive")
+    events.add_argument("--repo", default="",
+                        help="resume-semdup: owner/name under review")
     events.add_argument("--head", default="",
                         help="review: explicit head SHA re-drive")
     events.add_argument("--base", default="",
-                        help="review: explicit base SHA re-drive")
+                        help="review: explicit base SHA re-drive; "
+                             "resume-semdup: pinned base SHA")
+    events.add_argument("--run-dir", default="",
+                        help="resume-semdup: completed run dir whose "
+                             "artifacts identify the delta and prior spend")
     events.add_argument("--stale-after", type=float, default=-1.0,
                         help="recover: in-flight age seconds to mark "
                              "interrupted (-1: env/default 3600)")
+    events.add_argument("--ceiling", type=float, default=-1.0,
+                        help="resume-semdup: approved whole-PR remainder "
+                             "ceiling in USD for the resumed stage")
     semdup = sub.add_parser("semdup", help="DEV semantic-duplication shadow worker (report-only; TEST/Production untouched).")
     semdup.add_argument("op", choices=["config-check", "build-base",
                                        "process-event", "report"],
@@ -1158,6 +1169,31 @@ def cmd_events(args) -> dict:
                         "run_dir": result.get("run_dir")}
             except store_mod.StoreError as exc:
                 return {"status": "failed", "stage": "review",
+                        "error": str(exc)}
+        if op == "resume-semdup":
+            # Operator-approved continuation: rerun ONLY the semdup
+            # stage for a pinned delta at a higher ceiling. Completed
+            # verdicts resume from persisted continuation ($0); no
+            # normal-review rerun, no emails, no checkpoint changes.
+            if not (args.repo and args.pr and args.head and args.base
+                    and args.run_dir and args.ceiling > 0):
+                return {"status": "failed", "stage": "resume-semdup",
+                        "error": "resume-semdup needs --repo, --pr, --head, "
+                                 "--base, --run-dir and a positive --ceiling"}
+            try:
+                number = int(args.pr)
+            except (TypeError, ValueError):
+                return {"status": "failed", "stage": "resume-semdup",
+                        "error": "--pr must be numeric"}
+            try:
+                return {"status": "ok",
+                        **pipe_mod.resume_semdup(
+                            cfg=cfg, repo=args.repo.strip(), pr=number,
+                            base=args.base.strip(), head=args.head.strip(),
+                            run_dir=args.run_dir.strip(),
+                            ceiling_usd=args.ceiling)}
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "resume-semdup",
                         "error": str(exc)}
         if op == "ingest":
             if not args.payload:

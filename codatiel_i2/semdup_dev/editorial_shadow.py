@@ -21,6 +21,7 @@ Rules:
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -98,6 +99,60 @@ def _is_budget_error(err: Any) -> bool:
     text = str(err or "")
     return ("BudgetCeilingExceeded" in text
             or "exceeds remaining budget" in text)
+
+
+def _preflight_usd(pairs: list, merged_db: Path, terra_res: dict,
+                   luna_res: dict) -> float | None:
+    """Upper-bound cost to judge every pair through both models.
+
+    Sums actual-size Terra + Luna estimates over the pair list using
+    the deterministic representative texts (same rule as retrieval).
+    Luna only runs on Terra leads, so the true cost is at or below
+    this number — a conservative planning bound, never a promise.
+    None when rates or texts are unavailable.
+    """
+    try:
+        from codatiel_i2.semdup_dev import oai_dupe as _OD
+        from codatiel_i2.semdup_dev import editor as _ED
+        conn = sqlite3.connect(str(merged_db))
+    except Exception:  # noqa: BLE001 - no preflight without the view
+        return None
+    try:
+        total = 0.0
+        for p in pairs:
+            if not isinstance(p, dict):
+                continue
+            sizes = []
+            for u in (p.get("target") or {}, p.get("counterpart") or {}):
+                if not isinstance(u, dict):
+                    continue
+                r = conn.execute(
+                    "SELECT length(text) FROM units WHERE path=? AND "
+                    "symbol=? ORDER BY start_line LIMIT 1",
+                    (u.get("path"), u.get("symbol"))).fetchone()
+                if not r or not r[0]:
+                    return None
+                sizes.append(int(r[0]))
+            if len(sizes) != 2:
+                return None
+            body = sum(sizes)
+            te = _OD.estimate_call_usd(
+                len(_OD.TERRA_INSTRUCTIONS) + body,
+                terra_res.get("rate_usd_per_mtok") or {})
+            le = _OD.estimate_call_usd(
+                len(_ED.EDITOR_INSTRUCTIONS) + body,
+                luna_res.get("rate_usd_per_mtok") or {})
+            if te is None or le is None:
+                return None
+            total += te + le
+        return round(total, 6)
+    except Exception:  # noqa: BLE001 - estimates are best-effort
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _spent(ledger) -> float | None:
@@ -283,7 +338,8 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
                          "sha256")},
     }
     pre = ED.wrapper_prefilter(ev["target"]["text"],
-                               ev["counterpart"]["symbol"])
+                               ev["counterpart"]["symbol"],
+                               ev["target"]["symbol"])
     if pre["wrapper"]:
         row.update({"path": "suppressed", "reason": "deterministic_drop",
                     "detail": pre["detail"]})
@@ -454,6 +510,7 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
         "head_rev": head_rev, "base_rev": base_rev,
         "pairs": [], "published": [], "suppressed": [],
         "skipped": [], "spend_usd": 0.0, "wall_s": 0.0,
+        "preflight_usd": None,
     }
     try:
         from codatiel_i2 import providers as P
@@ -463,7 +520,7 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
         from codatiel_i2.semdup_dev import oai_dupe as OD
     except Exception as exc:  # noqa: BLE001 - stack unavailable
         outcome["ok"] = False
-        outcome["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+        outcome["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
         outcome["wall_s"] = round(time.monotonic() - t0, 1)
         return outcome
     if head_tree is None or base_tree is None:
@@ -521,6 +578,8 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
     cfg = SimpleNamespace(repos=[repo])
     assess = assess_fn or OD.assess_pair
     edit = edit_fn or ED.edit_pair
+    judged_preflight = _preflight_usd(pairs, merged_db, terra_res,
+                                      luna_res)
     for pair in pairs:
         row = _review_pair(
             pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
@@ -545,6 +604,7 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
     outcome["spend_usd"] = round(
         (spent_t or 0.0) + (spent_l or 0.0), 6)
     outcome["spend_unknown"] = spent_t is None or spent_l is None
+    outcome["preflight_usd"] = judged_preflight
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     return outcome

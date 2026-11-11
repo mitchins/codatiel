@@ -39,7 +39,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-STAGE_VERSION = "semdup-stage-0.2"
+STAGE_VERSION = "semdup-stage-0.3"
 DEFAULT_MAX_PAIRS_PER_TARGET = 2
 DEFAULT_CEILING_USD = 2.0
 DEDUP_LINE_WINDOW = 5
@@ -75,6 +75,7 @@ def run_stage(*, repo_path: Path, repo: str, pr: int,
         "skipped": [], "targets": [], "coverage": "unknown",
         "spend_usd": 0.0, "wall_s": 0.0, "reason": "",
         "pairs_total": 0, "pairs_reused": 0, "ceiling_usd": ceiling_usd,
+        "preflight_usd": None,
     }
     try:
         return _run(repo_path=Path(repo_path), repo=repo, pr=pr,
@@ -213,8 +214,14 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                 continue
             kind = WK._kind_of(classification, target)
             for p in ret.get("pairs", []):
-                pairs.append({"target": dict(target),
-                              "counterpart": dict(p),
+                tgt = dict(target)
+                if p.get("target_start_line") is not None:
+                    tgt["start_line"] = p["target_start_line"]
+                cpt = {"path": p.get("path"), "symbol": p.get("symbol")}
+                if p.get("start_line") is not None:
+                    cpt["start_line"] = p["start_line"]
+                pairs.append({"target": tgt,
+                              "counterpart": cpt,
                               "classification": kind,
                               "channels": list(p.get("via") or [])})
         pairs = _order_pairs(pairs)
@@ -289,6 +296,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     outcome["models"] = judged.get("models", {})
     outcome["spend_usd"] = judged.get("spend_usd", 0.0)
     outcome["spend_unknown"] = judged.get("spend_unknown", False)
+    outcome["preflight_usd"] = judged.get("preflight_usd")
     outcome["skipped"].extend(judged.get("skipped", []))
     if not judged.get("ok") or judged.get("stage") in (
             "backends_unavailable",):
@@ -497,8 +505,18 @@ def _empty_coverage_detail(merged: dict, deferred: int = 0,
 
 
 def _pair_key(target: dict, counterpart: dict) -> str:
-    return (f"{target.get('path')}::{target.get('symbol')}>>"
-            f"{counterpart.get('path')}::{counterpart.get('symbol')}")
+    """Identity key, line-qualified when lines are known.
+
+    Same-name overloads across types share (path, symbol); without
+    lines, unrelated overloads would share continuation verdicts.
+    Pairs without lines (legacy records) never match line-qualified
+    keys and are re-judged once.
+    """
+    def _loc(u: dict) -> str:
+        sl = u.get("start_line")
+        return (f"{u.get('path')}:{sl if sl is not None else '?'}::"
+                f"{u.get('symbol')}")
+    return f"{_loc(target)}>>{_loc(counterpart)}"
 
 
 def _is_filtered_unit(path: str, symbol: str) -> bool:

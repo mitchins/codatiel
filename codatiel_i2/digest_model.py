@@ -240,6 +240,10 @@ def _semdup_entry(sem: dict) -> dict:
             "differences": " ".join(str(p.get("reason") or "")
                                     .split())[:400],
         })
+    # Display grouping: related findings (same target file) stay
+    # adjacent regardless of judgment order. Deterministic.
+    pubs.sort(key=lambda p: (p["target_ref"].split(":")[0],
+                             p["target_symbol"]))
     sups = []
     for s in suppressed:
         t, c = s.get("target") or {}, s.get("counterpart") or {}

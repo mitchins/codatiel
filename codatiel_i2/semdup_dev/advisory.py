@@ -58,14 +58,34 @@ def _is_fragment(symbol: str) -> bool:
     return "#region" in symbol
 
 
-def validate_anchor(db_path: Path, path: str, symbol: str) -> dict:
-    """Resolve (path, symbol) exactly in the pinned merged head-view DB."""
+def validate_anchor(db_path: Path, path: str, symbol: str,
+                    start_line: int | None = None) -> dict:
+    """Resolve (path, symbol) exactly in the pinned merged head-view DB.
+
+    When several rows share an identity (same-name methods across
+    types, overloads), a bare (path, symbol) lookup is ambiguous and
+    refused — except when `start_line` pins the exact row the
+    deterministic retrieval layer selected. Pinning keeps evidence
+    and retrieval consistent by construction instead of dropping the
+    pair or, worse, attributing the wrong overload's text.
+    """
     try:
         conn = sqlite3.connect(str(db_path))
         try:
-            rows = conn.execute(
-                "SELECT path, symbol, start_line, end_line, text FROM units "
-                "WHERE path=? AND symbol=?", (path, symbol)).fetchall()
+            if start_line is not None:
+                rows = conn.execute(
+                    "SELECT path, symbol, start_line, end_line, text "
+                    "FROM units WHERE path=? AND symbol=? AND "
+                    "start_line=?", (path, symbol, start_line)).fetchall()
+                if not rows:
+                    return {"ok": False,
+                            "reason": "pinned anchor not found in "
+                                      "reviewed revision"}
+            else:
+                rows = conn.execute(
+                    "SELECT path, symbol, start_line, end_line, text "
+                    "FROM units WHERE path=? AND symbol=?",
+                    (path, symbol)).fetchall()
         finally:
             conn.close()
     except Exception as exc:  # noqa: BLE001 - unresolvable => suppress

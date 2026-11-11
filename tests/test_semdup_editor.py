@@ -240,3 +240,11 @@ def test_wrapper_prefilter():
     assert ED.wrapper_prefilter("def f():\n return g(x)\n", "g")["wrapper"] is True
     assert ED.wrapper_prefilter("def f():\n return 1\n", "g")["wrapper"] is False
     assert ED.wrapper_prefilter("", "g")["wrapper"] is False
+    # Same base name: bare matches are self-recursion, never delegation.
+    assert ED.wrapper_prefilter("def f():\n return f(x)\n", "f", "f")["wrapper"] is False
+    assert ED.wrapper_prefilter("RunCommand.executeStatic(\n", "executeStatic",
+                                )["wrapper"] is True  # different names: qualified counts
+    assert ED.wrapper_prefilter("RunCommand.executeStatic(\n", "executeStatic",
+                                "executeStatic")["wrapper"] is False  # same own-name: judge it
+    # Substring mimics do not fire (word boundary).
+    assert ED.wrapper_prefilter("biggest(1)\n", "big")["wrapper"] is False

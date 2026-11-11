@@ -108,7 +108,8 @@ def build_evidence_package(merged_db: Path, repo_path: Path, rev: str,
         if "#region" in symbol:
             return {"ok": False, "code": "fragment_source",
                     "detail": f"{label} is a region fragment"}
-        anchor = AV.validate_anchor(merged_db, path, symbol)
+        anchor = AV.validate_anchor(merged_db, path, symbol,
+                                    unit.get("start_line"))
         if not anchor.get("ok"):
             return {"ok": False, "code": f"{label}_unresolved",
                     "detail": anchor.get("reason", "")}
@@ -313,13 +314,41 @@ def edit_pair(*, package: dict, proposed_comment: str, tools: list,
             "error": ""}
 
 
-def wrapper_prefilter(target_text: str, counterpart_symbol: str) -> dict:
+def _base_symbol(symbol: str) -> str:
+    """Bare symbol without region/closure suffixes or sigils."""
+    return ((symbol or "").split("#")[0].split("@")[0].lstrip("$")
+            .strip())
+
+
+def wrapper_prefilter(target_text: str, counterpart_symbol: str,
+                      target_symbol: str = "") -> dict:
     """Deterministic delegation check: target calls the counterpart.
 
     A wrapper call is not an independent re-implementation; such pairs
     never reach the editor (no model spend).
+
+    A bare `name(` match is evidence of delegation ONLY when `name`
+    cannot be a self-call: when the counterpart shares the target's own
+    base symbol, the match is self-recursion (or an ambiguous
+    same-name reference), never proof of delegation — those pairs go
+    to the model instead of being silently dropped. Missing a wrapper
+    costs inference; dropping a genuine pair loses the finding, so the
+    rule errs toward judging.
     """
-    sym = (counterpart_symbol or "").split("#")[0].split("@")[0].lstrip("$")
-    hit = bool(sym) and f"{sym}(" in (target_text or "")
-    return {"wrapper": hit,
-            "detail": f"target calls {sym}()" if hit else ""}
+    import re as _re
+    sym = _base_symbol(counterpart_symbol)
+    own = _base_symbol(target_symbol)
+    text = target_text or ""
+    if not sym:
+        return {"wrapper": False, "detail": ""}
+    if sym == own:
+        # Same base name: bare matches are self-calls by construction,
+        # and even qualified `X.name(` calls may be own-type
+        # qualification — indistinguishable without type resolution.
+        return {"wrapper": False,
+                "detail": (f"same-name reference ({sym}) is not "
+                           "delegation evidence")}
+    if _re.search(r"(?<![\w$])" + _re.escape(sym) + r"\s*\(", text):
+        return {"wrapper": True,
+                "detail": f"target calls {sym}()"}
+    return {"wrapper": False, "detail": ""}

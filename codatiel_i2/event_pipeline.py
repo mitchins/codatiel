@@ -901,6 +901,83 @@ def _notify(cfg: EventConfig, run_dir: str, status: str,
         return False
 
 
+# -- operator-approved semdup continuation --------------------------------
+def resume_semdup(*, cfg: EventConfig, repo: str, pr: int,
+                  base: str, head: str, run_dir: str,
+                  ceiling_usd: float, assess_fn=None,
+                  edit_fn=None) -> dict:
+    """Resume semdup examination for one pinned delta at a new ceiling.
+
+    Reads the completed run's artifacts for identity and prior spend,
+    then runs ONLY the semdup stage into a fresh run dir. Completed
+    verdicts are reused from the persisted continuation at $0 — no
+    inference is ever repeated. Nothing is emailed, no checkpoint or
+    ledger changes: the operator delivers and settles explicitly.
+    Returns prior/new spend, the preflight upper bound for the work
+    still unjudged, and whether any figure is unconfirmed.
+    """
+    from pathlib import Path as _P
+    if cfg.env != "dev":
+        return {"status": "failed", "stage": "config",
+                "error": "resume-semdup is DEV-only"}
+    try:
+        ceiling = float(ceiling_usd)
+    except (TypeError, ValueError):
+        return {"status": "failed", "stage": "config",
+                "error": "ceiling must be numeric"}
+    if ceiling <= 0:
+        return {"status": "failed", "stage": "config",
+                "error": "ceiling must be positive"}
+    orig = _P(run_dir)
+    try:
+        prior_sem = json.loads((orig / "semdup.json").read_text(
+            encoding="utf-8"))
+    except Exception as exc:
+        return {"status": "failed", "stage": "identity",
+                "error": f"prior semdup.json unreadable: {exc}"}
+    if (prior_sem.get("base_rev") != base
+            or prior_sem.get("head_rev") != head):
+        return {"status": "failed", "stage": "identity",
+                "error": "run dir delta does not match --base/--head; "
+                         "refusing to mix deltas"}
+    repo_path = (cfg.repo_paths or {}).get(repo)
+    if not repo_path or not _P(repo_path).is_dir():
+        return {"status": "failed", "stage": "repo_access",
+                "error": f"no configured checkout for {repo}; set "
+                         f"{'CODATIEL_DEV_REPO_PATHS' if cfg.env == 'dev' else 'CODATIEL_TEST_REPO_PATHS'}"}
+    slug = repo.replace("/", "__")
+    tag = f"ceiling-{ceiling:.4f}".rstrip("0").rstrip(".")
+    dest = (cfg.state_dir / "semdup" / "resumed" / slug / str(pr) /
+            f"{base}__{head}" / tag)
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        from codatiel_i2.semdup_dev import stage as stage_mod
+        sem = stage_mod.run_stage(
+            repo_path=_P(repo_path), repo=repo, pr=pr, base_rev=base,
+            head_rev=head, run_dir=dest, state_dir=cfg.state_dir,
+            max_pairs=(cfg.semdup_max_pairs or None),
+            ceiling_usd=ceiling,
+            allow_embeddings=cfg.semdup_allow_embeddings,
+            assess_fn=assess_fn, edit_fn=edit_fn)
+    except Exception as exc:  # noqa: BLE001 - run_stage never raises
+        return {"status": "failed", "stage": "semdup",
+                "error": f"{type(exc).__name__}: {exc}"}
+    prior_spend = prior_sem.get("spend_usd", 0.0)
+    new_spend = sem.get("spend_usd", 0.0)
+    unconfirmed = bool(prior_sem.get("spend_unknown")
+                       or sem.get("spend_unknown"))
+    return {"status": "ok", "run_dir": str(dest),
+            "prior_spend_usd": prior_spend,
+            "new_spend_usd": new_spend,
+            "preflight_remaining_usd": sem.get("preflight_usd"),
+            "spend_unknown": unconfirmed,
+            "semdup_status": sem.get("status"),
+            "coverage": sem.get("coverage"),
+            "pairs_reused": sem.get("pairs_reused", 0),
+            "published": len(sem.get("published", [])),
+            "reason": str(sem.get("reason", ""))[:300]}
+
+
 # -- enable / recover / reset / status / dashboard -------------------------------
 def enable(*, cfg: EventConfig, store: store_mod.Store,
            discover: Any = None) -> dict:

@@ -232,32 +232,50 @@ def retrieve_pairs(merged_db: Path, target: dict, emb: dict | None,
     ST = importlib.import_module(f"{from_cod}.staged")
     conn = sqlite3.connect(str(merged_db))
     try:
-        tid = ST._unit_row(conn, target["path"], target["symbol"])["id"]
+        # Deterministic representative: same (path, symbol) rows
+        # (same-name methods across types, overloads) resolve to the
+        # smallest start_line everywhere, so retrieval and evidence
+        # always pin the same row.
+        trow = conn.execute(
+            "SELECT id, start_line FROM units WHERE path=? AND symbol=? "
+            "ORDER BY start_line LIMIT 1",
+            (target["path"], target["symbol"])).fetchone()
+        if trow is None:
+            raise LookupError(
+                f"target not in index: {target['path']}::"
+                f"{target['symbol']}")
+        tid, target_start = trow
         found = ST.discover(conn, {"file": target["path"],
                                    "symbol": target["symbol"]}, tid, emb=emb)
-    finally:
-        conn.close()
-    pairs: list[dict] = []
-    seen: set[str] = set()
-    for area in found.get("candidate_areas", []):
-        for m in area.get("members", []):
-            mid = m.get("id", "")
-            p, _, s = mid.partition("::")
-            if not mid or mid in seen or mid == f"{target['path']}::{target['symbol']}":
-                continue
-            if AV._is_oracle(p) or AV._is_fragment(s) or not s.strip():
-                continue
-            seen.add(mid)
-            pairs.append({"path": p, "symbol": s,
-                          "via": m.get("provenance", [])})
+        pairs: list[dict] = []
+        seen: set[str] = set()
+        for area in found.get("candidate_areas", []):
+            for m in area.get("members", []):
+                mid = m.get("id", "")
+                p, _, s = mid.partition("::")
+                if not mid or mid in seen or mid == f"{target['path']}::{target['symbol']}":
+                    continue
+                if AV._is_oracle(p) or AV._is_fragment(s) or not s.strip():
+                    continue
+                seen.add(mid)
+                cstart = conn.execute(
+                    "SELECT start_line FROM units WHERE path=? AND "
+                    "symbol=? ORDER BY start_line LIMIT 1",
+                    (p, s)).fetchone()
+                pairs.append({"path": p, "symbol": s,
+                              "via": m.get("provenance", []),
+                              "start_line": cstart[0] if cstart else None,
+                              "target_start_line": target_start})
+                if len(pairs) >= max_pairs:
+                    break
             if len(pairs) >= max_pairs:
                 break
-        if len(pairs) >= max_pairs:
-            break
-    return {"pairs": pairs,
-            "coverage": "full" if emb is not None else "reduced",
-            "n_union": found.get("n_union", 0),
-            "n_dropped_by_cap": found.get("n_dropped_by_cap", 0)}
+        return {"pairs": pairs,
+                "coverage": "full" if emb is not None else "reduced",
+                "n_union": found.get("n_union", 0),
+                "n_dropped_by_cap": found.get("n_dropped_by_cap", 0)}
+    finally:
+        conn.close()
 
 
 # --------------------------------------------------------------------------
