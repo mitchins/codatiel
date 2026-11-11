@@ -1012,3 +1012,92 @@ def test_cli_resume_semdup_validates_args(tmp_path: Path,
     out = cmd_events(args)
     assert out["status"] == "failed"
     assert "needs --repo" in out["error"]
+
+
+def test_notify_none_transport_uses_service_default(tmp_path: Path,
+                                                    monkeypatch):
+    """transport=None must send via the service default, never skip."""
+    from codatiel_i2 import event_pipeline as P
+    from codatiel_i2 import service as S
+    calls = []
+
+    def _fake_deliver(run_dir, *, to, sender, transport=None,
+                      subject=None, text_body=None, context=None,
+                      force=False):
+        calls.append({"transport": transport, "to": to})
+        return {"transport_receipt": {"ok": True}}
+
+    monkeypatch.setattr(S, "deliver_shadow", _fake_deliver)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    ok = P._notify(
+        P.EventConfig(env="dev", state_dir=tmp_path,
+                      notify_to=["t@example.com"],
+                      notify_sender="s@example.com"),
+        str(run_dir), "complete", transport=None, context="dev:o/r#1")
+    assert ok is True
+    assert calls and calls[0]["transport"] is None
+    assert calls[0]["to"] == ["t@example.com"]
+    # No recipients: still refuses.
+    assert P._notify(
+        P.EventConfig(env="dev", state_dir=tmp_path),
+        str(run_dir), "complete", transport=None) is False
+
+
+def test_deliver_shadow_subject_names_pr_not_path(tmp_path: Path):
+    """Event-context subjects name owner/repo#pr, never a clone path."""
+    from codatiel_i2 import service as S
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "run.json").write_text(json.dumps({
+        "run_id": "r1", "repo": "/tmp/clones/o__r",
+        "base_sha": "a" * 40, "head_sha": "b" * 40,
+        "config": {"model": "scripted:x"}}))
+    (run_dir / "shadow_result.json").write_text(json.dumps(
+        {"status": "complete", "counts": {}, "advisory": []}))
+    (run_dir / "metrics.json").write_text(json.dumps(
+        {"status": "complete", "model": "scripted:x",
+         "spend": {"usd_estimate": 0.01}}))
+    receipt = S.deliver_shadow(
+        run_dir, to=["t@example.com"], sender="s@example.com",
+        transport=lambda t, s, b, h=None: {"ok": True},
+        context="dev:o/r#7")
+    assert receipt["subject"] == "[codatiel] o/r#7 bbbbbbbb complete"
+    assert "clones" not in receipt["subject"]
+    plain = S.deliver_shadow(
+        run_dir, to=["t@example.com"], sender="s@example.com",
+        transport=lambda t, s, b, h=None: {"ok": True},
+        context=None, force=True)
+    assert plain["subject"].startswith("[codatiel-shadow] /tmp/clones/")
+
+
+def test_deliver_shadow_context_mismatch_refused(tmp_path: Path):
+    """A context label contradicting the run repo is refused, not sent."""
+    from codatiel_i2 import service as S
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "run.json").write_text(json.dumps({
+        "run_id": "r1", "repo": "/x/clones/mitchins__yt2wiki",
+        "base_sha": "a" * 40, "head_sha": "b" * 40,
+        "config": {"model": "scripted:x"}}))
+    (run_dir / "shadow_result.json").write_text(json.dumps(
+        {"status": "complete", "counts": {}, "advisory": []}))
+    (run_dir / "metrics.json").write_text(json.dumps(
+        {"status": "complete", "model": "scripted:x",
+         "spend": {"usd_estimate": 0.01}}))
+    (run_dir / "semdup.json").write_text(json.dumps(
+        {"status": "ok", "coverage": "full", "repo": "mitchins/yt2wiki",
+         "spend_usd": 0.0, "targets": [], "pairs_examined": 0,
+         "skipped": [], "published": [], "suppressed": []}))
+    sent = []
+    with pytest.raises(ValueError, match="does not match run repo"):
+        S.deliver_shadow(
+            run_dir, to=["t@example.com"], sender="s@example.com",
+            transport=lambda t, s, b, h=None: sent.append(b) or {"ok": True},
+            context="dev:mitchins/needletail-harness#10")
+    assert sent == [] and not (run_dir / "delivery.json").exists()
+    ok = S.deliver_shadow(
+        run_dir, to=["t@example.com"], sender="s@example.com",
+        transport=lambda t, s, b, h=None: sent.append(b) or {"ok": True},
+        context="dev:mitchins/yt2wiki#37")
+    assert sent and ok["subject"].startswith("[codatiel] mitchins/yt2wiki#37")

@@ -887,9 +887,10 @@ def _notify(cfg: EventConfig, run_dir: str, status: str,
     """Private digest to the configured env destination ONLY.
 
     Refuses anything but the configured TEST/DEV recipient list. No PR
-    comments exist anywhere on this path.
+    comments exist anywhere on this path. `transport=None` selects the
+    service default (real SMTP2GO delivery); it never means "skip".
     """
-    if not run_dir or not cfg.notify_to or transport is None:
+    if not run_dir or not cfg.notify_to:
         return False
     try:
         from codatiel_i2 import service as service_mod

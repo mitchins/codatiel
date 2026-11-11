@@ -194,3 +194,56 @@ def test_overview_groups_many_published_by_area(tmp_path: Path):
     m = DM.build_review_model(d, context="dev:o/r#7")
     assert "span 3 files" in m["overview"]
     assert "a.py (3)" in m["overview"]
+
+
+def test_opportunity_groups_connected_pairs(tmp_path: Path):
+    pubs = [
+        {"target_ref": "a.py:1-5", "target_symbol": "f",
+         "counterpart_ref": "b.py:1-5", "counterpart_symbol": "g",
+         "decision": "KEEP", "comment": "c1", "differences": ""},
+        {"target_ref": "b.py:1-5", "target_symbol": "g",
+         "counterpart_ref": "c.py:1-5", "counterpart_symbol": "h",
+         "decision": "KEEP", "comment": "c2", "differences": ""},
+        {"target_ref": "z.py:1-5", "target_symbol": "q",
+         "counterpart_ref": "y.py:1-5", "counterpart_symbol": "w",
+         "decision": "KEEP", "comment": "c3", "differences": ""},
+    ]
+    groups = DM._group_opportunities(pubs)
+    assert len(groups) == 2
+    assert sorted(groups[0]["pair_idxs"]) == [0, 1]
+    assert groups[1]["pair_idxs"] == [2]
+    assert "a.py::f" in groups[0]["units"]
+
+
+def test_grouped_email_lists_every_pair_once(tmp_path: Path):
+    pubs = [
+        {"target": {"path": "a.py", "symbol": "f"},
+         "counterpart": {"path": "b.py", "symbol": "g"},
+         "head_rev": "h", "decision": "KEEP",
+         "revised_comment": "cc1", "reason": "",
+         "anchors": {"target": {"path": "a.py", "start_line": 1,
+                                "end_line": 5},
+                     "counterpart": {"path": "b.py", "start_line": 1,
+                                     "end_line": 5}}},
+        {"target": {"path": "b.py", "symbol": "g"},
+         "counterpart": {"path": "c.py", "symbol": "h"},
+         "head_rev": "h", "decision": "REVISE",
+         "revised_comment": "cc2", "reason": "d2",
+         "anchors": {"target": {"path": "b.py", "start_line": 1,
+                                "end_line": 5},
+                     "counterpart": {"path": "c.py", "start_line": 1,
+                                     "end_line": 5}}},
+    ]
+    sem = {"status": "ok", "coverage": "full", "spend_usd": 0.01,
+           "reason": "examined 2 targets, 2 pairs; 2 approved",
+           "targets": [], "pairs_examined": 2,
+           "skipped": [], "published": pubs, "suppressed": []}
+    d = _run(tmp_path, advisory=[], sem=sem)
+    m = DM.build_review_model(d, context="dev:o/r#7")
+    text = DM.render_text(m)
+    assert "Shared reuse opportunity (2 supporting pairs)" in text
+    assert text.count("may reuse") == 2
+    assert "cc1" in text and "cc2" in text and "d2" in text
+    html = DM.render_html(m)
+    assert "Shared reuse opportunity" in html
+    assert html.count("may reuse") == 2

@@ -1580,6 +1580,8 @@ def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
     """
     run_dir = Path(run_dir)
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    if context is not None:
+        _check_context_matches_run(run_dir, run, context)
     if text_body is None:
         from codatiel_i2 import digest_model as _DM
         _model = _DM.build_review_model(run_dir, context=context)
@@ -1593,9 +1595,7 @@ def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
     body_sha256 = _hashlib.sha256(text.encode("utf-8")).hexdigest()
     html_sha256 = (_hashlib.sha256(html_body.encode("utf-8")).hexdigest()
                    if html_body is not None else None)
-    subj = subject or (f"[codatiel-shadow] {run.get('repo')} "
-                       f"{run.get('head_sha', '')[:8]} "
-                       f"{json.loads((run_dir / 'shadow_result.json').read_text(encoding='utf-8')).get('status')}")
+    subj = subject or _default_subject(run_dir, run, context)
     try:
         existing = json.loads((run_dir / "delivery.json").read_text(
             encoding="utf-8"))
@@ -1625,6 +1625,62 @@ def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
     write_json(run_dir / "delivery.json", record)
     return record
 
+
+def _check_context_matches_run(run_dir: Path, run: dict,
+                                 context: str) -> None:
+    """Refuse an event label that contradicts the run's own repo.
+
+    The context label (dev:owner/repo#123) decides the email header and
+    PR links; sending one run's findings under another PR's identity is
+    a misaddressed notification. When both sides are parseable and
+    disagree, fail closed. Unparseable sides proceed (nothing to check
+    against).
+    """
+    from codatiel_i2 import digest_model as _DM
+    ctx = _DM.parse_event_context(context)
+    if not ctx.get("repo_slug"):
+        return
+    candidates: list[str] = []
+    try:
+        sem = json.loads((run_dir / "semdup.json").read_text(
+            encoding="utf-8"))
+        if isinstance(sem, dict) and sem.get("repo"):
+            candidates.append(str(sem["repo"]))
+    except Exception:  # noqa: BLE001 - fall back to the run record
+        pass
+    repo_path = str(run.get("repo") or "")
+    base = repo_path.rstrip("/").split("/")[-1]
+    if "__" in base:
+        candidates.append(base.replace("__", "/", 1))
+    for cand in candidates:
+        if cand and cand != ctx["repo_slug"]:
+            raise ValueError(
+                f"context repo {ctx['repo_slug']!r} does not match run "
+                f"repo {cand!r}; refusing a misaddressed digest")
+
+
+def _default_subject(run_dir: Path, run: dict,
+                     context: str | None) -> str:
+    """Subject line naming the reviewed PR, never a local path.
+
+    Event reviews carry a context label (dev:owner/repo#123) that
+    identifies the PR; the run record only holds a checkout path.
+    """
+    status = ""
+    try:
+        status = json.loads((run_dir / "shadow_result.json").read_text(
+            encoding="utf-8")).get("status") or ""
+    except Exception:  # noqa: BLE001 - status unknown, still name the PR
+        pass
+    head = str(run.get("head_sha") or "")[:8]
+    if context:
+        from codatiel_i2 import digest_model as _DM
+        ctx = _DM.parse_event_context(context)
+        if ctx.get("repo_slug") and ctx.get("pr_number"):
+            return (f"[codatiel] {ctx['repo_slug']}#{ctx['pr_number']} "
+                    f"{head} {status}".rstrip())
+    return (f"[codatiel-shadow] {run.get('repo')} {head} "
+            f"{status}".rstrip())
 
 
 def _smtp2go_send(to: list[str], sender: str, subject: str,

@@ -34,7 +34,7 @@ def _short_sha(sha: str) -> str:
     return sha[:12] if isinstance(sha, str) else ""
 
 
-def _parse_context(context: str | None) -> dict:
+def parse_event_context(context: str | None) -> dict:
     """owner/repo + PR number from an event label like dev:owner/repo#10."""
     if not context:
         return {}
@@ -263,6 +263,7 @@ def _semdup_entry(sem: dict) -> dict:
                      "reason": str(s.get("reason") or "")}
                     for s in skipped],
         "published": pubs, "suppressed": sups,
+        "opportunity_groups": _group_opportunities(pubs),
     }
 
 
@@ -288,7 +289,7 @@ def build_review_model(run_dir: Path | str,
             sem = {}
     except OSError:
         sem = {}
-    ctx = _parse_context(context)
+    ctx = parse_event_context(context)
     slug = ctx.get("repo_slug", "")
     try:
         pr_number = int(ctx.get("pr_number", ""))
@@ -403,6 +404,70 @@ def _overview(slug: str, pr: int | None, status: str,
     return s
 
 
+def _group_opportunities(pubs: list[dict]) -> list[dict]:
+    """Group published pairs into opportunities (connected components).
+
+    Pairs sharing a unit (target or counterpart) describe one underlying
+    reuse opportunity with several supporting locations; disjoint pairs
+    are independent problems. Union-find over path::symbol unit keys;
+    groups ordered by first appearance, members sorted by (file,
+    symbol) for stable display. No pair is dropped or merged — grouping
+    only decides which findings read as one block.
+    """
+    def _units(p: dict) -> list[str]:
+        out = set()
+        for ref_key, sym_key in (("target_ref", "target_symbol"),
+                                 ("counterpart_ref",
+                                  "counterpart_symbol")):
+            path = str(p.get(ref_key) or "").split(":")[0]
+            sym = str(p.get(sym_key) or "")
+            if path and path != "?" and sym:
+                out.add(f"{path}::{sym}")
+        return sorted(out)
+
+    parent: dict[str, str] = {}
+
+    def _find(x: str) -> str:
+        while parent.get(x, x) != x:
+            parent[x] = parent.get(parent[x], parent[x])
+            x = parent[x]
+        return x
+
+    def _union(a: str, b: str) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for p in pubs:
+        units = _units(p)
+        for u in units:
+            parent.setdefault(u, u)
+        for u in units[1:]:
+            _union(units[0], u)
+    groups: dict[str, dict] = {}
+    order: list[str] = []
+    for i, p in enumerate(pubs):
+        units = _units(p)
+        roots = sorted({_find(u) for u in units} or {"?"})
+        key = roots[0]
+        if key not in groups:
+            groups[key] = {"units": set(), "pair_idxs": []}
+            order.append(key)
+        groups[key]["units"].update(units)
+        groups[key]["pair_idxs"].append(i)
+    out = []
+    for key in order:
+        g = groups[key]
+        out.append({"units": sorted(g["units"]),
+                    "pair_idxs": sorted(g["pair_idxs"],
+                                        key=lambda i: (
+                                            pubs[i]["target_ref"].split(
+                                                ":")[0],
+                                            pubs[i].get("target_symbol",
+                                                         "")))})
+    return out
+
+
 # Human glosses for stable internal reason codes. Presentation only:
 # the stored code is always shown alongside so nothing is hidden.
 _REASON_GLOSSARY = {
@@ -432,6 +497,56 @@ def _gloss_reason(reason: str) -> str:
 
 
 # -- shared rendering helpers -------------------------------------------
+
+def _render_published_text(L: list, sem: dict) -> None:
+    """Published pairs, grouped by opportunity when pairs share units.
+
+    Singleton groups render exactly as the flat list (no change for
+    small reviews). A multi-pair group names the shared units once and
+    lists each supporting pair with its own comment and differences —
+    no pair dropped, no evidence lost, no count cap.
+    """
+    pubs = sem.get("published", [])
+    groups = [g for g in (sem.get("opportunity_groups") or [])
+              if isinstance(g, dict)]
+    multi = any(len(g.get("pair_idxs", [])) > 1 for g in groups)
+    if not multi:
+        for p in pubs:
+            _render_pub_text(L, p)
+        return
+    n = 0
+    covered = set()
+    for g in groups:
+        idxs = [i for i in g.get("pair_idxs", []) if 0 <= i < len(pubs)]
+        if len(idxs) <= 1:
+            for i in idxs:
+                _render_pub_text(L, pubs[i])
+                covered.add(i)
+            continue
+        units = [u.split("::")[0].split("/")[-1] + "::" + u.split("::")[-1]
+                 if "::" in u else u for u in g.get("units", [])]
+        L.append("")
+        L.append(f"Shared reuse opportunity ({len(idxs)} supporting "
+                 f"pairs): {', '.join(units[:6])}")
+        for i in idxs:
+            _render_pub_text(L, pubs[i], indent="  ")
+            covered.add(i)
+    for i, p in enumerate(pubs):
+        if i not in covered:
+            _render_pub_text(L, p)
+
+
+def _render_pub_text(L: list, p: dict, indent: str = "") -> None:
+    L.append("")
+    L.append(f"{indent}- {p['target_ref']} `{p['target_symbol']}` may reuse "
+             f"{p['counterpart_ref']} `{p['counterpart_symbol']}` "
+             f"[{p['decision']}]")
+    if p["comment"]:
+        L.append(f"{indent}  {p['comment']}")
+    if p["differences"] and p["differences"] != p["comment"]:
+        L.append(f"{indent}  Behavioural differences to preserve: "
+                 f"{p['differences']}")
+
 
 def _loc_text(f: dict) -> str:
     if not f["path"]:
@@ -500,16 +615,7 @@ def render_text(model: dict) -> str:
         L.append(f"Possible existing functionality (duplication check "
                  f"finished, {sem['coverage_word']} coverage, {sem['spend']})")
         L.append(sem["state"])
-        for p in sem["published"]:
-            L.append("")
-            L.append(f"- {p['target_ref']} `{p['target_symbol']}` may reuse "
-                     f"{p['counterpart_ref']} `{p['counterpart_symbol']}` "
-                     f"[{p['decision']}]")
-            if p["comment"]:
-                L.append(f"  {p['comment']}")
-            if p["differences"] and p["differences"] != p["comment"]:
-                L.append(f"  Behavioural differences to preserve: "
-                         f"{p['differences']}")
+        _render_published_text(L, sem)
         if sem["suppressed"]:
             L.append(f"Dismissed duplication candidates "
                      f"({len(sem['suppressed'])}):")
@@ -663,17 +769,7 @@ def render_html(model: dict) -> str:
                  f"finished, {_esc(sem['coverage_word'])} coverage, "
                  f"{_esc(sem['spend'])}. "
                  f"{_esc(sem['state'])}</p>")
-        for p in sem["published"]:
-            h.append(f"<p class=\"body\"><strong>{_esc(p['target_ref'])} "
-                     f"<code>{_esc(p['target_symbol'])}</code></strong> may "
-                     f"reuse <strong>{_esc(p['counterpart_ref'])} "
-                     f"<code>{_esc(p['counterpart_symbol'])}</code></strong> "
-                     f"[{_esc(p['decision'])}]</p>")
-            if p["comment"]:
-                h.append(f"<p class=\"body\">{_esc(p['comment'])}</p>")
-            if p["differences"] and p["differences"] != p["comment"]:
-                h.append(f"<p class=\"body\">Behavioural differences to "
-                         f"preserve: {_esc(p['differences'])}</p>")
+        _render_published_html(h, sem)
         if sem["suppressed"]:
             h.append(f"<p class=\"lab\">Dismissed candidates "
                      f"({len(sem['suppressed'])})</p>")
@@ -708,6 +804,94 @@ def render_html(model: dict) -> str:
              f"bundle).</p>")
     h.append("</div></div></div></body></html>")
     return "".join(h)
+
+
+def _render_published_html(h: list, sem: dict) -> None:
+    """Published pairs, grouped by opportunity (mirrors text)."""
+    pubs = sem.get("published", [])
+    groups = [g for g in (sem.get("opportunity_groups") or [])
+              if isinstance(g, dict)]
+    multi = any(len(g.get("pair_idxs", [])) > 1 for g in groups)
+    if not multi:
+        for p in pubs:
+            _render_pub_html(h, p)
+        return
+    covered = set()
+    for g in groups:
+        idxs = [i for i in g.get("pair_idxs", []) if 0 <= i < len(pubs)]
+        if len(idxs) <= 1:
+            for i in idxs:
+                _render_pub_html(h, pubs[i])
+                covered.add(i)
+            continue
+        units = [u.split("::")[0].split("/")[-1] + "::" + u.split("::")[-1]
+                 if "::" in u else u for u in g.get("units", [])]
+        h.append(f"<p class=\"lab\">Shared reuse opportunity "
+                 f"({len(idxs)} supporting pairs): "
+                 f"{_esc(', '.join(units[:6]))}</p>")
+        for i in idxs:
+            _render_pub_html(h, pubs[i], nested=True)
+            covered.add(i)
+    for i, p in enumerate(pubs):
+        if i not in covered:
+            _render_pub_html(h, p)
+
+
+def _render_pub_html(h: list, p: dict, nested: bool = False) -> None:
+    tag = "blockquote" if nested else "p"
+    h.append(f"<{tag} class=\"body\"><strong>{_esc(p['target_ref'])} "
+             f"<code>{_esc(p['target_symbol'])}</code></strong> may "
+             f"reuse <strong>{_esc(p['counterpart_ref'])} "
+             f"<code>{_esc(p['counterpart_symbol'])}</code></strong> "
+             f"[{_esc(p['decision'])}]</{tag}>")
+    if p["comment"]:
+        h.append(f"<p class=\"body\">{_esc(p['comment'])}</p>")
+    if p["differences"] and p["differences"] != p["comment"]:
+        h.append(f"<p class=\"body\">Behavioural differences to "
+                 f"preserve: {_esc(p['differences'])}</p>")
+
+
+def _render_published_markdown(L: list, sem: dict) -> None:
+    """Published pairs, grouped by opportunity (mirrors text)."""
+    pubs = sem.get("published", [])
+    groups = [g for g in (sem.get("opportunity_groups") or [])
+              if isinstance(g, dict)]
+    multi = any(len(g.get("pair_idxs", [])) > 1 for g in groups)
+    if not multi:
+        for p in pubs:
+            _render_pub_markdown(L, p)
+        return
+    covered = set()
+    for g in groups:
+        idxs = [i for i in g.get("pair_idxs", []) if 0 <= i < len(pubs)]
+        if len(idxs) <= 1:
+            for i in idxs:
+                _render_pub_markdown(L, pubs[i])
+                covered.add(i)
+            continue
+        units = [u.split("::")[0].split("/")[-1] + "::" + u.split("::")[-1]
+                 if "::" in u else u for u in g.get("units", [])]
+        L.append("")
+        L.append(f"**Shared reuse opportunity ({len(idxs)} supporting "
+                 f"pairs):** {', '.join(units[:6])}")
+        for i in idxs:
+            _render_pub_markdown(L, pubs[i], indent="  ")
+            covered.add(i)
+    for i, p in enumerate(pubs):
+        if i not in covered:
+            _render_pub_markdown(L, p)
+
+
+def _render_pub_markdown(L: list, p: dict, indent: str = "") -> None:
+    L.append("")
+    L.append(f"{indent}- {p['target_ref']} `{p['target_symbol']}` may reuse "
+             f"{p['counterpart_ref']} `{p['counterpart_symbol']}` "
+             f"[{p['decision']}]")
+    if p["comment"]:
+        L.append(f"{indent}  {p['comment']}")
+    if p["differences"] and p["differences"] != p["comment"]:
+        L.append(f"{indent}  Behavioural differences to preserve: "
+                 f"{p['differences']}")
 
 
 # -- Markdown (future PR comments; NOT wired to GitHub) --------------------
@@ -771,16 +955,7 @@ def render_markdown(model: dict) -> str:
         L.append("")
         L.append(f"Duplication check finished, {sem['coverage_word']} "
                  f"coverage, {sem['spend']}. {sem['state']}")
-        for p in sem["published"]:
-            L.append("")
-            L.append(f"- {p['target_ref']} `{p['target_symbol']}` may reuse "
-                     f"{p['counterpart_ref']} `{p['counterpart_symbol']}` "
-                     f"[{p['decision']}]")
-            if p["comment"]:
-                L.append(f"  {p['comment']}")
-            if p["differences"] and p["differences"] != p["comment"]:
-                L.append(f"  Behavioural differences to preserve: "
-                         f"{p['differences']}")
+        _render_published_markdown(L, sem)
         if sem["suppressed"]:
             L.append("")
             L.append(f"Dismissed candidates ({len(sem['suppressed'])}):")

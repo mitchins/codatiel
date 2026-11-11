@@ -983,7 +983,8 @@ def cmd_deliver_shadow(args) -> dict:
         return service_mod.deliver_shadow(
             args.run_dir, to=to, sender=sender, transport=transport,
             context=(args.context.strip() or None)
-            if hasattr(args, "context") else None)
+            if hasattr(args, "context") else None,
+            force=bool(getattr(args, "force", False)))
 
     except Exception as exc:
         return {"status": "failed", "stage": "delivery",
