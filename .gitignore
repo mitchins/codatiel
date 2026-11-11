@@ -18,3 +18,6 @@ eval/auth3r/.docmat_cache/
 docker/*.env
 watcher_state.json
 watcher_state.json.heartbeat
+# local install artifacts (pip install . drops these in-tree)
+build/
+*.egg-info/
