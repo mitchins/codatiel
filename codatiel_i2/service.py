@@ -165,7 +165,8 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                  variant: str = "baseline",
                  playbook_name: str | None = None,
                  playbook_text: str | None = None,
-                 inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False) -> dict[str, Any]:
+                 inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False,
+                 delegation: Any | None = None) -> dict[str, Any]:
     """Run one canonical review over a local repository revision pair."""
     ws = prepare_local_workspace(Path(repo_root), base, head,
                                  Path(work_root))
@@ -181,7 +182,8 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                        playbook_name=playbook_name,
                        playbook_text=playbook_text,
                        inventory_strategy=inventory_strategy,
-                       enable_final=enable_final)
+                       enable_final=enable_final,
+                       delegation=delegation)
 
 
 def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
@@ -197,7 +199,8 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                expected_head: str | None = None,
                playbook_name: str | None = None,
                playbook_text: str | None = None,
-               inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False) -> dict[str, Any]:
+               inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False,
+               delegation: Any | None = None) -> dict[str, Any]:
     """Run one canonical review over a GitHub PR (base/head from the PR).
 
     When ``expected_base``/``expected_head`` are given (frozen roster SHAs),
@@ -225,17 +228,36 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
     if ws.status != "ready":
         return {"status": "failed", "stage": "workspace", "error": ws.error,
                 "service_version": SERVICE_VERSION}
-    return _run_review(ws, diff_repo=Path(ws.head_dir), model=model,
-                       model_name=model_name, runs_root=Path(runs_root),
-                       max_turns=max_turns, model_settings=model_settings,
-                       rate=rate, rate_status=rate_status,
-                       max_usd_per_review=max_usd_per_review,
-                       tool_budget=tool_budget,
-                       pr_number=pr, variant=variant,
-                       playbook_name=playbook_name,
-                       playbook_text=playbook_text,
-                       inventory_strategy=inventory_strategy,
-                       enable_final=enable_final)
+    out = _run_review(ws, diff_repo=Path(ws.head_dir), model=model,
+                      model_name=model_name, runs_root=Path(runs_root),
+                      max_turns=max_turns, model_settings=model_settings,
+                      rate=rate, rate_status=rate_status,
+                      max_usd_per_review=max_usd_per_review,
+                      tool_budget=tool_budget,
+                      pr_number=pr, variant=variant,
+                      playbook_name=playbook_name,
+                      playbook_text=playbook_text,
+                      inventory_strategy=inventory_strategy,
+                      enable_final=enable_final,
+                      delegation=delegation)
+    if out.get("status") in ("complete", "inconclusive") and out.get(
+            "run_dir"):
+        # IDENTITY-01: bind the review to its (repo, PR, SHAs, run ID)
+        # at creation; downstream render/delivery re-verifies it.
+        from codatiel_i2 import review_identity as identity_mod
+        try:
+            identity_mod.bind_run(
+                out["run_dir"], repo_slug=repo, pr_number=pr,
+                base_sha=ws.base_sha, head_sha=ws.head_sha,
+                run_id=Path(out["run_dir"]).name,
+                binder="service:review_pr")
+        except Exception as exc:
+            return {"status": "failed", "stage": "identity",
+                    "error": f"identity binding refused: {exc}",
+                    "service_version": SERVICE_VERSION,
+                    "repo": repo, "pr": pr,
+                    "run_dir": out.get("run_dir")}
+    return out
 
 
 def _collect_provider_termination(model: Any) -> dict[str, str]:
@@ -318,10 +340,12 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                variant: str = "baseline",
                playbook_name: str | None = None,
                playbook_text: str | None = None,
-               inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False) -> dict[str, Any]:
+               inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False,
+               delegation: Any | None = None) -> dict[str, Any]:
     import os
 
     from codatiel_i2 import providers as providers_mod
+    from codatiel_i2 import delegate as delegate_mod
     from codatiel_i2 import runtime_sdk
 
     runtime_sdk.ensure_local_tracing()
@@ -426,6 +450,26 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 "service_version": SERVICE_VERSION}
     user_input = ("Review this change between BASE and HEAD. "
                   f"Repository: {ws.repo}. {inventory}")
+    # REVIEW-DELEGATE-01: optional bounded multi-agent arm. Subagent
+    # sweeps run here (blind: the lead has not run yet), then the lead
+    # gains one delegation tool per subagent plus a prompt addendum.
+    # Budgets are unchanged for the lead; subagents carry their own.
+    delegation_state: dict[str, Any] | None = None
+    delegation_label = ""
+    if delegation is not None:
+        try:
+            delegation_state = delegate_mod.prepare_delegation(
+                ws=ws, diff_repo=diff_repo, inventory=inventory,
+                spec=delegation, parent_ctx=ctx)
+        except Exception as exc:
+            return {"status": "failed", "stage": "delegation_setup",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "service_version": SERVICE_VERSION}
+        tools = list(tools) + list(delegation_state.get("tools", []))
+        delegation_label = str(instructions_version)
+        # Lead instructions are finalized (base + sweep-digest addendum)
+        # inside the single-loop delegated run below, so provenance stays
+        # bound to the exact submitted bytes.
     ceiling = max_usd_per_review
     if ceiling is None:
         try:
@@ -467,6 +511,15 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 "error": f"durable spend sink unavailable: {ledger.sink_error}",
                 "service_version": SERVICE_VERSION}
     recorded_model = runtime_sdk.UsageRecordingModel(model, ledger)
+
+    def _delegation_summary() -> dict[str, Any] | None:
+        """Subagent summary at handler time (follow-ups happen mid-run)."""
+        if delegation_state is None:
+            return None
+        try:
+            return delegate_mod.delegation_summary(delegation_state)
+        except Exception:
+            return {"error": "summary_failed"}
     # CACHE-01: stable per-review OpenAI prompt-cache partition for Luna.
     # The SDK default mints a fresh key per Runner invocation, which
     # guarantees zero cross-turn cache reuse. The key is metadata only;
@@ -481,11 +534,28 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
         model_settings = runtime_sdk.with_prompt_cache_key(
             model_settings, prompt_cache_key)
     try:
-        result = runtime_sdk.run_review(
-            instructions=instructions,
-            user_input=user_input,
-            tools=tools, model=recorded_model, max_turns=max_turns,
-            model_settings=model_settings, usage_ledger=ledger)
+        if delegation_state is not None:
+            # Single event loop for sweeps + lead + follow-ups: the SDK
+            # shares one HTTP pool per loop, so splitting across loops
+            # strands connections on dead loops ("Event loop is closed").
+            import asyncio as _asyncio
+            result, delegation_state = _asyncio.run(
+                delegate_mod.arun_delegated(
+                    instructions=instructions, user_input=user_input,
+                    tools=tools, model=recorded_model, max_turns=max_turns,
+                    model_settings=model_settings, usage_ledger=ledger,
+                    model_name=model_name, state=delegation_state,
+                    instructions_label=delegation_label))
+            instructions = delegation_state["instructions_final"]
+            instructions_id = instructions_version = delegation_state[
+                "instructions_id_final"]
+            prompt_cache_key = delegation_state.get("prompt_cache_key")
+        else:
+            result = runtime_sdk.run_review(
+                instructions=instructions,
+                user_input=user_input,
+                tools=tools, model=recorded_model, max_turns=max_turns,
+                model_settings=model_settings, usage_ledger=ledger)
         boundary_sha256 = getattr(
             result, "sdk_boundary_instructions_sha256", None)
     except Exception as exc:
@@ -544,7 +614,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                             user_input=user_input, playbook_name=playbook_name,
                             playbook_text=playbook_text,
                             inventory_strategy_name=inventory_strategy_name,
-                            pr_number=pr_number)
+                            pr_number=pr_number,
+                            delegation_summary=_delegation_summary())
                 except Exception:
                     pass
             partial_result = getattr(exc, "run_data", None)
@@ -560,7 +631,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 user_input=user_input, playbook_name=playbook_name,
                 playbook_text=playbook_text,
                 inventory_strategy_name=inventory_strategy_name,
-                pr_number=pr_number)
+                pr_number=pr_number,
+                delegation_summary=_delegation_summary())
         # R1.1 pricing halts are controlled incomplete states with the same
         # partial-trace preservation. PricingUnbounded: the ledger holds a
         # PRICING_PARTIAL request whose true cost is unbounded above, so no
@@ -583,7 +655,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 user_input=user_input, playbook_name=playbook_name,
                 playbook_text=playbook_text,
                 inventory_strategy_name=inventory_strategy_name,
-                pr_number=pr_number)
+                pr_number=pr_number,
+                delegation_summary=_delegation_summary())
         is_budget_ceiling = type(exc).__name__ == "BudgetCeilingExceeded"
         if is_budget_ceiling:
             partial_result = getattr(exc, "run_data", None)
@@ -598,7 +671,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 user_input=user_input, playbook_name=playbook_name,
                 playbook_text=playbook_text,
                 inventory_strategy_name=inventory_strategy_name,
-                pr_number=pr_number)
+                pr_number=pr_number,
+                delegation_summary=_delegation_summary())
         # For other agent failures, try to preserve partial trace if available
         partial_result = getattr(exc, "run_data", None)
         return _write_failed_run(
@@ -611,7 +685,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
             user_input=user_input, playbook_name=playbook_name,
             playbook_text=playbook_text,
             inventory_strategy_name=inventory_strategy_name,
-            pr_number=pr_number)
+            pr_number=pr_number,
+            delegation_summary=_delegation_summary())
 
     tool_evidence = _harvest_tool_evidence(result)
     # CONTEXT-01 arm C: the bundle's citable line evidence was returned
@@ -725,6 +800,9 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 "variant": variant}
     if bundle_meta is not None:
         metrics["bundle"] = bundle_meta
+    if delegation_state is not None:
+        metrics["delegation"] = delegate_mod.delegation_summary(
+            delegation_state)
     _ft = None
     if 'final_tag' in locals() and locals().get('final_tag'):
         _ft = locals().get('final_tag')
@@ -1339,9 +1417,10 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                       inventory: str | None = None,
                       user_input: str | None = None,
                       playbook_name: str | None = None,
-                      playbook_text: str | None = None,
-                      inventory_strategy_name: str | None = None,
-                      pr_number: int | None = None) -> dict[str, Any]:
+               playbook_text: str | None = None,
+               inventory_strategy_name: str | None = None,
+               pr_number: int | None = None,
+               delegation_summary: dict[str, Any] | None = None) -> dict[str, Any]:
     """Minimal immutable record for runs that die before disposition.
 
     When a partial trace is available (e.g., MaxTurnsExceeded with tool calls
@@ -1417,6 +1496,8 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
         metrics["evidence_count"] = len(tool_evidence)
     # Preserve provider termination reasons even on failed runs
     termination_by_response = _collect_provider_termination(model_obj)
+    if delegation_summary is not None:
+        metrics["delegation"] = delegation_summary
     _finalize_spend_ledger(active, run_dir)
 
     pr_url = (f"https://github.com/{ws.repo}/pull/{pr_number}"
@@ -1481,67 +1562,204 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
             "service_version": SERVICE_VERSION}
 
 
+def _receipt_delivered(receipt: Any) -> bool:
+    """A transport receipt that proves the bytes were accepted."""
+    if not isinstance(receipt, dict):
+        return False
+    try:
+        if int(receipt.get("succeeded", 0)) > 0 and int(
+                receipt.get("failed", 0)) == 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return receipt.get("ok") is True
+
+
+def _record_delivery_history(run_dir: Path, entry: dict) -> None:
+    """Append-only per-run send history (IDENTITY-01 reconciliation).
+
+    delivery.json keeps only the latest receipt; this log keeps every
+    attempt — sends, replays, refusals — so delivery counts can be
+    reconciled against review runs. Never raises.
+    """
+    try:
+        from codatiel_i2.common import time as time_mod
+        line = {"ts": time_mod.utc_now_iso(), **entry}
+        with open(run_dir / "delivery-history.jsonl", "a",
+                  encoding="utf-8") as fh:
+            fh.write(json.dumps(line, default=str) + "\n")
+    except Exception:  # noqa: BLE001 - history must never block delivery
+        pass
+
+
 def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
                    transport: Any = None,
                    subject: str | None = None,
-                   text_body: str | None = None) -> dict[str, Any]:
+                   text_body: str | None = None,
+                   context: str | None = None,
+                   force: bool = False) -> dict[str, Any]:
     """Deliver the shadow digest for a completed run. No PR comments ever:
     the only outbound channel is the digest transport (SMTP2GO in ops,
     fixture transport in tests/gates).
 
-    `text_body`, when given, replaces the built-in terse digest with an
-    exact pre-rendered body (v0.1.0 watcher emails). The given bytes are
-    hashed and persisted pre-send exactly as with the default body."""
+    The default body is the consolidated review digest (DIGEST-01):
+    plain-text plus an HTML alternative rendered from the same
+    delivery-independent review model. `text_body`, when given, replaces
+    the built-in digest with an exact pre-rendered body (v0.1.0 watcher
+    emails): the given bytes are hashed and persisted pre-send exactly
+    as with the default body.
+
+    Re-delivering an identical body to an already-accepted receipt is a
+    no-op (returns the stored record marked already-delivered) unless
+    `force` is set for an explicit operator replay.
+    """
     run_dir = Path(run_dir)
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    shadow = json.loads((run_dir / "shadow_result.json").read_text(
-        encoding="utf-8"))
-    lines = ["Codatiel I2 shadow digest",
-             f"repo: {run.get('repo')}",
-             f"base: {run.get('base_sha', '')[:12]} head: {run.get('head_sha', '')[:12]}",
-             f"run: {run.get('run_id')} status: {shadow.get('status')}",
-             f"model: {run.get('config', {}).get('model', '? ')}"
-             f"{' (SCRIPTED mock run — non-evidence)' if 'scripted:' in str(run.get('config', {}).get('model', '')) else ''}",
-              "channel: shadow-only; no PR comments; nothing published",
-              "assessment: advisory findings are unverified review candidates; "
-              "none is a confirmed defect",
-
-             f"counts: {json.dumps(shadow.get('counts', {}))}"]
-    for f in shadow.get("advisory", [])[:10]:
-        if not isinstance(f, dict):
-            continue
-        anchor = f.get("changed_anchor", {}) if isinstance(f.get("changed_anchor"), dict) else {}
-        lines.append(f"- unverified review candidate [{f.get('detector')}] "
-                     f"{anchor.get('path')}:{anchor.get('line_start')} "
-                     f"{f.get('finding_id')} "
-                     f"(substantive assessment: {f.get('substantive_assessment', 'UNASSESSED')})")
-    if shadow.get("silence"):
-        lines.append(f"- silence: {shadow['silence'].get('summary', '')} "
-                     f"({shadow['silence'].get('tool_calls', 0)} tool calls)")
-    text = "\n".join(lines)
-    subj = subject or (f"[codatiel-shadow] {run.get('repo')} "
-                       f"{run.get('head_sha', '')[:8]} {shadow.get('status')}")
-    if text_body is not None:
+    # IDENTITY-01: verify the bound (repo, PR, SHAs, run) identity
+    # before anything is rendered or sent. A caller label may only
+    # confirm the binding; mismatch refuses with zero outbound bytes.
+    # Refusals are recorded in the per-run history, then re-raised.
+    from codatiel_i2 import review_identity as _RI
+    try:
+        _ident = _RI.require_bound(run_dir, context)
+    except ValueError as exc:
+        _record_delivery_history(run_dir, {
+            "outcome": "refused", "context": context,
+            "subject": subject, "error": str(exc)[:300]})
+        raise
+    if context is not None:
+        _check_context_matches_run(run_dir, run, context)
+    # Explicit subjects are caller labels too, on every path: on bound
+    # runs they must name the bound PR; on unbound runs they must
+    # agree with some stored artifact. (Covers the watcher and
+    # semdup-report text paths, which pass context=None, as well as
+    # subjects supplied alongside the rendered digest.)
+    if subject:
+        try:
+            if _ident is not None:
+                _RI.identity_named_in_subject(subject, _ident)
+            else:
+                _RI.check_subject_matches_artifacts(run_dir, subject)
+        except ValueError as exc:
+            _record_delivery_history(run_dir, {
+                "outcome": "refused", "context": context,
+                "subject": subject, "error": str(exc)[:300]})
+            raise
+    if text_body is None:
+        from codatiel_i2 import digest_model as _DM
+        _model = _DM.build_review_model(run_dir, context=context)
+        text = _DM.render_text(_model)
+        html_body: str | None = _DM.render_html(_model)
+    else:
         text = text_body
+        html_body = None
     import hashlib as _hashlib
 
     body_sha256 = _hashlib.sha256(text.encode("utf-8")).hexdigest()
-    # Durable pre-send record: the exact body and its hash are persisted
-    # BEFORE transport, so an accepted-but-unpreserved digest cannot recur.
+    html_sha256 = (_hashlib.sha256(html_body.encode("utf-8")).hexdigest()
+                   if html_body is not None else None)
+    subj = subject or _default_subject(run_dir, run, context,
+                                         bound=_ident)
+    try:
+        existing = json.loads((run_dir / "delivery.json").read_text(
+            encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - no prior delivery on record
+        existing = None
+    if (not force and isinstance(existing, dict)
+            and existing.get("body_sha256") == body_sha256
+            and existing.get("html_sha256") == html_sha256
+            and _receipt_delivered(existing.get("transport_receipt"))):
+        existing = dict(existing)
+        existing["delivery"] = "already-delivered"
+        write_json(run_dir / "delivery.json", existing)
+        _record_delivery_history(run_dir, {
+            "outcome": "already-delivered", "subject": subj,
+            "body_sha256": body_sha256,
+            "receipt": existing.get("transport_receipt") or {}})
+        return existing
+    # Durable pre-send record: the exact bodies and their hashes are
+    # persisted BEFORE transport, so an accepted-but-unpreserved digest
+    # cannot recur.
+    bound_for_record = None
+    try:
+        bound_for_record = _RI.load_identity(run_dir)
+    except Exception:  # noqa: BLE001 - record stays unlabeled
+        bound_for_record = None
     record = {"to": to, "sender": sender, "subject": subj,
               "run_id": run.get("run_id"), "repo": run.get("repo"),
+              "identity": bound_for_record,
               "body_sha256": body_sha256, "body": text,
+              "html_sha256": html_sha256, "html_body": html_body,
               "transport_receipt": None}
     write_json(run_dir / "delivery.json", record)
-    send = transport or (lambda t, s, b: _smtp2go_send(t, sender, s, b))
-    receipt = send(to, subj, text)
+    send = transport or (lambda t, s, b, h=None: _smtp2go_send(
+        t, sender, s, b, h))
+    try:
+        receipt = send(to, subj, text, html_body)
+    except Exception as exc:
+        _record_delivery_history(run_dir, {
+            "outcome": "transport-error", "subject": subj,
+            "body_sha256": body_sha256,
+            "error": f"{type(exc).__name__}: {exc}"})
+        raise
     record["transport_receipt"] = receipt
     write_json(run_dir / "delivery.json", record)
+    _record_delivery_history(run_dir, {
+        "outcome": "sent", "subject": subj,
+        "body_sha256": body_sha256,
+        "receipt": receipt if isinstance(receipt, dict) else {}})
     return record
 
 
+def _check_context_matches_run(run_dir: Path, run: dict,
+                                 context: str) -> None:
+    """Refuse an event label that contradicts the bound review identity.
+
+    Thin wrapper over the identity gate: the label must name the same
+    repository slug and PR number bound to the run dir at review time.
+    SHAs and run ID always come from the binding, never the label.
+    """
+    from codatiel_i2 import review_identity as _RI
+    _RI.require_bound(run_dir, context)
+
+
+def _default_subject(run_dir: Path, run: dict,
+                     context: str | None,
+                     bound: dict | None = None) -> str:
+    """Subject line naming the reviewed PR, never a local path.
+
+    The name comes from the bound review identity (verified), or —
+    for unbound legacy runs — from the caller label. Unbound runs with
+    no label keep the legacy shadow subject.
+    """
+    status = ""
+    try:
+        status = json.loads((run_dir / "shadow_result.json").read_text(
+            encoding="utf-8")).get("status") or ""
+    except Exception:  # noqa: BLE001 - status unknown, still name the PR
+        pass
+    head = str(run.get("head_sha") or "")[:8]
+    if bound is None:
+        try:
+            from codatiel_i2 import review_identity as _RI
+            bound = _RI.load_identity(run_dir)
+        except Exception:  # noqa: BLE001 - fall back to the caller label
+            bound = None
+    if bound and bound.get("repo_slug") and bound.get("pr_number"):
+        return (f"[codatiel] {bound['repo_slug']}#{bound['pr_number']} "
+                f"{head} {status}".rstrip())
+    if context:
+        from codatiel_i2 import digest_model as _DM
+        ctx = _DM.parse_event_context(context)
+        if ctx.get("repo_slug") and ctx.get("pr_number"):
+            return (f"[codatiel] {ctx['repo_slug']}#{ctx['pr_number']} "
+                    f"{head} {status}".rstrip())
+    return (f"[codatiel-shadow] {run.get('repo')} {head} "
+            f"{status}".rstrip())
+
 
 def _smtp2go_send(to: list[str], sender: str, subject: str,
-                  text_body: str) -> dict:
+                  text_body: str, html_body: str | None = None) -> dict:
     from codatiel_i2.delivery.smtp2go import send_email
-    return send_email(to, sender, subject, text_body)
+    return send_email(to, sender, subject, text_body,
+                      html_body=html_body)

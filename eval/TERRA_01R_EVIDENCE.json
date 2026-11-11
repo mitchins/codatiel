@@ -1,0 +1,4063 @@
+{
+ "experiment": "REVIEW-TERRA-01R",
+ "ceiling_usd": 5.0,
+ "spent_usd": 3.3793,
+ "stopped_reason": "roster complete: 27/27 slots (7 frozen + 20 resumed); $3.3793 < $5 ceiling",
+ "config": {
+  "arm": "B (bundle-0.1)",
+  "max_turns": 12,
+  "tool_budget": 40,
+  "enable_final": true,
+  "model": "terra:gpt-6.1-terra",
+  "settings": "store=false, no max_tokens cap (Luna harness used max_tokens=3000; disclosed, not copied)",
+  "cases": [
+   "FW3",
+   "KL1",
+   "L08",
+   "L06",
+   "L10",
+   "WT4",
+   "P15",
+   "PR25",
+   "PR27"
+  ]
+ },
+ "runs": [
+  {
+   "case": "WT4",
+   "arm": "B",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "ec348fb16a07",
+   "tool_calls": 3,
+   "usd": 0.0064668,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 11.1,
+   "final_tag": null,
+   "advisories": 0,
+   "verified_proof": 0,
+   "findings": []
+  },
+  {
+   "case": "FW3",
+   "arm": "B",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "90612a79b446",
+   "tool_calls": 25,
+   "usd": 0.1044586,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 144.16,
+   "final_tag": null,
+   "advisories": 6,
+   "verified_proof": 14,
+   "findings": [
+    {
+     "finding_id": "finding_48dc23efcf0f",
+     "disposition": "verified_proof",
+     "issue_key": "named|CAMERA_PORCH_PASSWORD",
+     "claim": "'CAMERA_PORCH_PASSWORD' is silently ignored",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_6eb02d840f9f",
+     "disposition": "verified_proof",
+     "issue_key": "named|ONVIF",
+     "claim": "'ONVIF' is silently ignored",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_1ae1a1a1c186",
+     "disposition": "verified_proof",
+     "issue_key": "named|CAMERA",
+     "claim": "'CAMERA' is silently ignored",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_b362cfe03733",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/health",
+     "claim": "no implemented route serves GET /health",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_34fb904b70d1",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/stats",
+     "claim": "no implemented route serves GET /stats",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_f33acb98dafd",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/history",
+     "claim": "no implemented route serves GET /history",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_9a9c7b33d16a",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/report",
+     "claim": "no implemented route serves GET /report",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_2c3c0ffe0e7f",
+     "disposition": "verified_proof",
+     "issue_key": "named|PEER_NOT_HEALTHY",
+     "claim": "'PEER_NOT_HEALTHY' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_cf073d3f5f8c",
+     "disposition": "verified_proof",
+     "issue_key": "named|AUTH_LATCHED",
+     "claim": "'AUTH_LATCHED' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_22010574b5f2",
+     "disposition": "verified_proof",
+     "issue_key": "named|ACKNOWLEDGED",
+     "claim": "'ACKNOWLEDGED' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_8962309f7eac",
+     "disposition": "verified_proof",
+     "issue_key": "named|OUTCOME_UNKNOWN",
+     "claim": "'OUTCOME_UNKNOWN' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_bafffd5adcd1",
+     "disposition": "verified_proof",
+     "issue_key": "named|UNSUPPORTED",
+     "claim": "'UNSUPPORTED' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_eae2613a3244",
+     "disposition": "verified_proof",
+     "issue_key": "named|UNKNOWN",
+     "claim": "'UNKNOWN' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_a5b6b8884a11",
+     "disposition": "verified_proof",
+     "issue_key": "named|TELEMETRY_STALE",
+     "claim": "'TELEMETRY_STALE' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The canonical deployment switches /data from ./data to a new external volume without migrating existing state. An upgrading recover-mode installation can therefore lose its recorded latches, cooldowns and attempt budgets",
+     "location": {
+      "line_end": 26,
+      "line_start": 24,
+      "path": "compose.yaml"
+     },
+     "evidence_count": 3,
+     "adjudication": null,
+     "scope": null,
+     "note": null
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Once boot grace expires with a camera dark, it becomes latched. If its frames later return, the phase-halt guard ignores that latch and treats it as a healthy peer after the shorter peer-stability interval. When global s",
+     "location": {
+      "line_end": 981,
+      "line_start": 965,
+      "path": "src/frigate_watchdog/policy.py"
+     },
+     "evidence_count": 6,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Per-action phase guard enforces peer stability (peers_stable must equal flowing count); cited phasing guarantee (halt while dark) holds. 30s/120s asymmetry is design, not a demonstrated defect."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "When multiple failing cameras are eligible, observe mode emits would_recover for each candidate in the same snapshot because reporting a hold does not reserve a hypothetical action or stop the loop. Recover mode would se",
+     "location": {
+      "line_end": 778,
+      "line_start": 750,
+      "path": "src/frigate_watchdog/policy.py"
+     },
+     "evidence_count": 3,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "would_recover per candidate is documented intended observe-mode semantics (policy.py:792-808: hypothetical decisions, recover reboots one at a time). No defect."
+    },
+    {
+     "finding_id": "agent-003",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The latched_incidents count includes only incidents currently marked latched or acknowledged. A latched incident that resolves after healthy confirmation becomes resolved and disappears from the count; acknowledging an o",
+     "location": {
+      "line_end": 839,
+      "line_start": 837,
+      "path": "src/frigate_watchdog/store.py"
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "report() counts incidents with state IN (latched, acknowledged): resolved disappear, acknowledged-but-never-latched counted. Mechanism exactly as claimed. Luna 0/3: Terra-exclusive win."
+    },
+    {
+     "finding_id": "agent-004",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Every attempt row increments reboots_sent, but the row is committed before the reboot call. A crash between reservation and send, or an UNREACHABLE outcome where the camera was never connected, is therefore reported as a",
+     "location": {
+      "line_end": 836,
+      "line_start": 832,
+      "path": "src/frigate_watchdog/store.py"
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Reference FW3-reboots. store.py report(): every attempt row increments reboots_sent regardless of outcome, reservation committed before client.reboot(). Found 3/3 by both models."
+    },
+    {
+     "finding_id": "agent-005",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "After frames briefly return during boot grace or a latched incident, frames_restored is recorded and the outage timer is cleared. If frames stop again before confirmation, these early returns suppress frames_stopped even",
+     "location": {
+      "line_end": 661,
+      "line_start": 655,
+      "path": "src/frigate_watchdog/policy.py"
+     },
+     "evidence_count": 3,
+     "adjudication": null,
+     "scope": null,
+     "note": null
+    }
+   ]
+  },
+  {
+   "case": "FW3",
+   "arm": "B",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "f17765907f8e",
+   "tool_calls": 26,
+   "usd": 0.09528350000000001,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 159.1,
+   "final_tag": null,
+   "advisories": 5,
+   "verified_proof": 14,
+   "findings": [
+    {
+     "finding_id": "finding_48dc23efcf0f",
+     "disposition": "verified_proof",
+     "issue_key": "named|CAMERA_PORCH_PASSWORD",
+     "claim": "'CAMERA_PORCH_PASSWORD' is silently ignored",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_6eb02d840f9f",
+     "disposition": "verified_proof",
+     "issue_key": "named|ONVIF",
+     "claim": "'ONVIF' is silently ignored",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_1ae1a1a1c186",
+     "disposition": "verified_proof",
+     "issue_key": "named|CAMERA",
+     "claim": "'CAMERA' is silently ignored",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_b362cfe03733",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/health",
+     "claim": "no implemented route serves GET /health",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_34fb904b70d1",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/stats",
+     "claim": "no implemented route serves GET /stats",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_f33acb98dafd",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/history",
+     "claim": "no implemented route serves GET /history",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_9a9c7b33d16a",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/report",
+     "claim": "no implemented route serves GET /report",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_2c3c0ffe0e7f",
+     "disposition": "verified_proof",
+     "issue_key": "named|PEER_NOT_HEALTHY",
+     "claim": "'PEER_NOT_HEALTHY' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_cf073d3f5f8c",
+     "disposition": "verified_proof",
+     "issue_key": "named|AUTH_LATCHED",
+     "claim": "'AUTH_LATCHED' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_22010574b5f2",
+     "disposition": "verified_proof",
+     "issue_key": "named|ACKNOWLEDGED",
+     "claim": "'ACKNOWLEDGED' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_8962309f7eac",
+     "disposition": "verified_proof",
+     "issue_key": "named|OUTCOME_UNKNOWN",
+     "claim": "'OUTCOME_UNKNOWN' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_bafffd5adcd1",
+     "disposition": "verified_proof",
+     "issue_key": "named|UNSUPPORTED",
+     "claim": "'UNSUPPORTED' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_eae2613a3244",
+     "disposition": "verified_proof",
+     "issue_key": "named|UNKNOWN",
+     "claim": "'UNKNOWN' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_a5b6b8884a11",
+     "disposition": "verified_proof",
+     "issue_key": "named|TELEMETRY_STALE",
+     "claim": "'TELEMETRY_STALE' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The canonical deployment switches /data from ./data to a new external volume without migrating the existing database. An upgrading installation that follows the new volume-creation instructions starts with an empty safet",
+     "location": {
+      "line_end": 26,
+      "line_start": 24,
+      "path": "compose.yaml"
+     },
+     "evidence_count": 4,
+     "adjudication": null,
+     "scope": null,
+     "note": null
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Once boot grace expires with a camera dark, the engine latches it and clears boot grace. If frames then return, the phase guard stops considering that latched camera because it checks latches only for NO_FRAMES peers. Af",
+     "location": {
+      "line_end": 977,
+      "line_start": 966,
+      "path": "src/frigate_watchdog/policy.py"
+     },
+     "evidence_count": 7,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Per-action phase guard enforces peer stability (peers_stable must equal flowing count); cited phasing guarantee (halt while dark) holds. 30s/120s asymmetry is design, not a demonstrated defect."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "With two eligible failing cameras and a healthy witness, observe mode evaluates both candidates and records would_recover for each in the same poll. Recover mode instead proposes only the first and waits for its outcome;",
+     "location": {
+      "line_end": 775,
+      "line_start": 750,
+      "path": "src/frigate_watchdog/policy.py"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "would_recover per candidate is documented intended observe-mode semantics (policy.py:792-808: hypothetical decisions, recover reboots one at a time). No defect."
+    },
+    {
+     "finding_id": "agent-003",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The first flowing sample ends the reported outage and clears outage_rebooted, even before recovery is confirmed. If frames stop again during boot grace or a latch, the early returns suppress a new frames_stopped event; w",
+     "location": {
+      "line_end": 539,
+      "line_start": 523,
+      "path": "src/frigate_watchdog/policy.py"
+     },
+     "evidence_count": 3,
+     "adjudication": "UNRESOLVED",
+     "scope": "unknown",
+     "note": "Clear-on-first-return (policy.py:536-537) and restart-on-dark (634) verified; whether frames_stopped is actually omitted depends on untraced confirmation gating during latch/boot-grace."
+    },
+    {
+     "finding_id": "agent-004",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "reboots_sent counts every attempt reservation, but a reservation is committed before the ONVIF send. A crash or cancellation between those steps leaves an unrecorded attempt that the report nevertheless presents as a sen",
+     "location": {
+      "line_end": 835,
+      "line_start": 831,
+      "path": "src/frigate_watchdog/store.py"
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Reference FW3-reboots. store.py report(): every attempt row increments reboots_sent regardless of outcome, reservation committed before client.reboot(). Found 3/3 by both models."
+    }
+   ]
+  },
+  {
+   "case": "FW3",
+   "arm": "B",
+   "rep": 3,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "dce95eb4671f",
+   "tool_calls": 25,
+   "usd": 0.1147979,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 128.27,
+   "final_tag": null,
+   "advisories": 5,
+   "verified_proof": 14,
+   "findings": [
+    {
+     "finding_id": "finding_48dc23efcf0f",
+     "disposition": "verified_proof",
+     "issue_key": "named|CAMERA_PORCH_PASSWORD",
+     "claim": "'CAMERA_PORCH_PASSWORD' is silently ignored",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_6eb02d840f9f",
+     "disposition": "verified_proof",
+     "issue_key": "named|ONVIF",
+     "claim": "'ONVIF' is silently ignored",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_1ae1a1a1c186",
+     "disposition": "verified_proof",
+     "issue_key": "named|CAMERA",
+     "claim": "'CAMERA' is silently ignored",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_b362cfe03733",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/health",
+     "claim": "no implemented route serves GET /health",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_34fb904b70d1",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/stats",
+     "claim": "no implemented route serves GET /stats",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_f33acb98dafd",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/history",
+     "claim": "no implemented route serves GET /history",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_9a9c7b33d16a",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/report",
+     "claim": "no implemented route serves GET /report",
+     "location": {
+      "line_end": 177,
+      "line_start": 1,
+      "path": "README.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_2c3c0ffe0e7f",
+     "disposition": "verified_proof",
+     "issue_key": "named|PEER_NOT_HEALTHY",
+     "claim": "'PEER_NOT_HEALTHY' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_cf073d3f5f8c",
+     "disposition": "verified_proof",
+     "issue_key": "named|AUTH_LATCHED",
+     "claim": "'AUTH_LATCHED' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_22010574b5f2",
+     "disposition": "verified_proof",
+     "issue_key": "named|ACKNOWLEDGED",
+     "claim": "'ACKNOWLEDGED' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_8962309f7eac",
+     "disposition": "verified_proof",
+     "issue_key": "named|OUTCOME_UNKNOWN",
+     "claim": "'OUTCOME_UNKNOWN' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_bafffd5adcd1",
+     "disposition": "verified_proof",
+     "issue_key": "named|UNSUPPORTED",
+     "claim": "'UNSUPPORTED' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_eae2613a3244",
+     "disposition": "verified_proof",
+     "issue_key": "named|UNKNOWN",
+     "claim": "'UNKNOWN' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "finding_a5b6b8884a11",
+     "disposition": "verified_proof",
+     "issue_key": "named|TELEMETRY_STALE",
+     "claim": "'TELEMETRY_STALE' is silently ignored",
+     "location": {
+      "line_end": 209,
+      "line_start": 1,
+      "path": "docs/operations.md"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "docs_code contract class identical for Luna and Terra (same 14 issue_keys all reps). Spot-verified false: GET /health|/stats|/history|/report ARE registered (http_api.py:144-147, inverted claims); CAMERA_PORCH_PASSWORD IS consumed (compose.yaml, config, tests). Remainder shares the extractor mechanism; presumed false, not individually verified."
+    },
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The previous Compose deployment mounted ./data at /data; the new deployment mounts a separate named volume without migrating that directory. An existing installation upgraded using this file will start with a new safety ",
+     "location": {
+      "line_end": 27,
+      "line_start": 25,
+      "path": "compose.yaml"
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "PR changes compose.yaml ./data:/data to named volume watchdog_data:/data with no migration path (24-file diff has no migration). Upgrading installations lose latches/cooldowns/budgets. Luna 0/3: Terra-exclusive win."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "When multiple eligible cameras fail together, observe mode records would_recover for each candidate in the same pass because it does not establish an in-flight action. Recover mode instead returns after the first proposa",
+     "location": {
+      "line_end": 776,
+      "line_start": 747,
+      "path": "src/frigate_watchdog/policy.py"
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "would_recover per candidate is documented intended observe-mode semantics (policy.py:792-808: hypothetical decisions, recover reboots one at a time). No defect."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The report counts only incidents whose current state is latched or acknowledged. A previously latched incident disappears from the total when healthy confirmation changes it to resolved, while acknowledging an open incid",
+     "location": {
+      "line_end": 839,
+      "line_start": 836,
+      "path": "src/frigate_watchdog/store.py"
+     },
+     "evidence_count": 3,
+     "adjudication": null,
+     "scope": null,
+     "note": null
+    },
+    {
+     "finding_id": "agent-003",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Reboot attribution is kept only in CameraRuntime. If the service restarts after a reboot request while the camera is still dark, the new runtime starts with outage_rebooted false; when frames return, the event is classif",
+     "location": {
+      "line_end": 536,
+      "line_start": 523,
+      "path": "src/frigate_watchdog/policy.py"
+     },
+     "evidence_count": 4,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "outage_rebooted is runtime-only (set at reservation, policy.py:1095); restart re-adopts latch state but not the flag, so post-restart recovery classifies SELF_RECOVERED despite the durable attempt row. Luna 0/3: Terra-exclusive win."
+    },
+    {
+     "finding_id": "agent-004",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The report increments reboots_sent for every attempt reservation, including an unrecorded reservation. Reservations commit before client.reboot(), so a crash between those steps can produce a reported command that was ne",
+     "location": {
+      "line_end": 835,
+      "line_start": 831,
+      "path": "src/frigate_watchdog/store.py"
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Reference FW3-reboots. store.py report(): every attempt row increments reboots_sent regardless of outcome, reservation committed before client.reboot(). Found 3/3 by both models."
+    }
+   ]
+  },
+  {
+   "case": "KL1",
+   "arm": "B",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "3030c9705a10",
+   "tool_calls": 32,
+   "usd": 0.17387145,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 85.55,
+   "final_tag": null,
+   "advisories": 2,
+   "verified_proof": 30,
+   "findings": [
+    {
+     "finding_id": "finding_b6cc34eb930d",
+     "disposition": "verified_proof",
+     "issue_key": "named|SCORM",
+     "claim": "'SCORM' is silently ignored",
+     "location": {
+      "line_end": 145,
+      "line_start": 1,
+      "path": "development-plan.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_43ea130bef34",
+     "disposition": "verified_proof",
+     "issue_key": "named|VALET",
+     "claim": "'VALET' is silently ignored",
+     "location": {
+      "line_end": 145,
+      "line_start": 1,
+      "path": "development-plan.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_bec20395d238",
+     "disposition": "verified_proof",
+     "issue_key": "named|SERVICE_BINDING_FAILED",
+     "claim": "'SERVICE_BINDING_FAILED' is silently ignored",
+     "location": {
+      "line_end": 27,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-diagnosis.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_4bb7322ce853",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/run/ladder-stored-8m",
+     "claim": "no implemented route serves GET /run/ladder-stored-8m",
+     "location": {
+      "line_end": 27,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-diagnosis.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_86633fc254d1",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/payload/ladder-stored-8m",
+     "claim": "no implemented route serves GET /payload/ladder-stored-8m",
+     "location": {
+      "line_end": 27,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-diagnosis.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_5566a650d71a",
+     "disposition": "verified_proof",
+     "issue_key": "named|dry-run",
+     "claim": "'--dry-run' is silently ignored",
+     "location": {
+      "line_end": 47,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-probe.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_43dedc745cb3",
+     "disposition": "verified_proof",
+     "issue_key": "named|README",
+     "claim": "'README' is silently ignored",
+     "location": {
+      "line_end": 36,
+      "line_start": 1,
+      "path": "docs/milestones/m0-deployed-runtime.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_66b4c9724604",
+     "disposition": "verified_proof",
+     "issue_key": "named|STORAGE",
+     "claim": "'STORAGE' is silently ignored",
+     "location": {
+      "line_end": 98,
+      "line_start": 1,
+      "path": "docs/milestones/m0-inventory.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_555b6cf9cb5b",
+     "disposition": "verified_proof",
+     "issue_key": "named|LICENSE",
+     "claim": "'LICENSE' is silently ignored",
+     "location": {
+      "line_end": 98,
+      "line_start": 1,
+      "path": "docs/milestones/m0-inventory.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3c4d4a8ebf71",
+     "disposition": "verified_proof",
+     "issue_key": "named|ASCII",
+     "claim": "'ASCII' is silently ignored",
+     "location": {
+      "line_end": 98,
+      "line_start": 1,
+      "path": "docs/milestones/m0-inventory.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_c95a5421b4e5",
+     "disposition": "verified_proof",
+     "issue_key": "named|RECORD",
+     "claim": "'RECORD' is silently ignored",
+     "location": {
+      "line_end": 150,
+      "line_start": 1,
+      "path": "docs/milestones/m0-ledger.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_0ccb15b9fa2c",
+     "disposition": "verified_proof",
+     "issue_key": "named|HEAD",
+     "claim": "'HEAD' is silently ignored",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3d897f33ea79",
+     "disposition": "verified_proof",
+     "issue_key": "named|SELECT",
+     "claim": "'SELECT' is silently ignored",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_70bc5dec4584",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/runtime/v1/attempts/{}/commits",
+     "claim": "no implemented route serves POST /runtime/v1/attempts/{attempt_id}/commits",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_fbe7799b1f6b",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/internal/launch-tokens/verify",
+     "claim": "no implemented route serves POST /api/internal/launch-tokens/verify",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_4e6f7ef05340",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/auth/challenges",
+     "claim": "no implemented route serves POST /api/v1/auth/challenges",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_a7413a556c58",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/auth/valet/exchange",
+     "claim": "no implemented route serves POST /api/v1/auth/valet/exchange",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3387b63579e2",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/me",
+     "claim": "no implemented route serves GET /api/v1/me",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_0777d28b2465",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/package-imports",
+     "claim": "no implemented route serves POST /api/v1/package-imports",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_e186a71c62ee",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/uploads/{}/parts",
+     "claim": "no implemented route serves POST /api/v1/uploads/{id}/parts",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_c85e8955ce17",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/package-imports/{}/publish",
+     "claim": "no implemented route serves POST /api/v1/package-imports/{id}/publish",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3cc83908a048",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/people-imports",
+     "claim": "no implemented route serves POST /api/v1/people-imports",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_69ead0439fa0",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/enrolments/{}/launch",
+     "claim": "no implemented route serves POST /api/v1/enrolments/{id}/launch",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_b6641c6989d0",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/launch/exchange",
+     "claim": "no implemented route serves POST /launch/exchange",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_60dc31ef2921",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/runtime/v1/attempts/{}/receipts/{}",
+     "claim": "no implemented route serves GET /runtime/v1/attempts/{id}/receipts/{checkpoint}",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_52e68a374028",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/runtime/v1/attempts/{}/renew",
+     "claim": "no implemented route serves POST /runtime/v1/attempts/{id}/renew",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_a21e97218070",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/reports/progress",
+     "claim": "no implemented route serves GET /api/v1/reports/progress",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_f24477ab7e81",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/exports",
+     "claim": "no implemented route serves POST /api/v1/exports",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_8e78f51df8b8",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/jobs/{}",
+     "claim": "no implemented route serves GET /api/v1/jobs/{id}",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_efb8c04de5bb",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/exports/{}/download",
+     "claim": "no implemented route serves GET /api/v1/exports/{id}/download",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The manifest validator checks the D1 UUID's format but compares created resources only by type and name, ignoring their recorded IDs. A manifest containing the disposable database name but another valid UUID therefore pa",
+     "location": {
+      "line_end": 133,
+      "line_start": 116,
+      "path": "tools/run_deployed_probe.py"
+     },
+     "evidence_count": 5,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "tools/run_deployed_probe.py manifest validation compares created resources by (type, name) only, ignoring recorded database IDs. Mechanism matches cited lines 116-133. Luna 0/3: Terra-exclusive win."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "All three supported fixtures expect Content-Range bytes 0-7/64, but their shared range asset is 65 bytes; the materialization evidence records that exact asset and digest as 65 bytes. A compliant server serving the packa",
+     "location": {
+      "line_end": 95,
+      "line_start": 91,
+      "path": "tests/fixtures/scorm/corpus.json"
+     },
+     "evidence_count": 6,
+     "adjudication": null,
+     "scope": null,
+     "note": null
+    }
+   ]
+  },
+  {
+   "case": "KL1",
+   "arm": "B",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "51bdcb138c41",
+   "tool_calls": 39,
+   "usd": 0.2013757,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 103.71,
+   "final_tag": null,
+   "advisories": 1,
+   "verified_proof": 30,
+   "findings": [
+    {
+     "finding_id": "finding_b6cc34eb930d",
+     "disposition": "verified_proof",
+     "issue_key": "named|SCORM",
+     "claim": "'SCORM' is silently ignored",
+     "location": {
+      "line_end": 145,
+      "line_start": 1,
+      "path": "development-plan.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_43ea130bef34",
+     "disposition": "verified_proof",
+     "issue_key": "named|VALET",
+     "claim": "'VALET' is silently ignored",
+     "location": {
+      "line_end": 145,
+      "line_start": 1,
+      "path": "development-plan.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_bec20395d238",
+     "disposition": "verified_proof",
+     "issue_key": "named|SERVICE_BINDING_FAILED",
+     "claim": "'SERVICE_BINDING_FAILED' is silently ignored",
+     "location": {
+      "line_end": 27,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-diagnosis.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_4bb7322ce853",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/run/ladder-stored-8m",
+     "claim": "no implemented route serves GET /run/ladder-stored-8m",
+     "location": {
+      "line_end": 27,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-diagnosis.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_86633fc254d1",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/payload/ladder-stored-8m",
+     "claim": "no implemented route serves GET /payload/ladder-stored-8m",
+     "location": {
+      "line_end": 27,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-diagnosis.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_5566a650d71a",
+     "disposition": "verified_proof",
+     "issue_key": "named|dry-run",
+     "claim": "'--dry-run' is silently ignored",
+     "location": {
+      "line_end": 47,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-probe.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_43dedc745cb3",
+     "disposition": "verified_proof",
+     "issue_key": "named|README",
+     "claim": "'README' is silently ignored",
+     "location": {
+      "line_end": 36,
+      "line_start": 1,
+      "path": "docs/milestones/m0-deployed-runtime.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_66b4c9724604",
+     "disposition": "verified_proof",
+     "issue_key": "named|STORAGE",
+     "claim": "'STORAGE' is silently ignored",
+     "location": {
+      "line_end": 98,
+      "line_start": 1,
+      "path": "docs/milestones/m0-inventory.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_555b6cf9cb5b",
+     "disposition": "verified_proof",
+     "issue_key": "named|LICENSE",
+     "claim": "'LICENSE' is silently ignored",
+     "location": {
+      "line_end": 98,
+      "line_start": 1,
+      "path": "docs/milestones/m0-inventory.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3c4d4a8ebf71",
+     "disposition": "verified_proof",
+     "issue_key": "named|ASCII",
+     "claim": "'ASCII' is silently ignored",
+     "location": {
+      "line_end": 98,
+      "line_start": 1,
+      "path": "docs/milestones/m0-inventory.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_c95a5421b4e5",
+     "disposition": "verified_proof",
+     "issue_key": "named|RECORD",
+     "claim": "'RECORD' is silently ignored",
+     "location": {
+      "line_end": 150,
+      "line_start": 1,
+      "path": "docs/milestones/m0-ledger.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_0ccb15b9fa2c",
+     "disposition": "verified_proof",
+     "issue_key": "named|HEAD",
+     "claim": "'HEAD' is silently ignored",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3d897f33ea79",
+     "disposition": "verified_proof",
+     "issue_key": "named|SELECT",
+     "claim": "'SELECT' is silently ignored",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_70bc5dec4584",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/runtime/v1/attempts/{}/commits",
+     "claim": "no implemented route serves POST /runtime/v1/attempts/{attempt_id}/commits",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_fbe7799b1f6b",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/internal/launch-tokens/verify",
+     "claim": "no implemented route serves POST /api/internal/launch-tokens/verify",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_4e6f7ef05340",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/auth/challenges",
+     "claim": "no implemented route serves POST /api/v1/auth/challenges",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_a7413a556c58",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/auth/valet/exchange",
+     "claim": "no implemented route serves POST /api/v1/auth/valet/exchange",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3387b63579e2",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/me",
+     "claim": "no implemented route serves GET /api/v1/me",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_0777d28b2465",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/package-imports",
+     "claim": "no implemented route serves POST /api/v1/package-imports",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_e186a71c62ee",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/uploads/{}/parts",
+     "claim": "no implemented route serves POST /api/v1/uploads/{id}/parts",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_c85e8955ce17",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/package-imports/{}/publish",
+     "claim": "no implemented route serves POST /api/v1/package-imports/{id}/publish",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3cc83908a048",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/people-imports",
+     "claim": "no implemented route serves POST /api/v1/people-imports",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_69ead0439fa0",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/enrolments/{}/launch",
+     "claim": "no implemented route serves POST /api/v1/enrolments/{id}/launch",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_b6641c6989d0",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/launch/exchange",
+     "claim": "no implemented route serves POST /launch/exchange",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_60dc31ef2921",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/runtime/v1/attempts/{}/receipts/{}",
+     "claim": "no implemented route serves GET /runtime/v1/attempts/{id}/receipts/{checkpoint}",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_52e68a374028",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/runtime/v1/attempts/{}/renew",
+     "claim": "no implemented route serves POST /runtime/v1/attempts/{id}/renew",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_a21e97218070",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/reports/progress",
+     "claim": "no implemented route serves GET /api/v1/reports/progress",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_f24477ab7e81",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/exports",
+     "claim": "no implemented route serves POST /api/v1/exports",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_8e78f51df8b8",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/jobs/{}",
+     "claim": "no implemented route serves GET /api/v1/jobs/{id}",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_efb8c04de5bb",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/exports/{}/download",
+     "claim": "no implemented route serves GET /api/v1/exports/{id}/download",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Each case has a separate one-shot claim, but there is no shared admission control before extraction. Concurrent authenticated requests for the stored and Deflate cases can therefore run two multipart extraction streams a",
+     "location": {
+      "line_end": 330,
+      "line_start": 325,
+      "path": "probes/archive/worker.js"
+     },
+     "evidence_count": 4,
+     "adjudication": "UNRESOLVED",
+     "scope": "unknown",
+     "note": "Per-case claim keys with onlyIf-not-exists serialize per case; alleged documented one-stream cross-case limit not located. Could be phantom-contract pattern or genuine."
+    }
+   ]
+  },
+  {
+   "case": "KL1",
+   "arm": "B",
+   "rep": 3,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "39033930ca8b",
+   "tool_calls": 25,
+   "usd": 0.13165140000000003,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 85.21,
+   "final_tag": null,
+   "advisories": 2,
+   "verified_proof": 30,
+   "findings": [
+    {
+     "finding_id": "finding_b6cc34eb930d",
+     "disposition": "verified_proof",
+     "issue_key": "named|SCORM",
+     "claim": "'SCORM' is silently ignored",
+     "location": {
+      "line_end": 145,
+      "line_start": 1,
+      "path": "development-plan.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_43ea130bef34",
+     "disposition": "verified_proof",
+     "issue_key": "named|VALET",
+     "claim": "'VALET' is silently ignored",
+     "location": {
+      "line_end": 145,
+      "line_start": 1,
+      "path": "development-plan.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_bec20395d238",
+     "disposition": "verified_proof",
+     "issue_key": "named|SERVICE_BINDING_FAILED",
+     "claim": "'SERVICE_BINDING_FAILED' is silently ignored",
+     "location": {
+      "line_end": 27,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-diagnosis.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_4bb7322ce853",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/run/ladder-stored-8m",
+     "claim": "no implemented route serves GET /run/ladder-stored-8m",
+     "location": {
+      "line_end": 27,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-diagnosis.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_86633fc254d1",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/payload/ladder-stored-8m",
+     "claim": "no implemented route serves GET /payload/ladder-stored-8m",
+     "location": {
+      "line_end": 27,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-diagnosis.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_5566a650d71a",
+     "disposition": "verified_proof",
+     "issue_key": "named|dry-run",
+     "claim": "'--dry-run' is silently ignored",
+     "location": {
+      "line_end": 47,
+      "line_start": 1,
+      "path": "docs/milestones/m0-archive-probe.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_43dedc745cb3",
+     "disposition": "verified_proof",
+     "issue_key": "named|README",
+     "claim": "'README' is silently ignored",
+     "location": {
+      "line_end": 36,
+      "line_start": 1,
+      "path": "docs/milestones/m0-deployed-runtime.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_66b4c9724604",
+     "disposition": "verified_proof",
+     "issue_key": "named|STORAGE",
+     "claim": "'STORAGE' is silently ignored",
+     "location": {
+      "line_end": 98,
+      "line_start": 1,
+      "path": "docs/milestones/m0-inventory.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_555b6cf9cb5b",
+     "disposition": "verified_proof",
+     "issue_key": "named|LICENSE",
+     "claim": "'LICENSE' is silently ignored",
+     "location": {
+      "line_end": 98,
+      "line_start": 1,
+      "path": "docs/milestones/m0-inventory.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3c4d4a8ebf71",
+     "disposition": "verified_proof",
+     "issue_key": "named|ASCII",
+     "claim": "'ASCII' is silently ignored",
+     "location": {
+      "line_end": 98,
+      "line_start": 1,
+      "path": "docs/milestones/m0-inventory.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_c95a5421b4e5",
+     "disposition": "verified_proof",
+     "issue_key": "named|RECORD",
+     "claim": "'RECORD' is silently ignored",
+     "location": {
+      "line_end": 150,
+      "line_start": 1,
+      "path": "docs/milestones/m0-ledger.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_0ccb15b9fa2c",
+     "disposition": "verified_proof",
+     "issue_key": "named|HEAD",
+     "claim": "'HEAD' is silently ignored",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3d897f33ea79",
+     "disposition": "verified_proof",
+     "issue_key": "named|SELECT",
+     "claim": "'SELECT' is silently ignored",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_70bc5dec4584",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/runtime/v1/attempts/{}/commits",
+     "claim": "no implemented route serves POST /runtime/v1/attempts/{attempt_id}/commits",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_fbe7799b1f6b",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/internal/launch-tokens/verify",
+     "claim": "no implemented route serves POST /api/internal/launch-tokens/verify",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_4e6f7ef05340",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/auth/challenges",
+     "claim": "no implemented route serves POST /api/v1/auth/challenges",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_a7413a556c58",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/auth/valet/exchange",
+     "claim": "no implemented route serves POST /api/v1/auth/valet/exchange",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3387b63579e2",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/me",
+     "claim": "no implemented route serves GET /api/v1/me",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_0777d28b2465",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/package-imports",
+     "claim": "no implemented route serves POST /api/v1/package-imports",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_e186a71c62ee",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/uploads/{}/parts",
+     "claim": "no implemented route serves POST /api/v1/uploads/{id}/parts",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_c85e8955ce17",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/package-imports/{}/publish",
+     "claim": "no implemented route serves POST /api/v1/package-imports/{id}/publish",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_3cc83908a048",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/people-imports",
+     "claim": "no implemented route serves POST /api/v1/people-imports",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_69ead0439fa0",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/enrolments/{}/launch",
+     "claim": "no implemented route serves POST /api/v1/enrolments/{id}/launch",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_b6641c6989d0",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/launch/exchange",
+     "claim": "no implemented route serves POST /launch/exchange",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_60dc31ef2921",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/runtime/v1/attempts/{}/receipts/{}",
+     "claim": "no implemented route serves GET /runtime/v1/attempts/{id}/receipts/{checkpoint}",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_52e68a374028",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/runtime/v1/attempts/{}/renew",
+     "claim": "no implemented route serves POST /runtime/v1/attempts/{id}/renew",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_a21e97218070",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/reports/progress",
+     "claim": "no implemented route serves GET /api/v1/reports/progress",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_f24477ab7e81",
+     "disposition": "verified_proof",
+     "issue_key": "route|POST|/api/v1/exports",
+     "claim": "no implemented route serves POST /api/v1/exports",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_8e78f51df8b8",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/jobs/{}",
+     "claim": "no implemented route serves GET /api/v1/jobs/{id}",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "finding_efb8c04de5bb",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/api/v1/exports/{}/download",
+     "claim": "no implemented route serves GET /api/v1/exports/{id}/download",
+     "location": {
+      "line_end": 480,
+      "line_start": 1,
+      "path": "kinglet-lms-mvp-1.0-spec.md"
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Identical 30 issue_keys all reps for both models (deterministic validator). Spot-verified false: SCORM (head README + AGENTS affirm SCORM-first; contract tests exist), README (m0-deployed-runtime.md mention is not the readme-totals reference issue), route claims against an aspirational MVP spec (README: nothing released). Remainder shares mechanism."
+    },
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The pair validator accepts any supported delivery mode for either profile, so a retail/private and B2B/public_consumer pair can receive a pair-check PASS. The M0 contract requires retail/public_consumer and B2B/private. ",
+     "location": {
+      "line_end": 166,
+      "line_start": 162,
+      "path": "tools/run_deployed_probe.py"
+     },
+     "evidence_count": 4,
+     "adjudication": null,
+     "scope": null,
+     "note": null
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Claims are keyed by case, so concurrent authenticated requests for the stored and Deflate cases can both acquire their claims and extract simultaneously. This does not enforce the documented single concurrent extraction ",
+     "location": {
+      "line_end": 272,
+      "line_start": 261,
+      "path": "probes/archive/worker.js"
+     },
+     "evidence_count": 3,
+     "adjudication": null,
+     "scope": null,
+     "note": null
+    }
+   ]
+  },
+  {
+   "case": "L08",
+   "arm": "B",
+   "rep": 1,
+   "status": "failed",
+   "stage": "agent",
+   "sanitized_run_id": "694ef9051e93",
+   "tool_calls": null,
+   "usd": 0.0,
+   "spend_accounting": "UNKNOWN_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": null,
+   "final_tag": null,
+   "advisories": 0,
+   "verified_proof": 0,
+   "findings": []
+  },
+  {
+   "case": "L08",
+   "arm": "B",
+   "rep": 2,
+   "status": "failed",
+   "stage": "agent",
+   "sanitized_run_id": "8ae907ea0a18",
+   "tool_calls": null,
+   "usd": 0.0,
+   "spend_accounting": "UNKNOWN_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": null,
+   "final_tag": null,
+   "advisories": 0,
+   "verified_proof": 0,
+   "findings": []
+  },
+  {
+   "case": "L08",
+   "arm": "B",
+   "rep": 3,
+   "status": "failed",
+   "stage": "agent",
+   "sanitized_run_id": "cba7409cc525",
+   "tool_calls": null,
+   "usd": 0.0,
+   "spend_accounting": "UNKNOWN_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": null,
+   "final_tag": null,
+   "advisories": 0,
+   "verified_proof": 0,
+   "findings": []
+  },
+  {
+   "case": "L06",
+   "arm": "B",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "aab42514edbf",
+   "tool_calls": 35,
+   "usd": 0.12454920000000004,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 45.98,
+   "final_tag": null,
+   "advisories": 4,
+   "verified_proof": 1,
+   "tiers": [
+    "short"
+   ],
+   "requests": 8,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The loading guard is cleared when the catalogue arrives, before its StoreKit request completes. A screen visit can therefore start another discovery while the first product request is in flight. Responses are applied without checking which catalogue produced them, so a late, partial response can replace newer products and leave plans missing or joined against the wrong catalogue.",
+     "location": {
+      "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Services/InAppPurchase/InAppPurchaseService.swift",
+      "line_start": 91,
+      "line_end": 100
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "isLoadingSubscriptionPlans cleared in catalogue onSuccess before async requestProducts completes; second loadSubscriptionPlans passes the guard -> overlapping discoveries race last-write-wins on entries. New file flow at head."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Catalogue and StoreKit failures report an error without clearing the prior plan options or StoreKit products. After a successful discovery, a later failed refresh can thus leave old plans and their purchase buttons available even though current availability and catalogue terms could not be verified.",
+     "location": {
+      "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Services/InAppPurchase/InAppPurchaseService.swift",
+      "line_start": 115,
+      "line_end": 118
+     },
+     "evidence_count": 4,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "reportPlanDiscoveryError posts failure notification but never clears subscriptionPlanOptions/products; failed refresh after success leaves stale purchasable options. Includes rep3 refresh variant."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The decoder accepts multiple entries with the same nonempty key. If the backend supplies two such plans with different products, selecting the second row stores that shared key, but purchase lookup resolves the first matching option. The app can therefore purchase a different product from the row selected.",
+     "location": {
+      "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Models/Subscription/SubscriptionPlanCatalogueEntry.swift",
+      "line_start": 47,
+      "line_end": 52
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Lenient decoder keeps duplicate keys; selection resolves by first-match on key (option(forKey:)), so purchase can resolve to a different plan than the row selected. Requires backend misconfiguration; minor."
+    },
+    {
+     "finding_id": "agent-003",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Discovery trims whitespace from catalogue product IDs before requesting them, but the join uses the original untrimmed strings. A configured ID with surrounding whitespace can successfully load from StoreKit yet never appear as a purchasable option.",
+     "location": {
+      "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Models/Subscription/SubscriptionPlanOption.swift",
+      "line_start": 59,
+      "line_end": 65
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Frozen reference L06-trim (CatalogueEntry:32 vs PlanOption:58-65): productIDs trims, join looks up raw entry.products strings. Verified at head; base lacks both files. Terra 3/3; Luna B 0/3."
+    },
+    {
+     "finding_id": "finding_1af944f74a34",
+     "disposition": "verified_proof",
+     "issue_key": "route|*|/private/tmp/mdmw-unit-tests.xcresult",
+     "claim": "no implemented route serves * /private/tmp/mdmw-unit-tests.xcresult",
+     "location": {
+      "path": "docs/IOS27-TEST-RUNNER.md",
+      "line_start": 1,
+      "line_end": 22
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Shared deterministic detector phantom-contract class (MODEL-INDEPENDENT). L06 xcresult path and PR25/PR27 GET /media/ are false by construction: yt2wiki serves @app.get('/media/{source_id}/{filename}') at head app.py:997. The /media/ repeat the partial report left untested is now tested: still phantom."
+    }
+   ]
+  },
+  {
+   "case": "L06",
+   "arm": "B",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "d5fbcce3d45a",
+   "tool_calls": 29,
+   "usd": 0.10395175000000001,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 42.38,
+   "final_tag": null,
+   "advisories": 4,
+   "verified_proof": 1,
+   "tiers": [
+    "short"
+   ],
+   "requests": 6,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The loading guard is released before the StoreKit request completes. A screen visit can therefore start a second discovery while the first product request is pending. If the catalogue changes between requests, a late response is joined against the newer shared catalogue, potentially replacing valid options with an empty or incomplete list without reporting an error.",
+     "location": {
+      "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Services/InAppPurchase/InAppPurchaseService.swift",
+      "line_start": 99,
+      "line_end": 115
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "isLoadingSubscriptionPlans cleared in catalogue onSuccess before async requestProducts completes; second loadSubscriptionPlans passes the guard -> overlapping discoveries race last-write-wins on entries. New file flow at head."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "A catalogue error, StoreKit failure, or empty StoreKit response reports an error but does not clear the previous plan options or StoreKit products. After a successful earlier load, a failed refresh can therefore leave outdated plans selectable and purchasable, including plans removed from a newly fetched catalogue.",
+     "location": {
+      "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Services/InAppPurchase/InAppPurchaseService.swift",
+      "line_start": 117,
+      "line_end": 119
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Same stale-options defect as above (rep3 refresh wording)."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Catalogue product IDs are trimmed before requesting StoreKit products, but the join looks up the original untrimmed strings. An otherwise valid entry with surrounding whitespace can successfully load its product yet never appear as an available plan.",
+     "location": {
+      "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Models/Subscription/SubscriptionPlanOption.swift",
+      "line_start": 59,
+      "line_end": 64
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Frozen reference L06-trim (CatalogueEntry:32 vs PlanOption:58-65): productIDs trims, join looks up raw entry.products strings. Verified at head; base lacks both files. Terra 3/3; Luna B 0/3."
+    },
+    {
+     "finding_id": "agent-003",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The decoder accepts multiple entries with the same nonempty key, while selection stores only that key and resolves purchases to the first matching option. If a catalogue contains duplicate keys for different products, tapping the later row can select and purchase the earlier product instead.",
+     "location": {
+      "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Models/Subscription/SubscriptionPlanCatalogueEntry.swift",
+      "line_start": 47,
+      "line_end": 52
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Lenient decoder keeps duplicate keys; selection resolves by first-match on key (option(forKey:)), so purchase can resolve to a different plan than the row selected. Requires backend misconfiguration; minor."
+    },
+    {
+     "finding_id": "finding_1af944f74a34",
+     "disposition": "verified_proof",
+     "issue_key": "route|*|/private/tmp/mdmw-unit-tests.xcresult",
+     "claim": "no implemented route serves * /private/tmp/mdmw-unit-tests.xcresult",
+     "location": {
+      "path": "docs/IOS27-TEST-RUNNER.md",
+      "line_start": 1,
+      "line_end": 22
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Shared deterministic detector phantom-contract class (MODEL-INDEPENDENT). L06 xcresult path and PR25/PR27 GET /media/ are false by construction: yt2wiki serves @app.get('/media/{source_id}/{filename}') at head app.py:997. The /media/ repeat the partial report left untested is now tested: still phantom."
+    }
+   ]
+  },
+  {
+   "case": "L06",
+   "arm": "B",
+   "rep": 3,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "ff53b05a489a",
+   "tool_calls": 39,
+   "usd": 0.12966045,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 57.28,
+   "final_tag": null,
+   "advisories": 3,
+   "verified_proof": 1,
+   "tiers": [
+    "short"
+   ],
+   "requests": 8,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The loading guard is cleared when the catalogue arrives, before its StoreKit request completes. Startup and plan-screen discovery can therefore overlap. If the catalogue changes between those fetches, an older StoreKit response can arrive last and be joined against the newer entries, replacing the newer products and leaving plans unavailable or incomplete.",
+     "location": {
+      "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Services/InAppPurchase/InAppPurchaseService.swift",
+      "line_start": 91,
+      "line_end": 114
+     },
+     "evidence_count": 4,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "isLoadingSubscriptionPlans cleared in catalogue onSuccess before async requestProducts completes; second loadSubscriptionPlans passes the guard -> overlapping discoveries race last-write-wins on entries. New file flow at head."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "A refresh replaces the catalogue entries but does not clear the previously joined options or StoreKit products when discovery fails. After a catalogue change or removal followed by a failed product request, the screen can still display and purchase the previous plan and terms instead of reflecting the latest catalogue.",
+     "location": {
+      "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Services/InAppPurchase/InAppPurchaseService.swift",
+      "line_start": 96,
+      "line_end": 118
+     },
+     "evidence_count": 4,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Same stale-options defect as above (rep3 refresh wording)."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Catalogue product IDs are trimmed before validation and the StoreKit request, but the join uses the original untrimmed values. An otherwise accepted ID with surrounding whitespace can load successfully from StoreKit yet fail to match, leaving that cadence absent from the plan list without a discovery error.",
+     "location": {
+      "path": "MyDayMyWay/MyDayMyWay/Modules/InAppPurchase/Models/Subscription/SubscriptionPlanOption.swift",
+      "line_start": 59,
+      "line_end": 65
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Frozen reference L06-trim (CatalogueEntry:32 vs PlanOption:58-65): productIDs trims, join looks up raw entry.products strings. Verified at head; base lacks both files. Terra 3/3; Luna B 0/3."
+    },
+    {
+     "finding_id": "finding_1af944f74a34",
+     "disposition": "verified_proof",
+     "issue_key": "route|*|/private/tmp/mdmw-unit-tests.xcresult",
+     "claim": "no implemented route serves * /private/tmp/mdmw-unit-tests.xcresult",
+     "location": {
+      "path": "docs/IOS27-TEST-RUNNER.md",
+      "line_start": 1,
+      "line_end": 22
+     },
+     "evidence_count": 1,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Shared deterministic detector phantom-contract class (MODEL-INDEPENDENT). L06 xcresult path and PR25/PR27 GET /media/ are false by construction: yt2wiki serves @app.get('/media/{source_id}/{filename}') at head app.py:997. The /media/ repeat the partial report left untested is now tested: still phantom."
+    }
+   ]
+  },
+  {
+   "case": "L08",
+   "arm": "B",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "4db0af946919",
+   "tool_calls": 26,
+   "usd": 0.12604479999999998,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 28.39,
+   "final_tag": null,
+   "advisories": 3,
+   "verified_proof": 0,
+   "tiers": [
+    "short"
+   ],
+   "requests": 5,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The LMS backend connects to port 443, but the added LMS FPM vhost listens on 9443. Requests therefore do not reach the new LMS vhost; the response depends on what is configured on port 443.",
+     "location": {
+      "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+      "line_start": 260,
+      "line_end": 260
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Frozen reference L08-lms (cfg:260 :443 backend vs :9443 vhost). Terra 3/3, Luna 3/3."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new frontend forwards HTTPS requests over plain HTTP to the FPM vhost. It sets X-Forwarded-Proto but does not set the HTTPS server variable consumed by WordPress. Unless the deployed WordPress configuration independently translates that header, HTTPS detection fails and forced-SSL admin requests can redirect in a loop. The deployed application configuration is not available to verify that tran",
+     "location": {
+      "path": "servers/nonprod/apache2-legacy/epcore.effectivepolicy.com.au.conf",
+      "line_start": 18,
+      "line_end": 30
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Terra-exclusive: TLS-terminating vhost proxies to plain-HTTP FPM, sets X-Forwarded-Proto only; no wp-config HTTPS fixup in scope, so WordPress is_ssl() false (canonical/http downgrade, non-Secure cookies). New vhost at head. 2/3."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new WordPress login limiter exempts any request whose Cookie header contains the substring wordpress_logged_in_, without validating a session. An unauthenticated client can supply that substring to avoid both tracking and the 429 response on login requests.",
+     "location": {
+      "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+      "line_start": 139,
+      "line_end": 144
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Terra-exclusive: admin-login rate limiter exempts any request with Cookie containing wordpress_logged_in_ (substring, no session validation). Trivially self-set by attacker -> brute-force rate limit bypass. New block at head (absent in base live config). 3/3."
+    }
+   ]
+  },
+  {
+   "case": "L08",
+   "arm": "B",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "1d71393cd6ad",
+   "tool_calls": 27,
+   "usd": 0.1520572,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 30.74,
+   "final_tag": null,
+   "advisories": 3,
+   "verified_proof": 0,
+   "tiers": [
+    "short"
+   ],
+   "requests": 5,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The LMS backend connects to port 443, but the new LMS FPM virtual host listens on 9443. Consequently, LMS requests do not reach the new FPM vhost; they may reach an old vhost or fail instead.",
+     "location": {
+      "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+      "line_start": 250,
+      "line_end": 260
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Frozen reference L08-lms (cfg:260 :443 backend vs :9443 vhost). Terra 3/3, Luna 3/3."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The epcore backend moves from port 443 to 9443, but the supplied WordPress vhost listens on loopback port 8083 and names only effectivepolicy.com.au and www. Unless a separate epcore vhost already exists on 9443, epcore requests will reach a different default vhost or fail rather than the intended WordPress site. The external host configuration was not available to verify that prerequisite.",
+     "location": {
+      "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+      "line_start": 179,
+      "line_end": 187
+     },
+     "evidence_count": 4,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Frozen reference L08-lms (cfg:260 :443 backend vs :9443 vhost). Terra 3/3, Luna 3/3."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new admin rate limit exempts any request whose Cookie header contains the substring wordpress_logged_in_, without validating a session. An unauthenticated client can add that string to every login attempt and avoid both tracking and the 429 response on either WordPress host.",
+     "location": {
+      "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+      "line_start": 141,
+      "line_end": 146
+     },
+     "evidence_count": 1,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Terra-exclusive: admin-login rate limiter exempts any request with Cookie containing wordpress_logged_in_ (substring, no session validation). Trivially self-set by attacker -> brute-force rate limit bypass. New block at head (absent in base live config). 3/3."
+    }
+   ]
+  },
+  {
+   "case": "L08",
+   "arm": "B",
+   "rep": 3,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "43bbc4ba394a",
+   "tool_calls": 23,
+   "usd": 0.13565355,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 30.44,
+   "final_tag": null,
+   "advisories": 3,
+   "verified_proof": 0,
+   "tiers": [
+    "short"
+   ],
+   "requests": 4,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The LMS backend connects to port 443, but the new LMS FPM virtual host listens on port 9443. Requests therefore do not reach the new LMS vhost; they may reach a different legacy vhost or fail instead.",
+     "location": {
+      "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+      "line_start": 260,
+      "line_end": 260
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Frozen reference L08-lms (cfg:260 :443 backend vs :9443 vhost). Terra 3/3, Luna 3/3."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new login rate limit exempts any request whose Cookie header contains wordpress_logged_in_, without validating a session. An unauthenticated client can supply that substring and send unlimited login requests without being tracked or rate-limited.",
+     "location": {
+      "path": "servers/nonprod/haproxy/scs-edge-01.haproxy.cfg",
+      "line_start": 139,
+      "line_end": 144
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Terra-exclusive: admin-login rate limiter exempts any request with Cookie containing wordpress_logged_in_ (substring, no session validation). Trivially self-set by attacker -> brute-force rate limit bypass. New block at head (absent in base live config). 3/3."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The TLS vhost now proxies to a plain HTTP FPM listener and sets only forwarded headers. WordPress normally determines HTTPS from the server HTTPS or port variables, not X-Forwarded-Proto, so this can cause admin redirect loops and incorrect secure URL or cookie behavior. An existing application-level proxy override could prevent the regression, but it is not established by these configurations.",
+     "location": {
+      "path": "servers/nonprod/apache2-legacy/epcore.effectivepolicy.com.au.conf",
+      "line_start": 18,
+      "line_end": 30
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Terra-exclusive: TLS-terminating vhost proxies to plain-HTTP FPM, sets X-Forwarded-Proto only; no wp-config HTTPS fixup in scope, so WordPress is_ssl() false (canonical/http downgrade, non-Secure cookies). New vhost at head. 2/3."
+    }
+   ]
+  },
+  {
+   "case": "L10",
+   "arm": "B",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "405b9c7cea39",
+   "tool_calls": 28,
+   "usd": 0.16275925000000002,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 41.1,
+   "final_tag": null,
+   "advisories": 4,
+   "verified_proof": 0,
+   "tiers": [
+    "short"
+   ],
+   "requests": 7,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The sole required STORE-02 variant is a SQLite transaction rollback probe. It does not exercise the catalogued crashes before intent, after intent, after side effect, and before completion; the receipt itself defers those production-store points. Nevertheless, the reconciler requires STORE-02 to be satisfied, making partial primitive evidence a full case pass.",
+     "location": {
+      "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+      "line_start": 133,
+      "line_end": 139
+     },
+     "evidence_count": 4,
+     "adjudication": "LOW_VALUE",
+     "scope": "PR_INTRODUCED",
+     "note": "Mechanism correct (sole STORE-02 variant is a rollback probe; 4 catalogued crash points untested) but STORE cases are DEFERRED_BY_PLAN (M2) with owed-evidence scaffolding; no binding force now. 3/3."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "STORE-07 and STORE-09 are certified by a test-local SQLite implementation rather than production storage. The STORE-07 assertion reads only seven records despite the catalogue requiring a huge transcript; STORE-09 checks one record-count limit, not separate session and global quotas. Passing these probes can therefore mark the product cases satisfied without testing their required behaviour.",
+     "location": {
+      "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+      "line_start": 134,
+      "line_end": 136
+     },
+     "evidence_count": 5,
+     "adjudication": "LOW_VALUE",
+     "scope": "PR_INTRODUCED",
+     "note": "SQLiteProbeStore is a real GRDB/file-backed SessionStore test double, not production storage; certifying deferred STORE-07/09 with it is tier-inadequate per catalogue but non-binding while deferred. 3/3."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new tier matcher unconditionally accepts an integration requirement, including for a result explicitly classified as pure. Thus a pure passing variant can make an integration-only catalogue case satisfied without integration evidence, contrary to the required-tier gate.",
+     "location": {
+      "path": "Sources/NeedletailTestSupport/CaseLedger.swift",
+      "line_start": 300,
+      "line_end": 304
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Terra-exclusive, neighbor facet of frozen L10-evidenceTier (reference anchors 226-240 default-pure init, which Terra missed 0/3 vs Luna 2/3): the new .integration matcher arm accepts pure results, citing WIRE-01 as pinning - but WIRE-01 (catalogue) is an SSE-parsing case REQUIRING integration evidence. Comment justification is bogus; gate void for all integration-required cases. 3/3."
+    },
+    {
+     "finding_id": "agent-003",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new crash test is included in the primitive target already selected by `./dev test quick`. It requires `/usr/bin/sqlite3`, starts a process and performs disk I/O, while the quick command is specified as pure and free of real I/O. A machine with SQLite development libraries but no CLI now fails the routine quick gate; the CI provisioning shown installs the headers but does not explicitly instal",
+     "location": {
+      "path": "Tests/NeedletailPrimitiveTests/SQLiteCrashTests.swift",
+      "line_start": 26,
+      "line_end": 32
+     },
+     "evidence_count": 4,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Terra-exclusive: new primitive-target test requires /usr/bin/sqlite3 CLI and real process/disk I/O; CI provisions only libsqlite3-dev headers, so the quick gate (./dev test quick via ./dev test offline) fails on clean runners. Breaks the pure/no-IO quick contract. 3/3."
+    }
+   ]
+  },
+  {
+   "case": "L10",
+   "arm": "B",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "60d4c63587cb",
+   "tool_calls": 25,
+   "usd": 0.14303465,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 34.51,
+   "final_tag": null,
+   "advisories": 4,
+   "verified_proof": 0,
+   "tiers": [
+    "short"
+   ],
+   "requests": 6,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The gate treats a passing SQLite transaction rollback probe as sufficient for STORE-02. The acceptance case requires crashes at multiple intent and side-effect boundaries, with correct absent/pending/unknown outcomes and no automatic replay. The probe exercises none of those operation-ledger behaviors; the receipt itself defers them to M2-A, yet reconciliation marks the case satisfied.",
+     "location": {
+      "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+      "line_start": 138,
+      "line_end": 138
+     },
+     "evidence_count": 4,
+     "adjudication": "LOW_VALUE",
+     "scope": "PR_INTRODUCED",
+     "note": "Mechanism correct (sole STORE-02 variant is a rollback probe; 4 catalogued crash points untested) but STORE cases are DEFERRED_BY_PLAN (M2) with owed-evidence scaffolding; no binding force now. 3/3."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The required variants exercise a test-local SQLite store, not the production store. STORE-07 uses seven records and checks pagination order, not huge-history memory behavior; STORE-09 checks a test-local record cap, not session/global quota handling and visible stop behavior. Nevertheless the gate marks both acceptance cases satisfied, concealing the missing product evidence.",
+     "location": {
+      "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+      "line_start": 135,
+      "line_end": 136
+     },
+     "evidence_count": 5,
+     "adjudication": "LOW_VALUE",
+     "scope": "PR_INTRODUCED",
+     "note": "SQLiteProbeStore is a real GRDB/file-backed SessionStore test double, not production storage; certifying deferred STORE-07/09 with it is tier-inadequate per catalogue but non-binding while deferred. 3/3."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new tier check unconditionally accepts an integration requirement, including when the only result is pure. A passing pure variant can therefore mark an integration-only catalogue case satisfied without executing integration evidence, contrary to the evidence-layer contract.",
+     "location": {
+      "path": "Sources/NeedletailTestSupport/CaseLedger.swift",
+      "line_start": 298,
+      "line_end": 302
+     },
+     "evidence_count": 4,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Terra-exclusive, neighbor facet of frozen L10-evidenceTier (reference anchors 226-240 default-pure init, which Terra missed 0/3 vs Luna 2/3): the new .integration matcher arm accepts pure results, citing WIRE-01 as pinning - but WIRE-01 (catalogue) is an SSE-parsing case REQUIRING integration evidence. Comment justification is bogus; gate void for all integration-required cases. 3/3."
+    },
+    {
+     "finding_id": "agent-003",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new primitive test requires an executable at the fixed path /usr/bin/sqlite3. It runs in the quick and offline gates, but CI provisions SQLite development headers rather than the CLI. Environments with the previously sufficient library and headers but no CLI, or with sqlite3 installed elsewhere, now fail those gates. Whether the current hosted runner happens to include the CLI is not establish",
+     "location": {
+      "path": "Tests/NeedletailPrimitiveTests/SQLiteCrashTests.swift",
+      "line_start": 28,
+      "line_end": 32
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Terra-exclusive: new primitive-target test requires /usr/bin/sqlite3 CLI and real process/disk I/O; CI provisions only libsqlite3-dev headers, so the quick gate (./dev test quick via ./dev test offline) fails on clean runners. Breaks the pure/no-IO quick contract. 3/3."
+    }
+   ]
+  },
+  {
+   "case": "L10",
+   "arm": "B",
+   "rep": 3,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "91026fca8623",
+   "tool_calls": 31,
+   "usd": 0.1594689,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 39.64,
+   "final_tag": null,
+   "advisories": 4,
+   "verified_proof": 0,
+   "tiers": [
+    "short"
+   ],
+   "requests": 7,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The required evidence marks STORE-01 and STORE-02 satisfied from generic SQLite reopen and transaction-rollback probes. STORE-01 requires the correct product schema and durable records; STORE-02 requires recovery at four intent and side-effect boundaries without automatic replay. Neither probe exercises those product behaviors, so coverage can report both cases satisfied while their M2-A obligatio",
+     "location": {
+      "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+      "line_start": 137,
+      "line_end": 138
+     },
+     "evidence_count": 5,
+     "adjudication": "LOW_VALUE",
+     "scope": "PR_INTRODUCED",
+     "note": "Mechanism correct (sole STORE-02 variant is a rollback probe; 4 catalogued crash points untested) but STORE cases are DEFERRED_BY_PLAN (M2) with owed-evidence scaffolding; no binding force now. 3/3."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "STORE-07 and STORE-09 are certified by tests of SQLiteProbeStore, which explicitly is not product code. STORE-07 tests seven records rather than huge-history loading and does not establish bounded memory use; STORE-09 checks the quota error but does not check retained evidence after the rejected append. These tests can pass without establishing the catalogue's product requirements.",
+     "location": {
+      "path": "Tests/BehaviourTests/XUnitIngestionTests.swift",
+      "line_start": 135,
+      "line_end": 136
+     },
+     "evidence_count": 4,
+     "adjudication": "LOW_VALUE",
+     "scope": "PR_INTRODUCED",
+     "note": "SQLiteProbeStore is a real GRDB/file-backed SessionStore test double, not production storage; certifying deferred STORE-07/09 with it is tier-inadequate per catalogue but non-binding while deferred. 3/3."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The integration branch unconditionally accepts every evidence tier, including the default pure tier. Consequently, a passing pure result can make an integration-required case satisfied without any integration execution, contrary to the ledger's lower-layer rule and the catalogue's distinct evidence layers.",
+     "location": {
+      "path": "Sources/NeedletailTestSupport/CaseLedger.swift",
+      "line_start": 299,
+      "line_end": 303
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Terra-exclusive, neighbor facet of frozen L10-evidenceTier (reference anchors 226-240 default-pure init, which Terra missed 0/3 vs Luna 2/3): the new .integration matcher arm accepts pure results, citing WIRE-01 as pinning - but WIRE-01 (catalogue) is an SSE-parsing case REQUIRING integration evidence. Comment justification is bogus; gate void for all integration-required cases. 3/3."
+    },
+    {
+     "finding_id": "agent-003",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new unconditional primitive test fails unless /usr/bin/sqlite3 exists, even if SQLite and GRDB are available or the executable is elsewhere on PATH. The primitive target is included in quick, native, and coverage runs, so those existing entry points now fail on such hosts.",
+     "location": {
+      "path": "Tests/NeedletailPrimitiveTests/SQLiteCrashTests.swift",
+      "line_start": 28,
+      "line_end": 32
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Terra-exclusive: new primitive-target test requires /usr/bin/sqlite3 CLI and real process/disk I/O; CI provisions only libsqlite3-dev headers, so the quick gate (./dev test quick via ./dev test offline) fails on clean runners. Breaks the pure/no-IO quick contract. 3/3."
+    }
+   ]
+  },
+  {
+   "case": "P15",
+   "arm": "B",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "e65fd1d1ddfc",
+   "tool_calls": 29,
+   "usd": 0.1458901,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 38.78,
+   "final_tag": null,
+   "advisories": 7,
+   "verified_proof": 0,
+   "tiers": [
+    "short"
+   ],
+   "requests": 6,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new caption bypass relies on preview.has_manual_captions, but the metadata probe always builds VideoInfo with an empty subtitles list. The flag is therefore always false for real previews, so captioned videos are rejected when ASR is not configured.",
+     "location": {
+      "path": "src/yt2wiki/web/app.py",
+      "line_start": 437,
+      "line_end": 441
+     },
+     "evidence_count": 3,
+     "adjudication": "GENUINE_PRE_EXISTING",
+     "scope": "PRE_EXISTING",
+     "note": "Probe path always builds VideoInfo with empty subs so the flag is always False; identical at base. Correct observation, not a regression; low value for PR-review qual. 1/3."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new readiness check requires status to match the provider URL, model and key-variable name. The CLI records the raw test result, which omits model and api_key_env, so successfully tested providers with either field set remain unready and web submission returns 409.",
+     "location": {
+      "path": "src/yt2wiki/web/inference.py",
+      "line_start": 212,
+      "line_end": 225
+     },
+     "evidence_count": 4,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "New 3-tuple readiness gate (url,model,key) vs pre-existing CLI raw record_test (stores identity (url,'','')): CLI-tested endpoints with model/key configured can never show Ready. New gate created the inconsistency. 3/3."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "An environment-resolved ASR URL is marked Ready without a probe. The default Compose service sets that URL even though the ASR container is behind an optional profile, so a normal deployment without that profile can queue transcription jobs that cannot reach the server.",
+     "location": {
+      "path": "src/yt2wiki/web/inference.py",
+      "line_start": 232,
+      "line_end": 245
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Env ASR Ready w/o probe (reps 1-2 wording)."
+    },
+    {
+     "finding_id": "agent-003",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Session validation checks only the stored token and expiry, not the password under which the session was created. Changing the operator password and restarting therefore leaves previously issued sessions authorized until logout or the 14-day expiry.",
+     "location": {
+      "path": "src/yt2wiki/web/auth.py",
+      "line_start": 136,
+      "line_end": 145
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "New auth.py session validation binds token+expiry only; password change/rotation does not invalidate sessions. Moderate session-management gap. 3/3."
+    },
+    {
+     "finding_id": "agent-004",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Save-and-test writes the endpoint before testing it, while the browser reports 'Not saved' when the test fails. Editing an assigned provider to an unreachable URL can thus replace its working configuration and invalidate its qualification even though the operator is told it was not saved.",
+     "location": {
+      "path": "src/yt2wiki/web/app.py",
+      "line_start": 605,
+      "line_end": 613
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "save-test persists config via save_one before probing; on test failure UI says 'Not saved' while the failed endpoint is already the active config. 1/3 app.py wording."
+    },
+    {
+     "finding_id": "agent-005",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "After a probe completes, record_qualified overwrites its tested identity with the provider currently saved under that name. If another request changes that provider during the probe, the first result can be recorded against and assign roles to the untested replacement.",
+     "location": {
+      "path": "src/yt2wiki/web/inference.py",
+      "line_start": 185,
+      "line_end": 192
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "record_qualified replaces the tested result identity (rep1 wording)."
+    },
+    {
+     "finding_id": "agent-006",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The source reprocess route calls enqueue without caption information, unlike job reprocessing, which passes the prior job's caption flag. Consequently, with no ASR configured, source reprocessing rejects a caption-backed job even when job reprocessing can accept it.",
+     "location": {
+      "path": "src/yt2wiki/web/app.py",
+      "line_start": 952,
+      "line_end": 966
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Source-reprocess enqueue drops has_captions while job-retry path passes it: reprocessed sources lose manual-caption subtitles. Minor. 2/3."
+    }
+   ]
+  },
+  {
+   "case": "P15",
+   "arm": "B",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "eb5dd481a718",
+   "tool_calls": 29,
+   "usd": 0.14321875000000003,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 41.31,
+   "final_tag": null,
+   "advisories": 7,
+   "verified_proof": 0,
+   "tiers": [
+    "short"
+   ],
+   "requests": 7,
+   "findings": [
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The CLI records test_endpoint's result without adding the configured model and API-key variable. For providers using either field, provider_status now rejects that successful result as an identity mismatch, so the documented CLI save-and-test workflow leaves writing or transcription unready and web jobs blocked.",
+     "location": {
+      "path": "src/yt2wiki/web/inference.py",
+      "line_start": 217,
+      "line_end": 228
+     },
+     "evidence_count": 4,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Same CLI/gate inconsistency (rep2 wording)."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "When an endpoint exposes exactly one model and the model field was blank, Test fills that field after recording a result bound to the blank model. Saving then prunes the mismatched result, so the UI's advertised test-then-save sequence leaves the endpoint unqualified until it is tested again.",
+     "location": {
+      "path": "src/yt2wiki/web/static/settings.js",
+      "line_start": 105,
+      "line_end": 109
+     },
+     "evidence_count": 3,
+     "adjudication": "LOW_VALUE",
+     "scope": "PRE_EXISTING",
+     "note": "Single-model autofill without persist; same behavior at base (modulo message). Trivial UX quirk. 1/3."
+    },
+    {
+     "finding_id": "agent-003",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "record_qualified replaces the tested identity with the provider currently stored under the name. If another request changes that provider while the network test is in flight, the first test's success is recorded against the new URL, model and key and can assign roles to an endpoint that was never tested.",
+     "location": {
+      "path": "src/yt2wiki/web/inference.py",
+      "line_start": 186,
+      "line_end": 192
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Same identity-overwrite defect (rep2 wording; race made explicit)."
+    },
+    {
+     "finding_id": "agent-004",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "An ASR URL from the environment is marked Ready without a probe. The default Compose service always sets http://asr:9000 while the ASR container is enabled only by an optional profile, so a normal deployment without that profile can queue transcription-dependent jobs against a nonexistent service.",
+     "location": {
+      "path": "src/yt2wiki/web/inference.py",
+      "line_start": 236,
+      "line_end": 246
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Env ASR Ready w/o probe (reps 1-2 wording)."
+    },
+    {
+     "finding_id": "agent-005",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Session validation checks only the token and expiry, not the password or a credential generation. After an operator changes the configured password and restarts, previously issued cookies remain authorized until logout or their 14-day expiry, preventing password rotation from revoking compromised sessions.",
+     "location": {
+      "path": "src/yt2wiki/web/auth.py",
+      "line_start": 141,
+      "line_end": 149
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "New auth.py session validation binds token+expiry only; password change/rotation does not invalidate sessions. Moderate session-management gap. 3/3."
+    },
+    {
+     "finding_id": "agent-006",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The documented Caddy example terminates TLS and proxies over HTTP, so request.url.scheme is HTTP and the operator cookie lacks Secure unless YT2WIKI_COOKIE_SECURE=1 is explicitly set. The deployment instructions do not mention that setting, leaving the session cookie eligible for transmission over HTTP on the same host.",
+     "location": {
+      "path": "src/yt2wiki/web/app.py",
+      "line_start": 322,
+      "line_end": 329
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Scheme-dependent Secure-cookie flag (request.url.scheme) behind documented TLS-terminating Caddy example with no fixup instruction: session cookies issued without Secure in the documented deployment. Low-moderate. 1/3 app.py wording."
+    },
+    {
+     "finding_id": "agent-007",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new readiness check runs only in enqueue, after the uploaded video has been copied into canonical storage and its source created. A 409 for an unready writer or ASR therefore leaves a stored video and source without a job; repeated rejected uploads can consume substantial disk space.",
+     "location": {
+      "path": "src/yt2wiki/web/app.py",
+      "line_start": 443,
+      "line_end": 474
+     },
+     "evidence_count": 1,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Same readiness-ordering defect (rep2 wording). Merged: one distinct defect in 2/3 reps."
+    }
+   ]
+  },
+  {
+   "case": "P15",
+   "arm": "B",
+   "rep": 3,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "80ae947929aa",
+   "tool_calls": 28,
+   "usd": 0.14343325,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 42.47,
+   "final_tag": null,
+   "advisories": 8,
+   "verified_proof": 0,
+   "tiers": [
+    "short"
+   ],
+   "requests": 6,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Sessions are validated only by token and expiry, not against the current password. Changing the operator password and restarting therefore leaves previously issued cookies authorized for up to 14 days, including a session whose password or cookie was compromised.",
+     "location": {
+      "path": "src/yt2wiki/web/auth.py",
+      "line_start": 135,
+      "line_end": 145
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "New auth.py session validation binds token+expiry only; password change/rotation does not invalidate sessions. Moderate session-management gap. 3/3."
+    },
+    {
+     "finding_id": "agent-001",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The documented reverse proxy terminates TLS before forwarding HTTP to the app, but does not instruct operators to set YT2WIKI_COOKIE_SECURE=1. In that configuration the app sees an HTTP scheme and issues a cookie without Secure, allowing it to be sent over HTTP to the same host.",
+     "location": {
+      "path": "docs/deploy.md",
+      "line_start": 395,
+      "line_end": 405
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Same scheme/Secure-cookie defect, docs-side wording (rep3). Merged: one distinct defect in 2/3 reps."
+    },
+    {
+     "finding_id": "agent-002",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new readiness check requires status to contain the provider's URL, model and API-key variable. The CLI records the raw probe result, which lacks model and api_key_env, so successfully tested providers with either field set are treated as untested and web submissions are rejected. Existing status records with the same shape are also affected.",
+     "location": {
+      "path": "src/yt2wiki/web/inference.py",
+      "line_start": 217,
+      "line_end": 226
+     },
+     "evidence_count": 5,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Same CLI/gate inconsistency (rep3 wording)."
+    },
+    {
+     "finding_id": "agent-003",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "Any nonempty environment ASR URL is reported Ready without a reachability or protocol test. The default Compose configuration always sets http://asr:9000 but starts that service only with the optional asr profile. Consequently the readiness gate accepts uploads and uncaptioned videos that then fail transcription on a default deployment.",
+     "location": {
+      "path": "src/yt2wiki/web/inference.py",
+      "line_start": 234,
+      "line_end": 245
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Env-resolved ASR URL marked Ready with no reachability probe while default Compose always sets YT2WIKI_ASR_URL (service profile-gated off): gate vacuous for default deployments; jobs queue against a non-existent service. Historical P15-5 concern class, reintroduced by the new gate. 3/3."
+    },
+    {
+     "finding_id": "agent-004",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "After probing an endpoint, record_qualified reloads the current provider and overwrites the tested result's identity with it. If another request changes the same provider during the probe, a pass for the old URL or model is attributed to the new one and roles are assigned to an untested endpoint.",
+     "location": {
+      "path": "src/yt2wiki/web/inference.py",
+      "line_start": 185,
+      "line_end": 203
+     },
+     "evidence_count": 2,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "record_qualified replaces the tested result identity (rep1 wording)."
+    },
+    {
+     "finding_id": "agent-005",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The readiness check now occurs inside enqueue, after the entire upload has been copied and registered as a source. When readiness returns 409, the canonical upload and source remain despite no job being created; repeated attempts with different videos can fill the persistent volume.",
+     "location": {
+      "path": "src/yt2wiki/web/app.py",
+      "line_start": 449,
+      "line_end": 475
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Readiness gate executes inside enqueue after upload copied and source registered: doomed uploads stored before rejection (orphaned rows, wasted copy). Ordering inefficiency; minor. 2/3."
+    },
+    {
+     "finding_id": "agent-006",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "New URL submissions pass their manual-caption status to enqueue, and job reprocessing carries that status forward, but source reprocessing calls enqueue without it. A captioned source that can be submitted without ASR is therefore rejected by the equivalent source-reprocess API when ASR is not ready.",
+     "location": {
+      "path": "src/yt2wiki/web/app.py",
+      "line_start": 952,
+      "line_end": 966
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Source-reprocess enqueue drops has_captions while job-retry path passes it: reprocessed sources lose manual-caption subtitles. Minor. 2/3."
+    },
+    {
+     "finding_id": "agent-007",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The UI tells the operator an unreachable endpoint was not saved, but save-test writes the provider before probing it. Editing an existing provider to an unreachable URL therefore replaces the working configuration and invalidates its qualification despite the failure message.",
+     "location": {
+      "path": "src/yt2wiki/web/static/settings.js",
+      "line_start": 43,
+      "line_end": 46
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Same save-test defect, UI-side wording (rep3). Merged with the app.py instance: one distinct defect in 2/3 reps."
+    }
+   ]
+  },
+  {
+   "case": "PR25",
+   "arm": "B",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "6391c720c288",
+   "tool_calls": 20,
+   "usd": 0.17458479999999998,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 26.46,
+   "final_tag": null,
+   "advisories": 0,
+   "verified_proof": 1,
+   "tiers": [
+    "short"
+   ],
+   "requests": 5,
+   "findings": [
+    {
+     "finding_id": "finding_c95e9e5c391e",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/media/",
+     "claim": "no implemented route serves GET /media/",
+     "location": {
+      "path": "src/yt2wiki/v9/review.py",
+      "line_start": 1,
+      "line_end": 59
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Shared deterministic detector phantom-contract class (MODEL-INDEPENDENT). L06 xcresult path and PR25/PR27 GET /media/ are false by construction: yt2wiki serves @app.get('/media/{source_id}/{filename}') at head app.py:997. The /media/ repeat the partial report left untested is now tested: still phantom."
+    },
+    {
+     "finding_id": "silence",
+     "disposition": "silence",
+     "issue_key": null,
+     "claim": "Compared the changed V9 orchestration, selection, judging, writing, and publishing paths against BASE, including the added invariant tests. No supported in-scope regression was identified.",
+     "location": {
+      "path": "",
+      "line_start": null,
+      "line_end": null
+     },
+     "evidence_count": 0,
+     "adjudication": "CORRECT_SILENCE",
+     "scope": "N/A",
+     "note": "Model abstained; sibling reps found minor advisories (repetition inconsistency, not error)."
+    }
+   ]
+  },
+  {
+   "case": "PR25",
+   "arm": "B",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "88de658ca60c",
+   "tool_calls": 18,
+   "usd": 0.17844279999999998,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 25.77,
+   "final_tag": null,
+   "advisories": 1,
+   "verified_proof": 1,
+   "tiers": [
+    "short"
+   ],
+   "requests": 6,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "When a response has a valid image count and `best` list but a non-integer `second` value, BASE retained the parsed primary shortlist after logging the error. HEAD returns an empty shortlist and substitutes a single central-keyframe heuristic. The judge can therefore receive a different incumbent and no ranked alternatives, potentially changing or omitting the published illustration.",
+     "location": {
+      "path": "src/yt2wiki/v9/select.py",
+      "line_start": 125,
+      "line_end": 133
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Sonar-refactor coarsened error handling: malformed `second` now discards the whole parsed `best` (returns ([],'')) where base retained the valid shortlist and only fell back when best was empty. Valid signal lost on advisory-field malformation. Minor. 1/3."
+    },
+    {
+     "finding_id": "finding_c95e9e5c391e",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/media/",
+     "claim": "no implemented route serves GET /media/",
+     "location": {
+      "path": "src/yt2wiki/v9/review.py",
+      "line_start": 1,
+      "line_end": 59
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Shared deterministic detector phantom-contract class (MODEL-INDEPENDENT). L06 xcresult path and PR25/PR27 GET /media/ are false by construction: yt2wiki serves @app.get('/media/{source_id}/{filename}') at head app.py:997. The /media/ repeat the partial report left untested is now tested: still phantom."
+    }
+   ]
+  },
+  {
+   "case": "PR25",
+   "arm": "B",
+   "rep": 3,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "8ba3893f2227",
+   "tool_calls": 21,
+   "usd": 0.18244489999999997,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 27.01,
+   "final_tag": null,
+   "advisories": 1,
+   "verified_proof": 1,
+   "tiers": [
+    "short"
+   ],
+   "requests": 6,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The source reference is now conditional on the normalized body rather than the original nonempty body. For example, a body containing only timestamp links becomes empty when citations are consolidated, so HEAD emits no section source reference; BASE emitted one. A remaining figure can consequently lose its section-span provenance.",
+     "location": {
+      "path": "src/yt2wiki/v9/publish.py",
+      "line_start": 276,
+      "line_end": 285
+     },
+     "evidence_count": 3,
+     "adjudication": "TRUE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Section source ref now gated on normalized body where base gated on original nonempty body: a section whose body normalizes to empty (e.g. only timestamp links) loses its section-span provenance for remaining figures. Minor. 1/3."
+    },
+    {
+     "finding_id": "finding_c95e9e5c391e",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/media/",
+     "claim": "no implemented route serves GET /media/",
+     "location": {
+      "path": "src/yt2wiki/v9/review.py",
+      "line_start": 1,
+      "line_end": 59
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Shared deterministic detector phantom-contract class (MODEL-INDEPENDENT). L06 xcresult path and PR25/PR27 GET /media/ are false by construction: yt2wiki serves @app.get('/media/{source_id}/{filename}') at head app.py:997. The /media/ repeat the partial report left untested is now tested: still phantom."
+    }
+   ]
+  },
+  {
+   "case": "PR27",
+   "arm": "B",
+   "rep": 1,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "b45e6ed0d7e1",
+   "tool_calls": 15,
+   "usd": 0.10257725,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 18.47,
+   "final_tag": null,
+   "advisories": 1,
+   "verified_proof": 1,
+   "tiers": [
+    "short"
+   ],
+   "requests": 5,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new trust-boundary description says a sources row is revalidated by hash before use. During deduplication, however, the row's path is passed to file_hash to perform that validation, so the file is opened before its hash is known. Acquisition also moves the recorded upload after only an is_file check, without comparing its hash. The assertion therefore gives readers an incorrect security assura",
+     "location": {
+      "path": "src/yt2wiki/paths.py",
+      "line_start": 42,
+      "line_end": 44
+     },
+     "evidence_count": 3,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Docs over-read, 3/3 consistent but wrong: recorded paths ARE re-validated by hash before use (_is_valid_upload/_canonical_for in services/__init__.py: 'authoritative only if the file exists and matches the hash'); dedup-by-content-hash is identity computation, and 'opened before hash known' is inherent to hashing. Unvalidated-move side not located."
+    },
+    {
+     "finding_id": "finding_72d497b4435b",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/media/",
+     "claim": "no implemented route serves GET /media/",
+     "location": {
+      "path": "src/yt2wiki/paths.py",
+      "line_start": 1,
+      "line_end": 204
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Shared deterministic detector phantom-contract class (MODEL-INDEPENDENT). L06 xcresult path and PR25/PR27 GET /media/ are false by construction: yt2wiki serves @app.get('/media/{source_id}/{filename}') at head app.py:997. The /media/ repeat the partial report left untested is now tested: still phantom."
+    }
+   ]
+  },
+  {
+   "case": "PR27",
+   "arm": "B",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "d3624d9b8272",
+   "tool_calls": 17,
+   "usd": 0.12582115,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 21.23,
+   "final_tag": null,
+   "advisories": 1,
+   "verified_proof": 1,
+   "tiers": [
+    "short"
+   ],
+   "requests": 6,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new docstring says a sources row is re-validated by hash before use. Deduplication does validate recorded paths, but acquisition moves a row's upload_path after only an is_file check; it records a hash afterward without comparing it to the expected hash. The security rationale therefore promises an integrity check that job execution does not perform.",
+     "location": {
+      "path": "src/yt2wiki/paths.py",
+      "line_start": 42,
+      "line_end": 43
+     },
+     "evidence_count": 4,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Docs over-read, 3/3 consistent but wrong: recorded paths ARE re-validated by hash before use (_is_valid_upload/_canonical_for in services/__init__.py: 'authoritative only if the file exists and matches the hash'); dedup-by-content-hash is identity computation, and 'opened before hash known' is inherent to hashing. Unvalidated-move side not located."
+    },
+    {
+     "finding_id": "finding_72d497b4435b",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/media/",
+     "claim": "no implemented route serves GET /media/",
+     "location": {
+      "path": "src/yt2wiki/paths.py",
+      "line_start": 1,
+      "line_end": 204
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Shared deterministic detector phantom-contract class (MODEL-INDEPENDENT). L06 xcresult path and PR25/PR27 GET /media/ are false by construction: yt2wiki serves @app.get('/media/{source_id}/{filename}') at head app.py:997. The /media/ repeat the partial report left untested is now tested: still phantom."
+    }
+   ]
+  },
+  {
+   "case": "PR27",
+   "arm": "B",
+   "rep": 3,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "4a045be758d0",
+   "tool_calls": 17,
+   "usd": 0.10437025,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 22.23,
+   "final_tag": null,
+   "advisories": 1,
+   "verified_proof": 1,
+   "tiers": [
+    "short"
+   ],
+   "requests": 6,
+   "findings": [
+    {
+     "finding_id": "agent-000",
+     "disposition": "advisory_grounded",
+     "issue_key": null,
+     "claim": "The new docstring says a sources row is revalidated by hash before use. Deduplication does validate existing rows, but acquisition reads the recorded upload path, checks only that it is a file, and moves it into the media directory without comparing its hash. A changed staged file can therefore be processed despite the documented security assurance.",
+     "location": {
+      "path": "src/yt2wiki/paths.py",
+      "line_start": 42,
+      "line_end": 44
+     },
+     "evidence_count": 3,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "PR_INTRODUCED",
+     "note": "Docs over-read, 3/3 consistent but wrong: recorded paths ARE re-validated by hash before use (_is_valid_upload/_canonical_for in services/__init__.py: 'authoritative only if the file exists and matches the hash'); dedup-by-content-hash is identity computation, and 'opened before hash known' is inherent to hashing. Unvalidated-move side not located."
+    },
+    {
+     "finding_id": "finding_72d497b4435b",
+     "disposition": "verified_proof",
+     "issue_key": "route|GET|/media/",
+     "claim": "no implemented route serves GET /media/",
+     "location": {
+      "path": "src/yt2wiki/paths.py",
+      "line_start": 1,
+      "line_end": 204
+     },
+     "evidence_count": 2,
+     "adjudication": "FALSE_POSITIVE",
+     "scope": "N/A",
+     "note": "Shared deterministic detector phantom-contract class (MODEL-INDEPENDENT). L06 xcresult path and PR25/PR27 GET /media/ are false by construction: yt2wiki serves @app.get('/media/{source_id}/{filename}') at head app.py:997. The /media/ repeat the partial report left untested is now tested: still phantom."
+    }
+   ]
+  },
+  {
+   "case": "WT4",
+   "arm": "B",
+   "rep": 2,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "27163b30efdd",
+   "tool_calls": 4,
+   "usd": 0.0068293,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 7.22,
+   "final_tag": null,
+   "advisories": 0,
+   "verified_proof": 0,
+   "tiers": [
+    "short"
+   ],
+   "requests": 2,
+   "findings": [
+    {
+     "finding_id": "silence",
+     "disposition": "silence",
+     "issue_key": null,
+     "claim": "Checked the workflow change and its build and publishing configuration. Upstream v7.4.0 behavior could not be verified because vendor documentation was unavailable.",
+     "location": {
+      "path": "",
+      "line_start": null,
+      "line_end": null
+     },
+     "evidence_count": 0,
+     "adjudication": "CORRECT_SILENCE",
+     "scope": "N/A",
+     "note": "Model abstained with stated reason; consistent with Luna 3/3 WT4 silence."
+    }
+   ]
+  },
+  {
+   "case": "WT4",
+   "arm": "B",
+   "rep": 3,
+   "status": "complete",
+   "stage": null,
+   "sanitized_run_id": "95f89d0a5713",
+   "tool_calls": 3,
+   "usd": 0.006440550000000001,
+   "spend_accounting": "CONFIRMED_USAGE",
+   "processing_tier": "standard",
+   "partial_requests": 0,
+   "unknown_requests": 0,
+   "wall_seconds": 5.73,
+   "final_tag": null,
+   "advisories": 0,
+   "verified_proof": 0,
+   "tiers": [
+    "short"
+   ],
+   "requests": 2,
+   "findings": [
+    {
+     "finding_id": "silence",
+     "disposition": "silence",
+     "issue_key": null,
+     "claim": "Checked the CI workflow and action-version change. Upstream release details were unavailable, so compatibility could not be independently verified.",
+     "location": {
+      "path": "",
+      "line_start": null,
+      "line_end": null
+     },
+     "evidence_count": 0,
+     "adjudication": "CORRECT_SILENCE",
+     "scope": "N/A",
+     "note": "Model abstained with stated reason; consistent with Luna 3/3 WT4 silence."
+    }
+   ]
+  }
+ ]
+}

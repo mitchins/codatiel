@@ -124,8 +124,10 @@ def test_grounded_candidate_retained(repo: dict, tmp_path: Path):
     assert shadow["counts"]["advisory_grounded"] >= 1
     sent: list[dict] = []
 
-    def fixture_transport(to: list[str], subject: str, body: str) -> dict:
-        sent.append({"to": to, "subject": subject, "body": body})
+    def fixture_transport(to: list[str], subject: str, body: str,
+                            html: str | None = None) -> dict:
+        sent.append({"to": to, "subject": subject, "body": body,
+                     "html": html})
         return {"accepted_by_transport": True, "parsed": True, "fixture": True,
                 "succeeded": len(to), "failed": 0, "email_id": "fixture-no-send"}
 
@@ -133,15 +135,15 @@ def test_grounded_candidate_retained(repo: dict, tmp_path: Path):
                                sender="codatiel@mitchellcurrie.com", transport=fixture_transport)
     assert len(sent) == 1
     body = sent[0]["body"]
-    # Test the actual rendered finding line, not just the message as a whole:
+    # Test the actual rendered finding, not just the message as a whole:
     # a finding labelled UNASSESSED must never be described as a confirmed
-    # defect on its own line.
+    # defect.
     finding_lines = [line for line in body.splitlines() if "agent-000" in line]
     assert len(finding_lines) == 1
-    rendered = finding_lines[0]
-    assert "unverified review candidate" in rendered
-    assert "UNASSESSED" in rendered
-    assert "confirmed defect" not in rendered
+    assert "Reference agent-000" in finding_lines[0]
+    assert "Do not treat this as a confirmed defect" in body
+    assert "confirmed defect." not in body.replace(
+        "Do not treat this as a confirmed defect.", "")
     # Deterministic detector prep must fire on the LIMIT contradiction and
     # pass full trust validation with its registered proof.
     det_rows = [r for r in rows if not r["finding_id"].startswith("agent-")]

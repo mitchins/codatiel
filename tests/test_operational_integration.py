@@ -60,6 +60,7 @@ def test_resolve_backends_and_privacy_posture():
     assert gemma["rate_usd_per_mtok"] == {"input": 0.0, "output": 0.0}
     for name, privacy in (
             ("luna", "OPENAI_STANDARD_API_NO_TRAINING"),
+            ("sol", "OPENAI_STANDARD_API_NO_TRAINING"),
             ("haiku", "ANTHROPIC_COMMERCIAL_NO_TRAINING_DEFAULT")):
         profile = providers_mod.load_profiles()[name]
         assert profile["privacy"] == privacy
@@ -70,13 +71,20 @@ def test_resolve_backends_and_privacy_posture():
             with pytest.raises(RuntimeError, match="needs .* in the environment"):
                 providers_mod.resolve_backend(name)
     with pytest.raises(ValueError):
-        providers_mod.resolve_backend("sol")
+        providers_mod.resolve_backend("solx")
 
 
 def test_luna_settings_enforce_store_false():
     from codatiel_i2 import runtime_sdk
 
     assert runtime_sdk.luna_model_settings().store is False
+
+
+def test_sol_settings_enforce_store_false():
+    from codatiel_i2 import runtime_sdk
+
+    assert runtime_sdk.sol_model_id() == "gpt-6.1-sol"
+    assert runtime_sdk.sol_model_settings().store is False
 
 
 def test_cost_math_never_invents_rates():
@@ -158,8 +166,10 @@ def test_shadow_delivery_fixture_transport(repo: dict, tmp_path: Path):
         work_root=tmp_path / "work")
     sent: list[dict] = []
 
-    def fixture_transport(to: list[str], subject: str, body: str) -> dict:
-        sent.append({"to": to, "subject": subject, "body": body})
+    def fixture_transport(to: list[str], subject: str, body: str,
+                            html: str | None = None) -> dict:
+        sent.append({"to": to, "subject": subject, "body": body,
+                     "html": html})
         return {"accepted_by_transport": True, "parsed": True,
                 "fixture": True, "succeeded": len(to), "failed": 0,
                 "email_id": "fixture-no-send"}

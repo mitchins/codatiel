@@ -27,6 +27,12 @@ from typing import Any
 from codatiel_i2.core.spend import SpendCeilingExceeded, SpendLedger
 
 
+# REVIEW-DELEGATE-01: which event loop owns the SDK's shared HTTP pool
+# (id(pool) -> loop). Pools bind to their creating loop; a pool owned by
+# a closed loop must be detached before reuse.
+_POOL_LOOP: dict[int, Any] = {}
+
+
 def require_sdk() -> Any:
     """Import the Agents SDK lazily so SDK-free environments still import I2."""
     try:
@@ -354,6 +360,7 @@ class UsageRecordingModel(_SDKModel):
         # fakes, adapters without the flag — must have its structural
         # details ignored: absent stays None, never zero.
         self._native_openai_provenance = False
+        self._origin_id = model if isinstance(model, str) else None
         if isinstance(model, str):
             # Native SDK string model ids (e.g. the Luna/Terra backends)
             # must be resolved to Model objects: the recording wrapper can
@@ -364,16 +371,69 @@ class UsageRecordingModel(_SDKModel):
             model = OpenAIProvider().get_model(model)
             self._native_openai_provenance = True
         self._model = model
+        try:
+            self._resolved_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._resolved_loop = None
         self.ledger = ledger if ledger is not None else SpendLedger()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._model, name)
+
+    def _ensure_loop_fresh(self) -> None:
+        """Keep string-origin models on the live loop's HTTP pool.
+
+        The installed SDK funnels every OpenAI request through one
+        process-global httpx pool whose connections bind to the creating
+        loop. Sequential ``asyncio.run`` loops in one process (delegated
+        reviews, FINAL-01 follow-ups, the Haiku gate) would otherwise
+        reuse a dead pool (``RuntimeError: Event loop is closed``).
+        Re-resolution is scoped to string ids (native provider path);
+        prebuilt adapters and scripted fakes are never touched.
+        """
+        if self._origin_id is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        try:
+            from agents.models import openai_provider as _op
+        except Exception:
+            return
+        cur = getattr(_op, "_http_client", None)
+        if cur is not None:
+            owner = _POOL_LOOP.get(id(cur))
+            if owner is None:
+                _POOL_LOOP[id(cur)] = loop  # first use binds pool here
+            elif owner is not loop:
+                try:
+                    _op._http_client = None  # detach stale pool
+                except Exception:
+                    pass
+                cur = None
+        if self._resolved_loop is loop and cur is not None:
+            return
+        # (Re)resolve the model on the live loop; this also rebuilds a
+        # detached global pool on first use.
+        require_sdk()
+        from agents.models.openai_provider import OpenAIProvider
+        self._model = OpenAIProvider().get_model(self._origin_id)
+        self._resolved_loop = loop
+        self._native_openai_provenance = True
+        try:
+            fresh = _op._http_client
+            if fresh is not None:
+                _POOL_LOOP[id(fresh)] = loop
+        except Exception:
+            pass
 
     async def get_response(self, *args: Any, **kwargs: Any) -> Any:
         from codatiel_i2.core.spend import (
             BudgetCeilingExceeded,
             PricingUnbounded,
         )
+        self._ensure_loop_fresh()
         # R1.1: a run holding a PRICING_PARTIAL request has unbounded true
         # cost — send no further model request. This raises before any
         # provider call is made, so the halt itself costs nothing.
@@ -1065,11 +1125,17 @@ def _merge_same_role(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return merged
 
 
-def run_review(*, instructions: str, user_input: str, tools: list[Any],
-               model: Any, max_turns: int = 12,
-               model_settings: Any = None,
-               usage_ledger: SpendLedger | None = None) -> Any:
-    """Run one bounded agentic review through the canonical SDK runtime."""
+async def arun_review(*, instructions: str, user_input: str, tools: list[Any],
+                      model: Any, max_turns: int = 12,
+                      model_settings: Any | None = None,
+                      usage_ledger: SpendLedger | None = None,
+                      session: Any | None = None) -> Any:
+    """Async core of one bounded agentic review (single event loop).
+
+    Nested delegation follow-ups await this in the SAME loop as the lead:
+    never wrap it in an executor + inner ``asyncio.run`` (that strands the
+    SDK's shared HTTP pool on a dead loop). Sync callers use run_review.
+    """
     ensure_local_tracing()
     agents = require_sdk()
     if model_settings is None:
@@ -1087,8 +1153,10 @@ def run_review(*, instructions: str, user_input: str, tools: list[Any],
         active_model = UsageRecordingModel(model, usage_ledger)
     agent = agents.Agent(name="codatiel-i2", instructions=instructions,
                          tools=tools, model=active_model, model_settings=model_settings)
-    result = asyncio.run(
-        agents.Runner.run(agent, user_input, max_turns=max_turns))
+    run_kwargs: dict[str, Any] = {"max_turns": max_turns}
+    if session is not None:
+        run_kwargs["session"] = session
+    result = await agents.Runner.run(agent, user_input, **run_kwargs)
     # M9.2 P1: capture the exact instructions object the SDK received, at
     # the SDK boundary, so the run record can prove its stored hash matches
     # what was actually passed to Agent — not just what the service claims.
@@ -1099,6 +1167,24 @@ def run_review(*, instructions: str, user_input: str, tools: list[Any],
     except Exception:
         pass
     return result
+
+
+def run_review(*, instructions: str, user_input: str, tools: list[Any],
+               model: Any, max_turns: int = 12,
+               model_settings: Any = None,
+               usage_ledger: SpendLedger | None = None,
+               session: Any | None = None) -> Any:
+    """Run one bounded agentic review through the canonical SDK runtime.
+
+    ``session`` is an optional SDK persistent session (REVIEW-DELEGATE-01):
+    when given, the run continues that session's thread instead of
+    starting a fresh conversation. ``None`` preserves the exact
+    standalone behavior.
+    """
+    return asyncio.run(arun_review(
+        instructions=instructions, user_input=user_input, tools=tools,
+        model=model, max_turns=max_turns, model_settings=model_settings,
+        usage_ledger=usage_ledger, session=session))
 
 
 def luna_model_id() -> str:
@@ -1179,6 +1265,33 @@ def terra_model_settings() -> Any:
     """ModelSettings enforcing the Terra privacy posture (store=false).
 
     Identical to Luna: no model-specific tuning during qualification.
+    """
+    agents = require_sdk()
+    from agents.model_settings import ModelSettings
+    return ModelSettings(store=False)
+
+
+def sol_model_id() -> str:
+    """Sol backend (REVIEW-COMPLEMENT-02): native SDK OpenAI provider;
+    model id only, no adapter — identical integration to Luna/Terra,
+    model changed.
+
+    Requires ``OPENAI_API_KEY`` from the Code Review project
+    (STANDARD_API_NO_TRAINING presumed same project/key; flagged as an
+    assumption in the qualification report). Returned as a plain model
+    id for ``Agent(model=...)`` with the SDK default provider. Always
+    pair with ``sol_model_settings()`` so ``store=false`` is enforced.
+    Reasoning effort is left at the provider default (medium): no
+    model-specific tuning during qualification.
+    """
+    return "gpt-6.1-sol"
+
+
+def sol_model_settings() -> Any:
+    """ModelSettings enforcing the Sol privacy posture (store=false).
+
+    Identical to Luna/Terra: no model-specific tuning during
+    qualification.
     """
     agents = require_sdk()
     from agents.model_settings import ModelSettings
