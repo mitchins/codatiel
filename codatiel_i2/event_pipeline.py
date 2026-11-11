@@ -480,6 +480,30 @@ def _read_spend_usd(run_dir: str | None) -> float | None:
     return (metrics.get("spend", {}) or {}).get("usd_estimate")
 
 
+def _bind_review_identity(repo: str, pr: int, base: str, head: str,
+                          run_dir: str) -> dict:
+    """Bind the (repo, PR, SHAs, run) identity at review creation.
+
+    Called with the same event arguments that drive the review, so the
+    binding is consistent by construction; every later consumer
+    (semdup stage, digest model, delivery) re-verifies it instead of
+    trusting a caller label. The run ID comes from the stored run
+    artifact (not the directory name). Refuses loudly — an unbound
+    review can never be delivered under a PR identity.
+    """
+    from codatiel_i2 import review_identity as identity_mod
+    try:
+        stored = json.loads((Path(run_dir) / "run.json").read_text(
+            encoding="utf-8"))
+        artifact_run_id = str(stored.get("run_id") or "")
+    except Exception:
+        artifact_run_id = ""
+    return identity_mod.bind_run(
+        run_dir, repo_slug=repo, pr_number=pr, base_sha=base,
+        head_sha=head, run_id=artifact_run_id or Path(run_dir).name,
+        binder="pipeline:run_review_for_range")
+
+
 def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
                         base: str, head: str, repo_path: Path,
                         runs_root: Path, run_dir: str | None,
@@ -603,6 +627,15 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
                 "terra_findings": _count_terra(out["run_dir"]),
                 "added": 0, "cost_usd": cost,
                 "cost_unknown": cost is None}
+        try:
+            _bind_review_identity(repo, pr, base, head, out["run_dir"])
+        except Exception as exc:
+            return {"status": "failed", "stage": "identity",
+                    "error": f"identity binding refused: {exc}",
+                    "mode": "terra-only-primary",
+                    "run_dir": out.get("run_dir"),
+                    "terra_findings": 0, "added": 0, "cost_usd": cost,
+                    "cost_unknown": cost is None}
         return _maybe_semdup_stage(
             cfg=cfg, repo=repo, pr=pr, base=base, head=head,
             repo_path=repo_path, runs_root=runs_root,
@@ -636,6 +669,16 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
             "terra_findings": _count_terra(out["run_dir"]),
             "added": int(out.get("added") or 0),
             "cost_usd": round(parent + sub, 4), "cost_unknown": False}
+    try:
+        _bind_review_identity(repo, pr, base, head, out["run_dir"])
+    except Exception as exc:
+        return {"status": "failed", "stage": "identity",
+                "error": f"identity binding refused: {exc}",
+                "mode": out.get("mode", "terra-only-primary"),
+                "run_dir": out.get("run_dir"),
+                "terra_findings": 0, "added": 0,
+                "cost_usd": result.get("cost_usd"),
+                "cost_unknown": result.get("cost_unknown", True)}
     return _maybe_semdup_stage(
         cfg=cfg, repo=repo, pr=pr, base=base, head=head,
         repo_path=repo_path, runs_root=runs_root,
@@ -799,10 +842,10 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         terra_findings=int(result.get("terra_findings") or 0),
         luna_added=int(result.get("added") or 0), cost_usd=cost,
         cost_unknown=unknown, run_dir=result.get("run_dir") or "")
-    notified = _notify(cfg, result.get("run_dir") or "",
-                       result["status"], transport,
-                       context=(f"{cfg.env}:{ev['repo']}#{pr}"
-                                if cfg.env == "dev" else None))
+    notified, notify_detail = _notify(cfg, result.get("run_dir") or "",
+                        result["status"], transport,
+                        context=(f"{cfg.env}:{ev['repo']}#{pr}"
+                                 if cfg.env == "dev" else None))
     semdup_bits = ""
     if result.get("semdup_status", "off") != "off":
         semdup_bits = (f", semdup {result.get('semdup_status')}/"
@@ -812,7 +855,8 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         f"{kind} review {result['status']} "
         f"(terra {result.get('terra_findings', 0)}, "
         f"luna-exclusive {result.get('added', 0)}{semdup_bits}; "
-        f"notified={notified})", cost)
+        f"notified={notified}"
+        + ("" if notified else f" ({notify_detail[:160]})") + ")", cost)
     # Drain a queued newer delta as its own run (separate evidence).
     if done.get("queued"):
         qb, qh = done["queued"]
@@ -883,23 +927,27 @@ def _remember_queued(store: store_mod.Store, ev: dict, cp: dict | None,
 
 
 def _notify(cfg: EventConfig, run_dir: str, status: str,
-            transport: Any, context: str | None = None) -> bool:
+            transport: Any, context: str | None = None
+            ) -> tuple[bool, str]:
     """Private digest to the configured env destination ONLY.
 
     Refuses anything but the configured TEST/DEV recipient list. No PR
     comments exist anywhere on this path. `transport=None` selects the
     service default (real SMTP2GO delivery); it never means "skip".
+    Returns (sent, detail): refusals (including identity refusals)
+    return False with the reason, so operators can tell a refusal
+    from a missing configuration.
     """
     if not run_dir or not cfg.notify_to:
-        return False
+        return False, "no run dir or no notify recipients configured"
     try:
         from codatiel_i2 import service as service_mod
         receipt = service_mod.deliver_shadow(
             run_dir, to=list(cfg.notify_to), sender=cfg.notify_sender,
             transport=transport, context=context)
-        return bool(receipt)
-    except Exception:
-        return False
+        return bool(receipt), "delivered"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
 
 
 # -- operator-approved semdup continuation --------------------------------

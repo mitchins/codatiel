@@ -13,7 +13,7 @@ from codatiel_i2 import digest_model as DM
 
 
 def _run(tmp_path: Path, *, advisory, sem=None, metrics=None,
-         evidence=()) -> Path:
+         evidence=(), bind_pr: int | None = 7) -> Path:
     d = tmp_path / "run"
     d.mkdir(exist_ok=True)
     (d / "run.json").write_text(json.dumps({
@@ -31,6 +31,12 @@ def _run(tmp_path: Path, *, advisory, sem=None, metrics=None,
             "\n".join(json.dumps(e) for e in evidence) + "\n")
     if sem is not None:
         (d / "semdup.json").write_text(json.dumps(sem))
+    if bind_pr is not None:
+        # IDENTITY-01: context-labelled renders require a bound run.
+        from codatiel_i2 import review_identity as _RI
+        _RI.bind_run(d, repo_slug="o/r", pr_number=bind_pr,
+                     base_sha="a" * 40, head_sha="b" * 40, run_id="r1",
+                     binder="test")
     return d
 
 
@@ -93,7 +99,7 @@ def test_html_escapes_untrusted_content(tmp_path: Path):
 
 
 def test_no_link_without_slug_or_sha(tmp_path: Path):
-    d = _run(tmp_path, advisory=[_adv()])
+    d = _run(tmp_path, advisory=[_adv()], bind_pr=None)
     m = DM.build_review_model(d)  # no context: local path, no slug
     assert m["findings"][0]["url"] is None
     assert m["pr_url"] is None

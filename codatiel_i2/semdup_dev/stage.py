@@ -71,12 +71,28 @@ def run_stage(*, repo_path: Path, repo: str, pr: int,
     outcome: dict[str, Any] = {
         "version": STAGE_VERSION, "status": "unavailable",
         "repo": repo, "pr": pr, "base_rev": base_rev,
-        "head_rev": head_rev, "published": [], "suppressed": [],
+        "head_rev": head_rev, "base_sha": base_rev, "head_sha": head_rev,
+        "published": [], "suppressed": [],
         "skipped": [], "targets": [], "coverage": "unknown",
         "spend_usd": 0.0, "wall_s": 0.0, "reason": "",
         "pairs_total": 0, "pairs_reused": 0, "ceiling_usd": ceiling_usd,
         "preflight_usd": None,
     }
+    bound_mismatch = _check_run_binding(run_dir, repo, pr, base_rev,
+                                        head_rev)
+    if bound_mismatch is not None:
+        outcome["status"] = "unavailable"
+        outcome["reason"] = bound_mismatch
+        # The refusal must not poison later delivery: strip the
+        # caller-supplied identity fields so a mismatched stamp can
+        # never contradict the run's binding at render/delivery time.
+        # The primary review's own artifacts still deliver normally.
+        for key in ("repo", "pr", "base_rev", "head_rev",
+                    "base_sha", "head_sha"):
+            outcome[key] = None
+        outcome["wall_s"] = round(time.monotonic() - t0, 1)
+        _persist(run_dir, outcome)
+        return outcome
     try:
         return _run(repo_path=Path(repo_path), repo=repo, pr=pr,
                      base_rev=base_rev, head_rev=head_rev, run_dir=run_dir,
@@ -664,6 +680,46 @@ def _mislabeled_refusal(row: dict) -> bool:
         return False
     detail = str(row.get("detail") or "")
     return _ES._is_budget_error(detail)
+
+
+def _check_run_binding(run_dir: Path, repo: str, pr: int,
+                       base_rev: str, head_rev: str) -> str | None:
+    """Refuse to stamp semdup rows onto a run bound to another review.
+
+    The stage's (repo, PR, SHAs) arguments must equal the run dir's
+    bound identity when one exists. Returns a reason string on
+    mismatch, else None. Never raises (the stage degrades, it never
+    breaks the standard review).
+    """
+    try:
+        from codatiel_i2 import review_identity as _RI
+        ident = _RI.load_identity(run_dir)
+    except Exception:  # noqa: BLE001 - no binding readable, nothing to check
+        return None
+    if ident is None:
+        if (run_dir / "identity.json").exists():
+            return ("stage identity file present but unreadable; "
+                    "refusing semdup stamp until repaired")
+        return None
+    try:
+        want = {"repo_slug": repo, "pr_number": int(pr),
+                "base_sha": base_rev, "head_sha": head_rev}
+    except (TypeError, ValueError):
+        return (f"stage identity invalid: repo={repo!r} pr={pr!r} "
+                f"not bindable; refusing semdup stamp")
+    for key, val in want.items():
+        try:
+            got = ident.get(key)
+            if key == "pr_number" and got is not None:
+                got = int(got)
+        except (TypeError, ValueError):
+            got = None
+        if got != val:
+            return (f"stage identity mismatch: run bound to "
+                    f"{ident.get('repo_slug')}#{ident.get('pr_number')} "
+                    f"{str(ident.get('head_sha') or '')[:12]} but stage "
+                    f"called for {repo}#{pr}; refusing semdup stamp")
+    return None
 
 
 def _persist(run_dir: Path, outcome: dict) -> None:

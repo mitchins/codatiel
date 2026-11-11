@@ -122,7 +122,8 @@ def build_parser() -> argparse.ArgumentParser:
     events = sub.add_parser("events", help="Event-driven incremental review pipeline (TEST/DEV operational verification).")
     events.add_argument("op", choices=["enable", "ingest", "status",
                                        "dashboard", "reset-spend", "recover",
-                                       "review", "resume-semdup"],
+                                       "review", "resume-semdup",
+                                       "bind-identity"],
                         help="enable: watermark + grandfather open PRs (no "
                              "inference); ingest: process one webhook payload; "
                              "status/dashboard: operational state; "
@@ -130,7 +131,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "recover: mark stale in-flight interrupted; "
                              "review: operator-explicit single re-drive; "
                              "resume-semdup: continue semdup for a pinned "
-                             "delta at an approved ceiling (no emails)")
+                             "delta at an approved ceiling (no emails); "
+                             "bind-identity: attest the (repo, PR, SHAs, run) "
+                             "binding for a legacy run dir, corroborated "
+                             "against the reviews table (no inference)")
     events.add_argument("--payload", default="",
                         help="ingest: webhook JSON body file")
     events.add_argument("--delivery-id", default="",
@@ -1196,6 +1200,73 @@ def cmd_events(args) -> dict:
             except store_mod.StoreError as exc:
                 return {"status": "failed", "stage": "resume-semdup",
                         "error": str(exc)}
+        if op == "bind-identity":
+            # Operator attestation for a legacy run dir: binds (repo,
+            # PR, SHAs, run) only when the reviews table corroborates
+            # the exact row (same repo/PR/base/head/run_dir). Already
+            # bound runs are returned unchanged when identical, and
+            # refuse any differing rebind. No inference, no spend.
+            if not (args.repo and args.pr and args.run_dir):
+                return {"status": "failed", "stage": "bind-identity",
+                        "error": "bind-identity needs --repo, --pr and "
+                                 "--run-dir"}
+            try:
+                number = int(args.pr)
+            except (TypeError, ValueError):
+                return {"status": "failed", "stage": "bind-identity",
+                        "error": "--pr must be numeric"}
+            from codatiel_i2 import review_identity as identity_mod
+            run_dir = args.run_dir.strip()
+            try:
+                rows = store.reviews_list()
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "bind-identity",
+                        "error": str(exc)}
+            match = None
+            for row in rows:
+                if (str(row.get("repo") or "") == args.repo.strip()
+                        and int(row.get("pr") or 0) == number
+                        and str(row.get("run_dir") or "") == run_dir):
+                    match = row
+                    break
+            if match is None:
+                return {"status": "failed", "stage": "bind-identity",
+                        "error": f"no reviews-table row corroborates "
+                                 f"{args.repo.strip()}#{number} at "
+                                 f"{run_dir}; refusing unattested binding"}
+            ambiguous = {(str(r.get("repo") or ""), int(r.get("pr") or 0),
+                            str(r.get("base_sha") or ""),
+                            str(r.get("head_sha") or ""))
+                         for r in rows
+                         if str(r.get("run_dir") or "") == run_dir}
+            if len(ambiguous) > 1:
+                return {"status": "failed", "stage": "bind-identity",
+                        "error": f"run dir {run_dir} is claimed by "
+                                 f"{len(ambiguous)} distinct review rows; "
+                                 f"refusing ambiguous attestation"}
+            try:
+                run_rec = json.loads(
+                    (Path(run_dir) / "run.json").read_text(
+                        encoding="utf-8"))
+                artifact_run_id = str(run_rec.get("run_id") or "")
+            except Exception as exc:
+                return {"status": "failed", "stage": "bind-identity",
+                        "error": f"run.json unreadable: {exc}"}
+            if not artifact_run_id:
+                return {"status": "failed", "stage": "bind-identity",
+                        "error": "run.json carries no run_id; refusing"}
+            try:
+                ident = identity_mod.bind_run(
+                    run_dir, repo_slug=args.repo.strip(),
+                    pr_number=number,
+                    base_sha=str(match.get("base_sha") or ""),
+                    head_sha=str(match.get("head_sha") or ""),
+                    run_id=artifact_run_id,
+                    binder="operator:bind-identity")
+            except Exception as exc:
+                return {"status": "failed", "stage": "bind-identity",
+                        "error": f"{type(exc).__name__}: {exc}"}
+            return {"status": "ok", "identity": ident}
         if op == "ingest":
             if not args.payload:
                 return {"status": "failed", "stage": "ingest",

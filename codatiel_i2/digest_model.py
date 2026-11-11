@@ -290,13 +290,29 @@ def build_review_model(run_dir: Path | str,
     except OSError:
         sem = {}
     ctx = parse_event_context(context)
-    slug = ctx.get("repo_slug", "")
-    try:
-        pr_number = int(ctx.get("pr_number", ""))
-    except (TypeError, ValueError):
-        pr_number = None
-    base_sha = str(run.get("base_sha") or "")
-    head_sha = str(run.get("head_sha") or "")
+    # IDENTITY-01: the (repo, PR, SHAs, run) identity is bound to the
+    # run dir, never taken from the caller label. The label may only
+    # confirm the binding; any mismatch refuses with zero output.
+    from codatiel_i2 import review_identity as _RI
+    ident = _RI.require_bound(run_dir, context)
+    if ident is not None:
+        slug = str(ident["repo_slug"])
+        try:
+            pr_number: int | None = int(ident["pr_number"])
+        except (TypeError, ValueError):
+            pr_number = None
+        base_sha = str(ident["base_sha"])
+        head_sha = str(ident["head_sha"])
+        run_id_bound = str(ident["run_id"])
+    else:
+        slug = ctx.get("repo_slug", "")
+        try:
+            pr_number = int(ctx.get("pr_number", ""))
+        except (TypeError, ValueError):
+            pr_number = None
+        base_sha = str(run.get("base_sha") or "")
+        head_sha = str(run.get("head_sha") or "")
+        run_id_bound = str(run.get("run_id") or "")
     advisories = [f for f in (shadow.get("advisory") or [])
                   if isinstance(f, dict)]
     ev_idx = _evidence_index(run_dir)
@@ -321,7 +337,7 @@ def build_review_model(run_dir: Path | str,
         "pr_url": (f"https://github.com/{slug}/pull/{pr_number}"
                    if slug and pr_number else None),
         "base_sha": base_sha, "head_sha": head_sha,
-        "run_id": str(run.get("run_id") or ""),
+        "run_id": run_id_bound,
         "review_status": status,
         "review_mode": str((metrics.get("mode") or run.get("mode")
                             or "")),

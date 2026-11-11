@@ -339,7 +339,8 @@ def test_dedup_distant_kept(tmp_path: Path):
 
 # -- email rendering ----------------------------------------------------
 
-def _min_run(tmp_path: Path, sem: dict | None) -> Path:
+def _min_run(tmp_path: Path, sem: dict | None,
+             bind_pr: int | None = None) -> Path:
     run_dir = tmp_path / "erun"
     run_dir.mkdir()
     (run_dir / "run.json").write_text(json.dumps({
@@ -353,6 +354,15 @@ def _min_run(tmp_path: Path, sem: dict | None) -> Path:
         "spend": {"usd_estimate": 0.0123}}))
     if sem is not None:
         (run_dir / "semdup.json").write_text(json.dumps(sem))
+    if bind_pr is not None:
+        # IDENTITY-01: context-labelled delivery requires a bound run.
+        from codatiel_i2 import review_identity as _RI
+        run_repo = json.loads(
+            (run_dir / "run.json").read_text())["repo"]
+        slug = _RI.decode_clone_slug(run_repo) or run_repo
+        _RI.bind_run(run_dir, repo_slug=slug, pr_number=bind_pr,
+                     base_sha="a" * 40, head_sha="b" * 40, run_id="r1",
+                     binder="test")
     return run_dir
 
 
@@ -438,7 +448,7 @@ def test_notify_test_env_unchanged(tmp_path: Path):
 
 
 def test_deliver_shadow_context_label(tmp_path: Path):
-    run_dir = _min_run(tmp_path, None)
+    run_dir = _min_run(tmp_path, None, bind_pr=1)
     receipt = service_mod.deliver_shadow(
         run_dir, to=["t@example.com"], sender="s@example.com",
         transport=lambda t, s, b, h=None: {"ok": True, "body": b,
@@ -450,13 +460,14 @@ def test_deliver_shadow_context_label(tmp_path: Path):
     assert "Codatiel review: o/r#1" in body
     assert "https://github.com/o/r/pull/1" in body
     assert "event:" not in body
-    # Without context the header names the repo with no PR link.
+    # Without context the header still names the bound PR (from stored
+    # identity, never a caller string); the local path never appears.
     plain = service_mod.deliver_shadow(
         run_dir, to=["t@example.com"], sender="s@example.com",
         transport=lambda t, s, b, h=None: {"ok": True, "body": b},
         context=None, force=True)
-    assert "Codatiel review: o/r" in plain["transport_receipt"]["body"]
-    assert "github.com" not in plain["transport_receipt"]["body"]
+    assert "Codatiel review: o/r#1" in plain["transport_receipt"]["body"]
+    assert "erun" not in plain["transport_receipt"]["body"]
 
 
 def test_deliver_shadow_duplicate_send_prevented(tmp_path: Path):
@@ -525,6 +536,14 @@ def test_pipeline_test_env_stage_off(tmp_path: Path, dupe_repo: dict,
     assert result["status"] in ("complete", "inconclusive")
     assert result["semdup_status"] == "off"
     assert not (Path(result["run_dir"]) / "semdup.json").exists()
+    # IDENTITY-01: the review is bound at creation, even with the
+    # stage off (binding args are the same event args as the review).
+    import json as _json
+    bound = _json.loads(
+        (Path(result["run_dir"]) / "identity.json").read_text())
+    assert bound["repo_slug"] == REPO and bound["pr_number"] == 1
+    assert bound["base_sha"] == dupe_repo["base"]
+    assert bound["head_sha"] == dupe_repo["head"]
 
 
 def test_pipeline_dev_opt_out_intact(tmp_path: Path, dupe_repo: dict,
@@ -1030,18 +1049,19 @@ def test_notify_none_transport_uses_service_default(tmp_path: Path,
     monkeypatch.setattr(S, "deliver_shadow", _fake_deliver)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    ok = P._notify(
+    ok, detail = P._notify(
         P.EventConfig(env="dev", state_dir=tmp_path,
                       notify_to=["t@example.com"],
                       notify_sender="s@example.com"),
         str(run_dir), "complete", transport=None, context="dev:o/r#1")
-    assert ok is True
+    assert ok is True and detail == "delivered"
     assert calls and calls[0]["transport"] is None
     assert calls[0]["to"] == ["t@example.com"]
-    # No recipients: still refuses.
-    assert P._notify(
+    # No recipients: still refuses, with a reason.
+    refused, why = P._notify(
         P.EventConfig(env="dev", state_dir=tmp_path),
-        str(run_dir), "complete", transport=None) is False
+        str(run_dir), "complete", transport=None)
+    assert refused is False and "no run dir or no notify" in why
 
 
 def test_deliver_shadow_subject_names_pr_not_path(tmp_path: Path):
@@ -1058,6 +1078,10 @@ def test_deliver_shadow_subject_names_pr_not_path(tmp_path: Path):
     (run_dir / "metrics.json").write_text(json.dumps(
         {"status": "complete", "model": "scripted:x",
          "spend": {"usd_estimate": 0.01}}))
+    from codatiel_i2 import review_identity as _RI
+    _RI.bind_run(run_dir, repo_slug="o/r", pr_number=7,
+                 base_sha="a" * 40, head_sha="b" * 40, run_id="r1",
+                 binder="test")
     receipt = S.deliver_shadow(
         run_dir, to=["t@example.com"], sender="s@example.com",
         transport=lambda t, s, b, h=None: {"ok": True},
@@ -1068,7 +1092,10 @@ def test_deliver_shadow_subject_names_pr_not_path(tmp_path: Path):
         run_dir, to=["t@example.com"], sender="s@example.com",
         transport=lambda t, s, b, h=None: {"ok": True},
         context=None, force=True)
-    assert plain["subject"].startswith("[codatiel-shadow] /tmp/clones/")
+    # Bound runs name the PR from stored identity even without a
+    # caller label; the local path never appears in the subject.
+    assert plain["subject"] == "[codatiel] o/r#7 bbbbbbbb complete"
+    assert "clones" not in plain["subject"]
 
 
 def test_deliver_shadow_context_mismatch_refused(tmp_path: Path):
@@ -1089,8 +1116,12 @@ def test_deliver_shadow_context_mismatch_refused(tmp_path: Path):
         {"status": "ok", "coverage": "full", "repo": "mitchins/yt2wiki",
          "spend_usd": 0.0, "targets": [], "pairs_examined": 0,
          "skipped": [], "published": [], "suppressed": []}))
+    from codatiel_i2 import review_identity as _RI
+    _RI.bind_run(run_dir, repo_slug="mitchins/yt2wiki", pr_number=37,
+                 base_sha="a" * 40, head_sha="b" * 40, run_id="r1",
+                 binder="test")
     sent = []
-    with pytest.raises(ValueError, match="does not match run repo"):
+    with pytest.raises(ValueError, match="does not match bound"):
         S.deliver_shadow(
             run_dir, to=["t@example.com"], sender="s@example.com",
             transport=lambda t, s, b, h=None: sent.append(b) or {"ok": True},

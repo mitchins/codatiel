@@ -228,18 +228,36 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
     if ws.status != "ready":
         return {"status": "failed", "stage": "workspace", "error": ws.error,
                 "service_version": SERVICE_VERSION}
-    return _run_review(ws, diff_repo=Path(ws.head_dir), model=model,
-                       model_name=model_name, runs_root=Path(runs_root),
-                       max_turns=max_turns, model_settings=model_settings,
-                       rate=rate, rate_status=rate_status,
-                       max_usd_per_review=max_usd_per_review,
-                       tool_budget=tool_budget,
-                       pr_number=pr, variant=variant,
-                       playbook_name=playbook_name,
-                       playbook_text=playbook_text,
-                       inventory_strategy=inventory_strategy,
-                       enable_final=enable_final,
-                       delegation=delegation)
+    out = _run_review(ws, diff_repo=Path(ws.head_dir), model=model,
+                      model_name=model_name, runs_root=Path(runs_root),
+                      max_turns=max_turns, model_settings=model_settings,
+                      rate=rate, rate_status=rate_status,
+                      max_usd_per_review=max_usd_per_review,
+                      tool_budget=tool_budget,
+                      pr_number=pr, variant=variant,
+                      playbook_name=playbook_name,
+                      playbook_text=playbook_text,
+                      inventory_strategy=inventory_strategy,
+                      enable_final=enable_final,
+                      delegation=delegation)
+    if out.get("status") in ("complete", "inconclusive") and out.get(
+            "run_dir"):
+        # IDENTITY-01: bind the review to its (repo, PR, SHAs, run ID)
+        # at creation; downstream render/delivery re-verifies it.
+        from codatiel_i2 import review_identity as identity_mod
+        try:
+            identity_mod.bind_run(
+                out["run_dir"], repo_slug=repo, pr_number=pr,
+                base_sha=ws.base_sha, head_sha=ws.head_sha,
+                run_id=Path(out["run_dir"]).name,
+                binder="service:review_pr")
+        except Exception as exc:
+            return {"status": "failed", "stage": "identity",
+                    "error": f"identity binding refused: {exc}",
+                    "service_version": SERVICE_VERSION,
+                    "repo": repo, "pr": pr,
+                    "run_dir": out.get("run_dir")}
+    return out
 
 
 def _collect_provider_termination(model: Any) -> dict[str, str]:
@@ -1557,6 +1575,23 @@ def _receipt_delivered(receipt: Any) -> bool:
     return receipt.get("ok") is True
 
 
+def _record_delivery_history(run_dir: Path, entry: dict) -> None:
+    """Append-only per-run send history (IDENTITY-01 reconciliation).
+
+    delivery.json keeps only the latest receipt; this log keeps every
+    attempt — sends, replays, refusals — so delivery counts can be
+    reconciled against review runs. Never raises.
+    """
+    try:
+        from codatiel_i2.common import time as time_mod
+        line = {"ts": time_mod.utc_now_iso(), **entry}
+        with open(run_dir / "delivery-history.jsonl", "a",
+                  encoding="utf-8") as fh:
+            fh.write(json.dumps(line, default=str) + "\n")
+    except Exception:  # noqa: BLE001 - history must never block delivery
+        pass
+
+
 def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
                    transport: Any = None,
                    subject: str | None = None,
@@ -1580,8 +1615,36 @@ def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
     """
     run_dir = Path(run_dir)
     run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    # IDENTITY-01: verify the bound (repo, PR, SHAs, run) identity
+    # before anything is rendered or sent. A caller label may only
+    # confirm the binding; mismatch refuses with zero outbound bytes.
+    # Refusals are recorded in the per-run history, then re-raised.
+    from codatiel_i2 import review_identity as _RI
+    try:
+        _ident = _RI.require_bound(run_dir, context)
+    except ValueError as exc:
+        _record_delivery_history(run_dir, {
+            "outcome": "refused", "context": context,
+            "subject": subject, "error": str(exc)[:300]})
+        raise
     if context is not None:
         _check_context_matches_run(run_dir, run, context)
+    # Explicit subjects are caller labels too, on every path: on bound
+    # runs they must name the bound PR; on unbound runs they must
+    # agree with some stored artifact. (Covers the watcher and
+    # semdup-report text paths, which pass context=None, as well as
+    # subjects supplied alongside the rendered digest.)
+    if subject:
+        try:
+            if _ident is not None:
+                _RI.identity_named_in_subject(subject, _ident)
+            else:
+                _RI.check_subject_matches_artifacts(run_dir, subject)
+        except ValueError as exc:
+            _record_delivery_history(run_dir, {
+                "outcome": "refused", "context": context,
+                "subject": subject, "error": str(exc)[:300]})
+            raise
     if text_body is None:
         from codatiel_i2 import digest_model as _DM
         _model = _DM.build_review_model(run_dir, context=context)
@@ -1595,7 +1658,8 @@ def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
     body_sha256 = _hashlib.sha256(text.encode("utf-8")).hexdigest()
     html_sha256 = (_hashlib.sha256(html_body.encode("utf-8")).hexdigest()
                    if html_body is not None else None)
-    subj = subject or _default_subject(run_dir, run, context)
+    subj = subject or _default_subject(run_dir, run, context,
+                                         bound=_ident)
     try:
         existing = json.loads((run_dir / "delivery.json").read_text(
             encoding="utf-8"))
@@ -1608,63 +1672,65 @@ def deliver_shadow(run_dir: Path | str, *, to: list[str], sender: str,
         existing = dict(existing)
         existing["delivery"] = "already-delivered"
         write_json(run_dir / "delivery.json", existing)
+        _record_delivery_history(run_dir, {
+            "outcome": "already-delivered", "subject": subj,
+            "body_sha256": body_sha256,
+            "receipt": existing.get("transport_receipt") or {}})
         return existing
     # Durable pre-send record: the exact bodies and their hashes are
     # persisted BEFORE transport, so an accepted-but-unpreserved digest
     # cannot recur.
+    bound_for_record = None
+    try:
+        bound_for_record = _RI.load_identity(run_dir)
+    except Exception:  # noqa: BLE001 - record stays unlabeled
+        bound_for_record = None
     record = {"to": to, "sender": sender, "subject": subj,
               "run_id": run.get("run_id"), "repo": run.get("repo"),
+              "identity": bound_for_record,
               "body_sha256": body_sha256, "body": text,
               "html_sha256": html_sha256, "html_body": html_body,
               "transport_receipt": None}
     write_json(run_dir / "delivery.json", record)
     send = transport or (lambda t, s, b, h=None: _smtp2go_send(
         t, sender, s, b, h))
-    receipt = send(to, subj, text, html_body)
+    try:
+        receipt = send(to, subj, text, html_body)
+    except Exception as exc:
+        _record_delivery_history(run_dir, {
+            "outcome": "transport-error", "subject": subj,
+            "body_sha256": body_sha256,
+            "error": f"{type(exc).__name__}: {exc}"})
+        raise
     record["transport_receipt"] = receipt
     write_json(run_dir / "delivery.json", record)
+    _record_delivery_history(run_dir, {
+        "outcome": "sent", "subject": subj,
+        "body_sha256": body_sha256,
+        "receipt": receipt if isinstance(receipt, dict) else {}})
     return record
 
 
 def _check_context_matches_run(run_dir: Path, run: dict,
                                  context: str) -> None:
-    """Refuse an event label that contradicts the run's own repo.
+    """Refuse an event label that contradicts the bound review identity.
 
-    The context label (dev:owner/repo#123) decides the email header and
-    PR links; sending one run's findings under another PR's identity is
-    a misaddressed notification. When both sides are parseable and
-    disagree, fail closed. Unparseable sides proceed (nothing to check
-    against).
+    Thin wrapper over the identity gate: the label must name the same
+    repository slug and PR number bound to the run dir at review time.
+    SHAs and run ID always come from the binding, never the label.
     """
-    from codatiel_i2 import digest_model as _DM
-    ctx = _DM.parse_event_context(context)
-    if not ctx.get("repo_slug"):
-        return
-    candidates: list[str] = []
-    try:
-        sem = json.loads((run_dir / "semdup.json").read_text(
-            encoding="utf-8"))
-        if isinstance(sem, dict) and sem.get("repo"):
-            candidates.append(str(sem["repo"]))
-    except Exception:  # noqa: BLE001 - fall back to the run record
-        pass
-    repo_path = str(run.get("repo") or "")
-    base = repo_path.rstrip("/").split("/")[-1]
-    if "__" in base:
-        candidates.append(base.replace("__", "/", 1))
-    for cand in candidates:
-        if cand and cand != ctx["repo_slug"]:
-            raise ValueError(
-                f"context repo {ctx['repo_slug']!r} does not match run "
-                f"repo {cand!r}; refusing a misaddressed digest")
+    from codatiel_i2 import review_identity as _RI
+    _RI.require_bound(run_dir, context)
 
 
 def _default_subject(run_dir: Path, run: dict,
-                     context: str | None) -> str:
+                     context: str | None,
+                     bound: dict | None = None) -> str:
     """Subject line naming the reviewed PR, never a local path.
 
-    Event reviews carry a context label (dev:owner/repo#123) that
-    identifies the PR; the run record only holds a checkout path.
+    The name comes from the bound review identity (verified), or —
+    for unbound legacy runs — from the caller label. Unbound runs with
+    no label keep the legacy shadow subject.
     """
     status = ""
     try:
@@ -1673,6 +1739,15 @@ def _default_subject(run_dir: Path, run: dict,
     except Exception:  # noqa: BLE001 - status unknown, still name the PR
         pass
     head = str(run.get("head_sha") or "")[:8]
+    if bound is None:
+        try:
+            from codatiel_i2 import review_identity as _RI
+            bound = _RI.load_identity(run_dir)
+        except Exception:  # noqa: BLE001 - fall back to the caller label
+            bound = None
+    if bound and bound.get("repo_slug") and bound.get("pr_number"):
+        return (f"[codatiel] {bound['repo_slug']}#{bound['pr_number']} "
+                f"{head} {status}".rstrip())
     if context:
         from codatiel_i2 import digest_model as _DM
         ctx = _DM.parse_event_context(context)
