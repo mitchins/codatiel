@@ -80,10 +80,15 @@ class EventConfig:
     clock: Callable[[], float] = time.time
     # Integrated semantic-duplication stage (SEMDUP-08, DEV-only).
     # TEST keeps the pipeline exactly as before (forced off below).
+    # COMPLETENESS-01: one aggregate spending guard per PR covers the
+    # normal review and the semdup stage together. No independently
+    # restrictive semantic pair-count ceiling exists: max_pairs 0
+    # disables the experimental pair cap entirely (normal operation);
+    # a positive max_pairs is an explicit controlled-experiment limit.
     semdup_enabled: bool = False
-    semdup_ceiling_usd: float = 0.20
-    semdup_max_pairs: int = 4
+    semdup_max_pairs: int = 0
     semdup_allow_embeddings: bool = True
+    whole_pr_ceiling_usd: float = 2.0
 
 
 def _env_list(name: str) -> list[str]:
@@ -130,22 +135,25 @@ def config_from_env() -> EventConfig:
             f"REVIEW_PIPELINE must be one of {PIPELINE_MODES}; "
             f"got {pipeline!r}")
     # Integrated semdup stage: DEV-only, TEST forced off (unchanged).
-    semdup_enabled, semdup_ceiling = False, 0.20
-    semdup_max_pairs, semdup_allow_emb = 4, True
+    # COMPLETENESS-01: the experimental pair cap defaults to DISABLED
+    # (0 = no count limit); the spending guard is the whole-PR ceiling.
+    semdup_enabled, semdup_max_pairs, semdup_allow_emb = False, 0, True
+    whole_pr_ceiling = 2.0
     if env == "dev":
         if (os.environ.get("CODATIEL_DEV_SEMDUP", "1") or "").strip() == "1":
             try:
-                semdup_ceiling = float(os.environ.get(
-                    "CODATIEL_DEV_SEMDUP_CEILING_USD", "0.20"))
                 semdup_max_pairs = int(os.environ.get(
-                    "CODATIEL_DEV_SEMDUP_MAX_PAIRS", "4"))
+                    "CODATIEL_DEV_SEMDUP_MAX_PAIRS", "0"))
+                whole_pr_ceiling = float(os.environ.get(
+                    "CODATIEL_DEV_WHOLE_PR_CEILING_USD", "2.0"))
             except ValueError:
                 raise store_mod.StoreError(
-                    "CODATIEL_DEV_SEMDUP_CEILING_USD / "
-                    "CODATIEL_DEV_SEMDUP_MAX_PAIRS must be numeric")
-            if semdup_ceiling <= 0 or semdup_max_pairs <= 0:
+                    "CODATIEL_DEV_SEMDUP_MAX_PAIRS / "
+                    "CODATIEL_DEV_WHOLE_PR_CEILING_USD must be numeric")
+            if semdup_max_pairs < 0 or whole_pr_ceiling <= 0:
                 raise store_mod.StoreError(
-                    "semdup ceiling and max pairs must be positive")
+                    "semdup max pairs must be >= 0 and the whole-PR "
+                    "ceiling must be positive")
             semdup_enabled = True
             semdup_allow_emb = (
                 os.environ.get("CODATIEL_DEV_SEMDUP_ALLOW_EMBEDDINGS",
@@ -164,9 +172,9 @@ def config_from_env() -> EventConfig:
         notify_sender=(os.environ.get(prefix + "SENDER", "") or "").strip(),
         repo_paths=repo_paths,
         semdup_enabled=semdup_enabled,
-        semdup_ceiling_usd=semdup_ceiling,
         semdup_max_pairs=semdup_max_pairs,
-        semdup_allow_embeddings=semdup_allow_emb)
+        semdup_allow_embeddings=semdup_allow_emb,
+        whole_pr_ceiling_usd=whole_pr_ceiling)
 
 
 def verify_signature(payload_bytes: bytes,
@@ -476,15 +484,40 @@ def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
                         base: str, head: str, repo_path: Path,
                         runs_root: Path, run_dir: str | None,
                         result: dict) -> dict:
-    """Integrated duplication stage (SEMDUP-08): direct retrieval into
-    Terra/Luna after the standard review completes. DEV-only, bounded,
-    never raises, never changes the standard review's status: standard
-    findings stand even when the stage is unavailable.
+    """Integrated duplication stage (COMPLETENESS-01): direct retrieval
+    into Terra/Luna after the standard review completes. DEV-only,
+    bounded by the whole-PR remainder, never raises, never changes the
+    standard review's status: standard findings stand even when the
+    stage is unavailable.
+
+    The stage spends at most (whole-PR ceiling minus the normal review's
+    recorded actual). A zero/negative remainder, or an unknown normal
+    cost, is an explicit unavailable — never silent, never
+    over-budget.
     """
     result["semdup_status"] = "off"
     result["semdup_published"] = 0
     result["semdup_spend_usd"] = 0.0
+    result["semdup_budget_usd"] = 0.0
     if cfg.env != "dev" or not cfg.semdup_enabled or not run_dir:
+        return result
+    normal_cost = result.get("cost_usd")
+    if not isinstance(normal_cost, (int, float)) or result.get(
+            "cost_unknown"):
+        result["semdup_status"] = "unavailable"
+        result["semdup_reason"] = (
+            "normal review cost unknown; refusing semdup spend without "
+            "an accountable whole-PR remainder")
+        return result
+    remaining = round(float(cfg.whole_pr_ceiling_usd) - float(normal_cost),
+                      6)
+    result["semdup_budget_usd"] = max(remaining, 0.0)
+    if remaining <= 0:
+        result["semdup_status"] = "unavailable"
+        result["semdup_reason"] = (
+            f"whole-PR ceiling ${cfg.whole_pr_ceiling_usd:.2f} already "
+            f"reached by the normal review (${float(normal_cost):.4f}); "
+            "no semdup inference attempted")
         return result
     try:
         from codatiel_i2.semdup_dev import stage as stage_mod
@@ -492,8 +525,8 @@ def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
             repo_path=repo_path, repo=repo, pr=pr, base_rev=base,
             head_rev=head, run_dir=run_dir,
             state_dir=cfg.state_dir,
-            max_pairs=cfg.semdup_max_pairs,
-            ceiling_usd=cfg.semdup_ceiling_usd,
+            max_pairs=(cfg.semdup_max_pairs or None),
+            ceiling_usd=remaining,
             allow_embeddings=cfg.semdup_allow_embeddings)
     except Exception as exc:  # noqa: BLE001 - belt and braces; run_stage never raises
         sem = {"status": "unavailable", "published": [],
@@ -544,11 +577,17 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
             model, settings = providers_mod.build_model("terra")
             model_name = f"terra:{resolved['model']}"
             rate, rate_status = (resolved["rate_usd_per_mtok"],
-                                resolved["rate_status"])
+                                 resolved["rate_status"])
+        # Whole-PR breaker covers the normal review too: DEV caps the
+        # primary review at the whole-PR ceiling (ordinary PRs never
+        # approach it); TEST keeps the long-standing default.
+        primary_cap = (cfg.whole_pr_ceiling_usd if cfg.env == "dev"
+                       else None)
         out = service_mod.review_local(
             repo_path, base, head, model=model, model_name=model_name,
             runs_root=runs_root, work_root=work_root,
             rate=rate, rate_status=rate_status,
+            max_usd_per_review=primary_cap,
             inventory_strategy="bundle-0.1", enable_final=True)
         if out.get("status") not in ("complete", "inconclusive") or \
                 not out.get("run_dir"):
@@ -569,11 +608,19 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
             repo_path=repo_path, runs_root=runs_root,
             run_dir=out.get("run_dir"), result=result)
     from codatiel_i2 import additive as additive_mod
+    # Whole-PR breaker: the Terra primary is capped at the whole-PR
+    # ceiling in DEV (ordinary PRs never approach it); the Luna subagent
+    # keeps its own smaller ceiling, bounded above by the whole-PR
+    # ceiling so the two together cannot exceed it. TEST untouched.
+    primary_cap = (cfg.whole_pr_ceiling_usd if cfg.env == "dev" else None)
+    sub_cap = 0.25 if cfg.env != "dev" else min(
+        0.25, cfg.whole_pr_ceiling_usd)
     out = additive_mod.run_additive(
         mode="additive",
         target={"mode": "local", "case": f"{repo}#{pr}",
                 "root": str(repo_path), "base": base, "head": head},
-        runs_root=runs_root, work_root=work_root)
+        runs_root=runs_root, work_root=work_root,
+        primary_ceiling_usd=primary_cap, sub_ceiling_usd=sub_cap)
     if out.get("status") not in ("complete", "inconclusive") or \
             not out.get("run_dir"):
         return {"status": out.get("status", "failed"),

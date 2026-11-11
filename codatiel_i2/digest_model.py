@@ -350,7 +350,28 @@ def _overview(slug: str, pr: int | None, status: str,
                 f"{'finding' if len(findings) == 1 else 'findings'} "
                 f"{'was' if len(findings) == 1 else 'were'} recorded before "
                 f"the run ended; each needs human judgment.")
+    pubs = (sem.get("published", []) if isinstance(sem, dict)
+              else [])
+    group = ""
+    if len(pubs) > 3:
+        # Longer reviews get a grouping line: area counts by target file,
+        # top three named. Deterministic, derived only from stored rows.
+        from collections import Counter
+        areas = Counter(str(((p.get("target") or {}).get("path") or "?"))
+                        for p in pubs if isinstance(p, dict))
+        top = ", ".join(f"{path.split('/')[-1]} ({n})"
+                        for path, n in areas.most_common(3))
+        n_files = len(areas)
+        group = (f" The {len(pubs)} reuse suggestions span "
+                 f"{n_files} {'file' if n_files == 1 else 'files'}, "
+                 f"most in {top}.")
     if not findings:
+        if pubs:
+            return (f"Codatiel's ordinary review of {where} surfaced no "
+                    f"findings, but the duplication check approved "
+                    f"{len(pubs)} reuse "
+                    f"{'suggestion' if len(pubs) == 1 else 'suggestions'} "
+                    f"(see Possible existing functionality below).{group}")
         return (f"Codatiel completed its review of {where} with no material "
                 f"findings. Silence here means the investigated surface "
                 f"produced nothing worth surfacing — see Review completeness "
@@ -369,10 +390,12 @@ def _overview(slug: str, pr: int | None, status: str,
         s += (f"Start with the first item below ({loc}: "
               f"{first['title']}); the remainder are ordered by review "
               f"priority.")
-    if sem and sem.get("present") and (
+    if isinstance(sem, dict) and (
             sem.get("coverage") != "full" or sem.get("skipped")):
         s += (" Duplication examination was partial, so unexamined code "
               "may still contain reuse opportunities.")
+    pubs = sem.get("published", []) if sem else []
+    s += group
     return s
 
 
@@ -382,8 +405,10 @@ _REASON_GLOSSARY = {
     "terra_no_lead": "the review model declined to propose this reuse",
     "deterministic_drop": "a deterministic overlap check ruled it out",
     "duplicate_of_review": "the ordinary review already covers it",
-    "pr_cap": "approved but held back by the per-email cap",
+    "mirror_of_published": "the same pair published in the other direction",
     "delta pair budget exhausted": "pair budget reached before it",
+    "experimental pair budget": "held back by the explicit experiment limit",
+    "budget_stop": "stopped by the spending guard before inference",
     "retrieval failed": "candidate lookup failed for it",
     "tree unavailable": "source tree unavailable for it",
 }

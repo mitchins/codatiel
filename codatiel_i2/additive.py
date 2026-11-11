@@ -273,11 +273,14 @@ def consolidate(*, terra_run_dir: Path, luna_findings: list[dict],
 def run_additive(*, mode: str, target: dict[str, Any],
                  runs_root: Path, work_root: Path,
                  sub_role: str = "luna",
-                 sub_ceiling_usd: float = 0.25) -> dict[str, Any]:
+                 sub_ceiling_usd: float = 0.25,
+                 primary_ceiling_usd: float | None = 5.0) -> dict[str, Any]:
     """Run Terra canonical first (sealed), then the blind subagent, merge.
 
     ``mode``/``target`` mirror the D01 runner ({mode: local|pr, ...}).
     Never fails a completed Terra primary because of subagent trouble.
+    ``primary_ceiling_usd`` caps the Terra primary (None keeps the
+    long-standing default); the subagent keeps its own ceiling.
     """
     from codatiel_i2 import delegate as delegate_mod
     from codatiel_i2 import providers as providers_mod
@@ -293,7 +296,8 @@ def run_additive(*, mode: str, target: dict[str, Any],
               max_turns=12, model_settings=settings,
               rate=resolved["rate_usd_per_mtok"],
               rate_status=resolved["rate_status"],
-              max_usd_per_review=5.0,
+              max_usd_per_review=(5.0 if primary_ceiling_usd is None
+                                  else float(primary_ceiling_usd)),
               inventory_strategy="bundle-0.1", enable_final=True,
               delegation=None)
     if target["mode"] == "local":

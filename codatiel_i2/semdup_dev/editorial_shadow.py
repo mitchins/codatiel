@@ -93,10 +93,34 @@ def candidate_pairs(records: list, max_pairs: int) -> tuple[list, list]:
     return pairs, skipped
 
 
+def _is_budget_error(err: Any) -> bool:
+    """Ledger/spending-guard refusal, never a model verdict."""
+    text = str(err or "")
+    return ("BudgetCeilingExceeded" in text
+            or "exceeds remaining budget" in text)
+
+
 def _spent(ledger) -> float | None:
     try:
         return ledger.confirmed_usd()
     except Exception:  # noqa: BLE001 - spend unknown => stop spending
+        return None
+
+
+def _input_chars(render: Callable | None, *args: Any) -> int | None:
+    """Actual model input size for the estimate, never a fixed proxy.
+
+    A fixed character proxy blinds the preflight gate to real evidence
+    size (a 50 KB unit costs ~15x the old 12 K proxy), letting calls
+    pass the gate only to die at the ledger — mislabelled as model
+    verdicts. Measure the rendered input; fall back to the proxy only
+    if rendering itself fails.
+    """
+    try:
+        if render is None:
+            return None
+        return len(render(*args))
+    except Exception:  # noqa: BLE001 - fall back to the proxy
         return None
 
 
@@ -268,12 +292,17 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         repo=cfg.repos[0] if cfg.repos else "dev", base_sha=base_rev,
         head_sha=head_rev, base_dir=base_tree, head_dir=head_tree,
         diff_repo=repo_path, tool_budget=OD.TERRA_TOOL_BUDGET)
-    est = OD.estimate_call_usd(len(OD.TERRA_INSTRUCTIONS) + 12000,
-                               terra_res["rate_usd_per_mtok"])
+    est = OD.estimate_call_usd(
+        _input_chars(OD.render_terra_input, ev, head_rev,
+                     pair.get("classification") or "introduced")
+        or (len(OD.TERRA_INSTRUCTIONS) + 12000),
+        terra_res["rate_usd_per_mtok"])
     s = _spent(terra_ledger)
     if s is None or (est is not None and s + est > half):
         row.update({"path": "suppressed", "reason": "budget_stop",
-                    "detail": "terra estimate exceeds half-ceiling"})
+                    "detail": ("terra estimate exceeds its half of the "
+                               f"whole-PR ceiling ${ceiling_usd:.2f}; "
+                               "unexamined, not rejected")})
         return row
     ta = assess(
         evidence={"target": ev["target"],
@@ -283,13 +312,25 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         target_kind=pair.get("classification") or "introduced",
         tools=OD.scoped_tools(terra_ctx), model=terra_model_id,
         model_settings=terra_settings, ledger=terra_ledger, ctx=terra_ctx)
+    row["assess_ran"] = True
     row["terra_tool_calls"] = len(
         ((ta.get("transcript") or {}).get("tool_calls", [])))
     if not ta.get("ok") or not (ta.get("terra") or {}).get("overlap"):
+        err = str(ta.get("error", "") or "")
+        if _is_budget_error(err):
+            # Ledger refusal is inability, never a decline: record the
+            # guard stop explicitly so budget exhaustion cannot hide
+            # behind a model-rejection label.
+            row.update({"path": "suppressed", "reason": "budget_stop",
+                        "detail": ("Terra call refused by the spending "
+                                   f"guard ({err[:160]}); unexamined, "
+                                   "not rejected")})
+            return row
         row.update({"path": "suppressed", "reason": "terra_no_lead",
-                    "detail": ta.get("error", ""),
+                    "detail": err,
                     "terra_note": str(
-                        (ta.get("transcript") or {}).get("final_text", "")
+                        (ta.get("transcript") or {}).get("final_text",
+                                                       "")
                         or "")[:600]})
         return row
     terra = ta["terra"]
@@ -308,24 +349,36 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         repo=cfg.repos[0] if cfg.repos else "dev", base_sha=base_rev,
         head_sha=head_rev, base_dir=base_tree, head_dir=head_tree,
         diff_repo=repo_path, tool_budget=8)
-    est_l = OD.estimate_call_usd(len(ED.EDITOR_INSTRUCTIONS) + 12000,
-                                 luna_res["rate_usd_per_mtok"])
+    est_l = OD.estimate_call_usd(
+        _input_chars(OD.render_luna_input, ev, terra)
+        or (len(ED.EDITOR_INSTRUCTIONS) + 12000),
+        luna_res["rate_usd_per_mtok"])
     sl = _spent(luna_ledger)
     if sl is None or (est_l is not None and sl + est_l > half):
         row.update({"path": "suppressed", "reason": "budget_stop",
-                    "detail": "luna estimate exceeds half-ceiling"})
+                    "detail": ("luna estimate exceeds its half of the "
+                               f"whole-PR ceiling ${ceiling_usd:.2f}; "
+                               "Terra proposal held, never published "
+                               "without Luna review")})
         return row
     lt0 = time.monotonic()
     luna = edit(
         package=ev, proposed_comment=proposed,
         tools=R.build_i2_tools(luna_ctx), model=luna_model_id,
         model_settings=luna_settings, ledger=luna_ledger, ctx=luna_ctx)
+    row["edit_ran"] = True
     row["luna_wall_s"] = round(time.monotonic() - lt0, 1)
     row["luna_tool_calls"] = len(
         ((luna.get("transcript") or {}).get("tool_calls", [])))
     row["editor"] = luna.get("editor")
     row["editor_error"] = luna.get("error", "")
     if not luna.get("ok"):
+        if _is_budget_error(luna.get("error", "")):
+            row.update({"path": "suppressed", "reason": "budget_stop",
+                        "detail": ("Luna call refused by the spending "
+                                   "guard; Terra proposal held, never "
+                                   "published without Luna review")})
+            return row
         row.update({"path": "suppressed",
                     "reason": "editor_unpublishable"})
         return row
@@ -378,7 +431,8 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
                            base_tree: Path | str | None,
                            run_dir: Path, ceiling_usd: float,
                            assess_fn: Callable | None = None,
-                           edit_fn: Callable | None = None) -> dict:
+                           edit_fn: Callable | None = None,
+                           on_pair: Callable | None = None) -> dict:
     """Terra-propose / Luna-edit over directly-retrieved pairs.
 
     SEMDUP-08 integrated stage: pairs come from deterministic retrieval
@@ -386,6 +440,9 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
     stage is invoked anywhere on this path; Terra and Luna are resolved
     via the standard product backends. Every failure degrades to a
     recorded row; this function never raises.
+
+    `on_pair` (optional) receives each judged row right after it is
+    recorded, so the caller can persist verdicts incrementally.
 
     Returns {"ok", "models", "pairs", "published", "suppressed",
     "skipped", "spend_usd", "spend_unknown", "wall_s", "stage"/"error"}.
@@ -479,6 +536,11 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
             outcome["published"].append(_public_row(row))
         else:
             outcome["suppressed"].append(_suppressed_row(row))
+        if on_pair is not None:
+            try:
+                on_pair(row)
+            except Exception:  # noqa: BLE001 - hook never breaks judging
+                pass
     spent_t, spent_l = _spent(terra_ledger), _spent(luna_ledger)
     outcome["spend_usd"] = round(
         (spent_t or 0.0) + (spent_l or 0.0), 6)

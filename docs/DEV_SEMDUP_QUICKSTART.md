@@ -74,8 +74,10 @@ No SEMDUP history needed. No GPU. No manual database work.
   repo (cached per content; later revs reuse vectors in ~1 s).
   No GPU required; without embedding libraries the stage reports
   `unavailable` and the normal review still completes.
-- A small PR review: ~$0.02–0.15 normal + ~$0.02–0.03 duplication
-  (separate $3 mission budget; per-delta ceiling $0.20 default).
+- A small PR review: ~$0.02–0.15 normal + ~$0.02–0.03 duplication.
+  One whole-PR ceiling (CODATIEL_DEV_WHOLE_PR_CEILING_USD, $2 default)
+  covers both together; there are no pair/finding count caps in normal
+  operation.
 - `events status` / `events dashboard` show spend, checkpoints and
   findings from the durable ledger. `CODATIEL_DEV_SPEND_CAP_USD`
   (default 5) stops inference at the cap; `reset-spend` never

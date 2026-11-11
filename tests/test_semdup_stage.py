@@ -110,8 +110,8 @@ def test_stage_dev_default_on(tmp_path: Path, dupe_repo: dict,
     _dev_env(monkeypatch, tmp_path, dupe_repo["root"])
     cfg = P.config_from_env()
     assert cfg.semdup_enabled is True
-    assert cfg.semdup_ceiling_usd == pytest.approx(0.20)
-    assert cfg.semdup_max_pairs == 4
+    assert cfg.semdup_max_pairs == 0  # experimental cap disabled
+    assert cfg.whole_pr_ceiling_usd == pytest.approx(2.0)
 
 
 def test_stage_test_always_off(tmp_path: Path, dupe_repo: dict,
@@ -139,7 +139,7 @@ def test_stage_opt_out(tmp_path: Path, dupe_repo: dict,
 def test_stage_bad_numbers_fail_closed(tmp_path: Path, dupe_repo: dict,
                                         monkeypatch: pytest.MonkeyPatch):
     _dev_env(monkeypatch, tmp_path, dupe_repo["root"])
-    monkeypatch.setenv("CODATIEL_DEV_SEMDUP_CEILING_USD", "nonsense")
+    monkeypatch.setenv("CODATIEL_DEV_WHOLE_PR_CEILING_USD", "nonsense")
     with pytest.raises(S.StoreError):
         P.config_from_env()
 
@@ -201,7 +201,7 @@ def test_run_stage_direct_pairs_judged(tmp_path: Path, dupe_repo: dict,
     assert out["coverage_detail"]["examination"]["targets_examined"] >= 1
     assert len(out["targets"]) >= 1
     assert out["pairs_examined"] >= 1  # retrieval really ran
-    assert len(out["published"]) <= ST.PR_FINDING_CAP
+    assert "pr_cap" not in json.dumps(out)  # no numerical publication cap
     assert (run_dir / "semdup.json").exists()
     # Approved rows carry exact anchors and the Luna decision.
     for row in out["published"]:
@@ -293,11 +293,22 @@ def _pub_row(i: int) -> dict:
                                    "end_line": 10 * i + 5}}}
 
 
-def test_pr_cap():
-    kept, capped = ST._apply_pr_cap([_pub_row(1), _pub_row(2),
-                                     _pub_row(3)])
-    assert len(kept) == 2 and len(capped) == 1
-    assert capped[0]["reason"] == "pr_cap"
+def test_no_publication_cap_all_approved_publish(
+        tmp_path: Path, dupe_repo: dict, monkeypatch: pytest.MonkeyPatch):
+    """Every Luna-approved pair publishes: no numerical cap exists."""
+    assert not hasattr(ST, "PR_FINDING_CAP")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = ST.run_stage(
+        repo_path=dupe_repo["root"], repo=REPO, pr=1,
+        base_rev=dupe_repo["base"], head_rev=dupe_repo["head"],
+        run_dir=run_dir, state_dir=tmp_path / "state",
+        allow_embeddings=False, assess_fn=_fake_assess,
+        edit_fn=_fake_edit)
+    assert out["status"] == "ok", out
+    assert len(out["published"]) >= 1
+    assert "pr_cap" not in json.dumps(out.get("suppressed", []))
 
 
 def test_dedup_overlapping_suppressed(tmp_path: Path):
@@ -540,11 +551,203 @@ def test_pipeline_dev_opt_out_intact(tmp_path: Path, dupe_repo: dict,
     assert result["semdup_status"] == "off"
 
 
-# -- honest coverage: partial is never reported as full ------------------
+# -- COMPLETENESS-01: spend-gated examination, no count caps ---------
+
+def _multi_dupe_repo(tmp_path: Path) -> dict:
+    """Base + head with three near-duplicate added functions."""
+    import subprocess
+
+    def _git(repo, *args):
+        proc = subprocess.run(["git", "-C", str(repo), *args],
+                              capture_output=True, text=True, timeout=60)
+        assert proc.returncode == 0, proc.stderr
+        return proc.stdout.strip()
+
+    root = tmp_path / "multirepo"
+    root.mkdir()
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    (root / "existing.py").write_text(EXISTING)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "base")
+    base = _git(root, "rev-parse", "HEAD")
+    body = ('\n\ndef {name}(amount, places=2):\n'
+            '    """Format amount with thousands separators for display."""\n'
+            '    quantized = round(float(amount), places)\n'
+            '    return f"{{quantized:,{{places}}f}}"\n')
+    (root / "new.py").write_text(
+        '"""Checkout helpers."""\n' + "".join(
+            body.format(name=n) for n in
+            ("alpha_price", "beta_price", "gamma_price")))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "add three duplicates")
+    return {"root": root, "base": base,
+            "head": _git(root, "rev-parse", "HEAD")}
+
+
+def test_publish_all_multiple_approvals(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Three genuine approvals all publish — no finding-count cap."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    repo = _multi_dupe_repo(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = ST.run_stage(
+        repo_path=repo["root"], repo=REPO, pr=1,
+        base_rev=repo["base"], head_rev=repo["head"],
+        run_dir=run_dir, state_dir=tmp_path / "state",
+        allow_embeddings=False, assess_fn=_fake_assess,
+        edit_fn=_fake_edit)
+    assert out["status"] == "ok", out
+    assert len(out["published"]) >= 3, out
+    assert out["coverage"] == "full", out
+
+
+def test_mirror_publications_collapsed(tmp_path: Path):
+    """A->B and B->A approvals publish once; the mirror is recorded."""
+    a = _pub_row(1)
+    b = {"target": a["counterpart"], "counterpart": a["target"],
+         "head_rev": "h", "decision": "REVISE",
+         "revised_comment": "c", "reason": "r", "anchors": {}}
+    kept, mirrors = ST._dedup_mirrors([a, b])
+    assert kept == [a]
+    assert len(mirrors) == 1
+    assert mirrors[0]["reason"] == "mirror_of_published"
+
+
+def test_deterministic_filter_fragments_excluded():
+    assert ST._is_filtered_unit("oracles/x.py", "f")
+    assert ST._is_filtered_unit("oracles", "f")
+    assert ST._is_filtered_unit("a.py", "x#region@1")
+    assert ST._is_filtered_unit("a.py", "  ")
+    assert ST._is_filtered_unit("", "f")
+    assert not ST._is_filtered_unit("a.py", "real_fn")
+    assert not ST._is_filtered_unit("a.py", "<closure>@101")
+
+
+def test_pair_ordering_multichannel_first():
+    def _p(t, c, via):
+        return {"target": {"path": "n.py", "symbol": t},
+                "counterpart": {"path": "e.py", "symbol": c},
+                "channels": via}
+
+    ordered = ST._order_pairs([
+        _p("z", "z", ["embedding"]),
+        _p("a", "a", ["lexical", "semantic"]),
+        _p("m", "m", []),
+        _p("b", "b", ["semantic", "lexical"]),
+    ])
+    assert [(p["target"]["symbol"], len(p["channels"]))
+            for p in ordered] == [("a", 2), ("b", 2), ("z", 1), ("m", 0)]
+
+
+def test_whole_pr_ceiling_stops_cleanly(
+        tmp_path: Path, dupe_repo: dict, monkeypatch: pytest.MonkeyPatch):
+    """A ~zero remainder stops inference with explicit partial status."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = ST.run_stage(
+        repo_path=dupe_repo["root"], repo=REPO, pr=1,
+        base_rev=dupe_repo["base"], head_rev=dupe_repo["head"],
+        run_dir=run_dir, state_dir=tmp_path / "state",
+        allow_embeddings=False, ceiling_usd=0.0,
+        assess_fn=_fake_assess, edit_fn=_fake_edit)
+    assert out["status"] == "ok", out
+    assert out["published"] == []
+    assert out["coverage"] == "partial", out
+    assert all(r.get("reason") == "budget_stop"
+               for r in out["suppressed"]), out
+    assert "budget" in out["reason"].lower()
+
+
+def test_terra_without_luna_never_publishes(
+        tmp_path: Path, dupe_repo: dict, monkeypatch: pytest.MonkeyPatch):
+    """A Terra proposal held back by a failed Luna edit is suppressed."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+
+    def _fail_edit(*, package, proposed_comment, tools, model,
+                   model_settings, ledger, ctx=None, call=None,
+                   max_turns=4):
+        return {"ok": False, "error": "luna exploded"}
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = ST.run_stage(
+        repo_path=dupe_repo["root"], repo=REPO, pr=1,
+        base_rev=dupe_repo["base"], head_rev=dupe_repo["head"],
+        run_dir=run_dir, state_dir=tmp_path / "state",
+        allow_embeddings=False, assess_fn=_fake_assess,
+        edit_fn=_fail_edit)
+    assert out["status"] == "ok", out
+    assert out["published"] == []
+    assert any(r.get("reason") == "editor_unpublishable"
+               for r in out["suppressed"])
+
+
+def test_continuation_rerun_no_recharge(
+        tmp_path: Path, dupe_repo: dict, monkeypatch: pytest.MonkeyPatch):
+    """An authorized rerun reuses recorded verdicts: zero new inference."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    calls = {"assess": 0, "edit": 0}
+
+    def _count_assess(**kw):
+        calls["assess"] += 1
+        return _fake_assess(**kw)
+
+    def _count_edit(**kw):
+        calls["edit"] += 1
+        return _fake_edit(**kw)
+
+    kw = dict(repo_path=dupe_repo["root"], repo=REPO, pr=1,
+              base_rev=dupe_repo["base"], head_rev=dupe_repo["head"],
+              state_dir=tmp_path / "state",
+              allow_embeddings=False, assess_fn=_count_assess,
+              edit_fn=_count_edit)
+    run1 = tmp_path / "run1"
+    run1.mkdir()
+    out1 = ST.run_stage(run_dir=run1, **kw)
+    assert out1["status"] == "ok", out1
+    n_assess = calls["assess"]
+    assert n_assess >= 1
+    assert out1["pairs_reused"] == 0
+    run2 = tmp_path / "run2"
+    run2.mkdir()
+    out2 = ST.run_stage(run_dir=run2, **kw)
+    assert out2["status"] == "ok", out2
+    assert calls["assess"] == n_assess  # no repeated paid work
+    assert calls["edit"] == out1["pairs_examined"]
+    assert out2["pairs_reused"] == out1["pairs_examined"]
+    assert out2["spend_usd"] == 0.0
+    assert len(out2["published"]) == len(out1["published"])
+
+
+def test_maybe_semdup_stage_remainder_guard(tmp_path: Path):
+    """Unknown or exhausted normal cost => explicit unavailable, no spend."""
+    from codatiel_i2 import event_pipeline as P
+    cfg = P.EventConfig(env="dev", state_dir=tmp_path,
+                        whole_pr_ceiling_usd=2.0, semdup_enabled=True)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "run.json").write_text(json.dumps({"run_id": "r"}))
+    (run_dir / "metrics.json").write_text(json.dumps({}))
+    out = P._maybe_semdup_stage(
+        cfg=cfg, repo=REPO, pr=1, base="b", head="h",
+        repo_path=tmp_path, runs_root=tmp_path, run_dir=str(run_dir),
+        result={"cost_usd": None, "cost_unknown": True})
+    assert out["semdup_status"] == "unavailable"
+    assert "without an accountable" in out["semdup_reason"]
+    out2 = P._maybe_semdup_stage(
+        cfg=cfg, repo=REPO, pr=1, base="b", head="h",
+        repo_path=tmp_path, runs_root=tmp_path, run_dir=str(run_dir),
+        result={"cost_usd": 2.5, "cost_unknown": False})
+    assert out2["semdup_status"] == "unavailable"
+    assert "already reached" in out2["semdup_reason"]
 
 def test_stage_pair_budget_partial_never_full(
         tmp_path: Path, dupe_repo: dict, monkeypatch: pytest.MonkeyPatch):
-    """A delta with budget-skipped targets is partial, with reasons."""
+    """An explicit experimental pair cap truncates honestly as partial."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -558,6 +761,8 @@ def test_stage_pair_budget_partial_never_full(
     assert out["coverage"] == "partial", out
     assert out["skipped"], out
     assert all(s.get("reason") for s in out["skipped"])
+    assert any("experimental pair budget" in s.get("reason", "")
+               for s in out["skipped"])
     assert "skipped" in out["reason"]
     detail = out["coverage_detail"]["examination"]
     assert detail["targets_examined"] == 0
@@ -565,9 +770,9 @@ def test_stage_pair_budget_partial_never_full(
     assert len(detail["skipped"]) == len(out["skipped"])
 
 
-def test_stage_selection_budget_recorded_not_dropped(
+def test_stage_no_count_caps_by_default(
         tmp_path: Path, dupe_repo: dict, monkeypatch: pytest.MonkeyPatch):
-    """Units beyond max_targets are listed as skipped, never silent."""
+    """Normal operation examines every retrieved pair (no truncation)."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -575,14 +780,13 @@ def test_stage_selection_budget_recorded_not_dropped(
         repo_path=dupe_repo["root"], repo=REPO, pr=1,
         base_rev=dupe_repo["base"], head_rev=dupe_repo["head"],
         run_dir=run_dir, state_dir=tmp_path / "state",
-        allow_embeddings=False, max_targets=0,
+        allow_embeddings=False, max_pairs=None,
         assess_fn=_fake_assess, edit_fn=_fake_edit)
     assert out["status"] == "ok", out
-    assert out["coverage"] == "partial", out
-    assert out["skipped"], out
-    assert any("target selection budget" in s.get("reason", "")
-               for s in out["skipped"])
-    assert "selection budget" in out["reason"]
+    assert out["pairs_total"] >= 1
+    assert out["pairs_examined"] == out["pairs_total"]
+    assert not any("budget exhausted" in s.get("reason", "")
+                   for s in out["skipped"])
 
 
 def test_stage_full_only_when_nothing_skipped(
@@ -601,3 +805,102 @@ def test_stage_full_only_when_nothing_skipped(
     assert out["coverage"] == "full", out
     assert out["skipped"] == []
     assert out["coverage_detail"]["retrieval"]["failures"] == 0
+
+
+def test_budget_refusal_never_labelled_as_decline(
+        tmp_path: Path, dupe_repo: dict, monkeypatch: pytest.MonkeyPatch):
+    """A ledger ceiling refusal is a budget_stop, not a model verdict."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+
+    def _refuse_assess(**kw):
+        return {"ok": False, "error": "BudgetCeilingExceeded: next request "
+                "estimated $0.0671 exceeds remaining budget $0.0021",
+                "transcript": {"tool_calls": []}}
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = ST.run_stage(
+        repo_path=dupe_repo["root"], repo=REPO, pr=1,
+        base_rev=dupe_repo["base"], head_rev=dupe_repo["head"],
+        run_dir=run_dir, state_dir=tmp_path / "state",
+        allow_embeddings=False, ceiling_usd=2.0,
+        assess_fn=_refuse_assess, edit_fn=_fake_edit)
+    assert out["status"] == "ok", out
+    assert out["published"] == []
+    assert out["suppressed"], out
+    assert all(r.get("reason") == "budget_stop"
+               for r in out["suppressed"])
+    assert out["coverage"] == "partial", out
+
+
+def test_estimate_uses_actual_evidence_size(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A 60 KB unit stops a $0.02 ceiling; the old 12 K proxy would pass."""
+    import subprocess
+
+    def _git(repo, *args):
+        proc = subprocess.run(["git", "-C", str(repo), *args],
+                              capture_output=True, text=True, timeout=60)
+        assert proc.returncode == 0, proc.stderr
+        return proc.stdout.strip()
+
+    def _big(name):
+        return ('"""Big module."""\n\n\ndef %s():\n    """Doc."""\n'
+                % name + "\n".join(f"    v{i} = {i}"
+                                   for i in range(3000))
+                + "\n    return 1\n")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    root = tmp_path / "bigrepo"
+    root.mkdir()
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    (root / "existing.py").write_text(_big("big_money"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "base")
+    base = _git(root, "rev-parse", "HEAD")
+    (root / "new.py").write_text(_big("big_price"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "big")
+    head = _git(root, "rev-parse", "HEAD")
+    called = []
+
+    def _spy_assess(**kw):
+        called.append(kw)
+        return _fake_assess(**kw)
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = ST.run_stage(
+        repo_path=root, repo=REPO, pr=1, base_rev=base, head_rev=head,
+        run_dir=run_dir, state_dir=tmp_path / "state",
+        allow_embeddings=False, ceiling_usd=0.02,
+        assess_fn=_spy_assess, edit_fn=_fake_edit)
+    assert out["status"] == "ok", out
+    assert called == []  # estimate gate stopped before any model call
+    assert any(r.get("reason") == "budget_stop"
+               for r in out["suppressed"])
+    assert out["coverage"] == "partial", out
+
+
+def test_continuation_ignores_mislabeled_refusals(tmp_path: Path):
+    """Budget-mislabeled rows are re-judged, never reused as verdicts."""
+    from codatiel_i2.semdup_dev import stage as S
+    pair = {"target": {"path": "n.py", "symbol": "f"},
+            "counterpart": {"path": "e.py", "symbol": "g"}}
+    key = S._pair_key(pair["target"], pair["counterpart"])
+    known = {
+        key: {"target": pair["target"], "counterpart": pair["counterpart"],
+              "path": "suppressed", "reason": "terra_no_lead",
+              "detail": "BudgetCeilingExceeded: next request estimated "
+                        "$0.0671 exceeds remaining budget $0.0021"},
+    }
+    new_pairs, reused = S._partition_new([pair], known)
+    assert new_pairs == [pair] and reused == []
+    known[key] = {"target": pair["target"],
+                  "counterpart": pair["counterpart"],
+                  "path": "suppressed", "reason": "terra_no_lead",
+                  "detail": ""}
+    new_pairs, reused = S._partition_new([pair], known)
+    assert new_pairs == [] and len(reused) == 1

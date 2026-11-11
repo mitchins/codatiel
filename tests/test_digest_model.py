@@ -176,3 +176,21 @@ def test_malformed_advisory_entries_skipped(tmp_path: Path):
     d = _run(tmp_path, advisory=["junk", None, 42, _adv()])
     m = DM.build_review_model(d, context="dev:o/r#7")
     assert m["n_findings"] == 1  # only the dict survives
+
+
+def test_overview_groups_many_published_by_area(tmp_path: Path):
+    pubs = [{
+        "target": {"path": f"src/{chr(97 + i)}.py", "symbol": f"f{i}"},
+        "counterpart": {"path": "src/old.py", "symbol": "g"},
+        "decision": "KEEP", "revised_comment": "reuse", "reason": "",
+    } for i in range(5)]
+    pubs[3]["target"]["path"] = "src/a.py"
+    pubs[4]["target"]["path"] = "src/a.py"
+    sem = {"status": "ok", "coverage": "full", "spend_usd": 0.05,
+           "reason": "examined 5 targets, 5 pairs; 5 approved",
+           "targets": [], "pairs_examined": 5,
+           "skipped": [], "published": pubs, "suppressed": []}
+    d = _run(tmp_path, advisory=[], sem=sem)
+    m = DM.build_review_model(d, context="dev:o/r#7")
+    assert "span 3 files" in m["overview"]
+    assert "a.py (3)" in m["overview"]
