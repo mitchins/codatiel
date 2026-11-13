@@ -123,7 +123,8 @@ def build_parser() -> argparse.ArgumentParser:
     events.add_argument("op", choices=["enable", "ingest", "status",
                                        "dashboard", "reset-spend", "recover",
                                        "review", "resume-semdup",
-                                       "bind-identity"],
+                                       "bind-identity", "github-arm",
+                                       "github-publish"],
                         help="enable: watermark + grandfather open PRs (no "
                              "inference); ingest: process one webhook payload; "
                              "status/dashboard: operational state; "
@@ -134,7 +135,12 @@ def build_parser() -> argparse.ArgumentParser:
                              "delta at an approved ceiling (no emails); "
                              "bind-identity: attest the (repo, PR, SHAs, run) "
                              "binding for a legacy run dir, corroborated "
-                             "against the reviews table (no inference)")
+                             "against the reviews table (no inference); "
+                             "github-arm: write the GitHub-comments arming "
+                             "watermark (immutable; only later reviews may "
+                             "publish); github-publish: post one "
+                             "consolidated PR comment for a bound completed "
+                             "run dir (needs CODATIEL_GITHUB_COMMENTS=on)")
     events.add_argument("--payload", default="",
                         help="ingest: webhook JSON body file")
     events.add_argument("--delivery-id", default="",
@@ -159,6 +165,9 @@ def build_parser() -> argparse.ArgumentParser:
     events.add_argument("--ceiling", type=float, default=-1.0,
                         help="resume-semdup: approved whole-PR remainder "
                              "ceiling in USD for the resumed stage")
+    events.add_argument("--superseded-by", type=int, default=None,
+                        help="github-publish: PR number that supersedes the "
+                             "review's PR (publication refused, email-only)")
     semdup = sub.add_parser("semdup", help="DEV semantic-duplication shadow worker (report-only; TEST/Production untouched).")
     semdup.add_argument("op", choices=["config-check", "build-base",
                                        "process-event", "report"],
@@ -1267,6 +1276,29 @@ def cmd_events(args) -> dict:
                 return {"status": "failed", "stage": "bind-identity",
                         "error": f"{type(exc).__name__}: {exc}"}
             return {"status": "ok", "identity": ident}
+        if op == "github-arm":
+            from codatiel_i2.github import comments as comments_mod
+            try:
+                return {"status": "ok",
+                        **comments_mod.arm(store)}
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "github-arm",
+                        "error": str(exc)}
+        if op == "github-publish":
+            from codatiel_i2.github import comments as comments_mod
+            if not args.run_dir:
+                return {"status": "failed", "stage": "github-publish",
+                        "error": "github-publish needs --run-dir"}
+            try:
+                pub = comments_mod.post_review_comment(
+                    run_dir=args.run_dir.strip(), store=store,
+                    superseded_by=args.superseded_by)
+            except store_mod.StoreError as exc:
+                return {"status": "failed", "stage": "github-publish",
+                        "error": str(exc)}
+            ok = pub.get("outcome") == "posted"
+            return {"status": ("posted" if ok else "refused"),
+                    **pub}
         if op == "ingest":
             if not args.payload:
                 return {"status": "failed", "stage": "ingest",

@@ -101,6 +101,18 @@ CREATE TABLE IF NOT EXISTS reviews (
     finished_ts REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_reviews_repo_pr ON reviews(repo, pr);
+CREATE TABLE IF NOT EXISTS publications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo TEXT NOT NULL,
+    pr INTEGER NOT NULL,
+    head_sha TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    comment_id TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    created_ts REAL NOT NULL DEFAULT 0,
+    UNIQUE(repo, pr, head_sha, run_id)
+);
 """
 
 
@@ -289,6 +301,37 @@ class Store:
         row = self.delivery_get(delivery_id)
         if row is None:
             raise StoreError("delivery vanished after replay mark")
+        return row
+
+    def delivery_reopen_draft(self, delivery_id: str,
+                              now: float | None = None) -> dict:
+        """Supersede a deferred skipped:draft row for a readiness rerun.
+
+        Narrow escape from replay protection: only a terminal
+        skipped:draft decision (or a skipped:replay wrapper preserving
+        it as the original decision) may be reclaimed to in_progress.
+        Every other decision is left untouched and the row returned.
+        """
+        ts = time.time() if now is None else now
+        try:
+            self.cx.execute(_BEGIN)
+            self.cx.execute(
+                "UPDATE deliveries SET decision='in_progress',"
+                " reason='readiness transition re-claimed from draft"
+                " deferral', cost_usd=NULL, received_ts=?"
+                " WHERE delivery_id=? AND (decision='skipped:draft'"
+                " OR decision='skipped:replay')",
+                (ts, delivery_id))
+            self.cx.execute(_COMMIT)
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"delivery reopen failed: {exc}")
+        row = self.delivery_get(delivery_id)
+        if row is None:
+            raise StoreError("delivery vanished after reopen")
         return row
 
     def checkpoint_get(self, repo: str, pr: int) -> dict | None:
@@ -623,6 +666,100 @@ class Store:
             raise StoreError(f"settle failed: {exc}")
         return {"settled_usd": s, "reserved_usd": r,
                 "unknown_holds": u}
+
+    # -- publications (GitHub comment record; PROD-01 Track A) ---------------
+    def publication_get(self, repo: str, pr: int, head_sha: str,
+                        run_id: str) -> dict | None:
+        try:
+            row = self.cx.execute(
+                "SELECT repo, pr, head_sha, run_id, comment_id, outcome,"
+                " reason, created_ts FROM publications"
+                " WHERE repo=? AND pr=? AND head_sha=? AND run_id=?",
+                (repo, pr, head_sha, run_id)).fetchone()
+        except Exception as exc:
+            raise StoreError(f"publication read failed: {exc}")
+        if not row:
+            return None
+        keys = ("repo", "pr", "head_sha", "run_id", "comment_id",
+                "outcome", "reason", "created_ts")
+        return dict(zip(keys, row))
+
+    def publication_record(self, *, repo: str, pr: int, head_sha: str,
+                           run_id: str, comment_id: str, outcome: str,
+                           reason: str,
+                           now: float | None = None) -> dict:
+        """Insert-or-keep one publication row per (repo, PR, head, run).
+
+        The first outcome for a review identity stands; a concurrent
+        duplicate loses the race and the winner's row is returned, so
+        retries observe the original post instead of double-posting.
+        """
+        ts = time.time() if now is None else now
+        try:
+            self.cx.execute(_BEGIN)
+            self.cx.execute(
+                "INSERT INTO publications(repo, pr, head_sha, run_id,"
+                " comment_id, outcome, reason, created_ts)"
+                " VALUES(?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(repo, pr, head_sha, run_id) DO NOTHING",
+                (repo, pr, head_sha, run_id, comment_id, outcome,
+                 reason, ts))
+            self.cx.execute(_COMMIT)
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"publication record failed: {exc}")
+        row = self.publication_get(repo, pr, head_sha, run_id)
+        if row is None:
+            raise StoreError("publication record vanished after insert")
+        return row
+
+    def publication_update(self, repo: str, pr: int, head_sha: str,
+                           run_id: str, comment_id: str, outcome: str,
+                           reason: str,
+                           now: float | None = None) -> None:
+        """Overwrite a publication row (repost after delete, refusal
+        re-evaluation). Posted rows are never downgraded by callers —
+        post_review_comment reconciles first and only upgrades.
+        """
+        ts = time.time() if now is None else now
+        try:
+            self.cx.execute(_BEGIN)
+            self.cx.execute(
+                "UPDATE publications SET comment_id=?, outcome=?,"
+                " reason=?, created_ts=? WHERE repo=? AND pr=?"
+                " AND head_sha=? AND run_id=?",
+                (comment_id, outcome, reason, ts, repo, pr, head_sha,
+                 run_id))
+            self.cx.execute(_COMMIT)
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"publication update failed: {exc}")
+
+    def publications_list(self, repo: str | None = None,
+                          pr: int | None = None) -> list[dict]:
+        try:
+            if repo is not None and pr is not None:
+                rows = self.cx.execute(
+                    "SELECT repo, pr, head_sha, run_id, comment_id,"
+                    " outcome, reason, created_ts FROM publications"
+                    " WHERE repo=? AND pr=? ORDER BY created_ts",
+                    (repo, pr)).fetchall()
+            else:
+                rows = self.cx.execute(
+                    "SELECT repo, pr, head_sha, run_id, comment_id,"
+                    " outcome, reason, created_ts FROM publications"
+                    " ORDER BY created_ts").fetchall()
+        except Exception as exc:
+            raise StoreError(f"publication list failed: {exc}")
+        keys = ("repo", "pr", "head_sha", "run_id", "comment_id",
+                "outcome", "reason", "created_ts")
+        return [dict(zip(keys, r)) for r in rows]
 
     def deliveries_by_decision(self) -> dict[str, int]:
         try:
