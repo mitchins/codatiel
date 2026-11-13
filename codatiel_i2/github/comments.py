@@ -67,6 +67,36 @@ def is_enabled() -> bool:
     return switch() == "on"
 
 
+def operator_pause_reason() -> str | None:
+    """Operator-layer pause for GitHub comments, if one is configured.
+
+    Returns a human-readable reason when publishing must hold, else
+    None. Absent operator file = no constraint. Present file with
+    pause unset or true = hold (safe default; the operator must
+    explicitly unpause). Unreadable/invalid file = hold with the
+    loud error as the reason (refuse rather than run on unknown
+    controls). Never reads secret values.
+    """
+    try:
+        from codatiel_i2 import operator_config as opcfg
+    except ImportError:
+        return None
+    try:
+        state_dir = opcfg.state_dir_from_env()
+        if state_dir is None:
+            return None
+        settings, _source = opcfg.load(state_dir)
+    except Exception as exc:  # noqa: BLE001 - corrupt controls => hold
+        return (f"operator controls unreadable ({exc}); refusing to "
+                f"publish on unknown controls")
+    if not settings.present:
+        return None
+    if settings.pause_github_comments:
+        return ("operator pause is set (pause_github_comments in "
+                "operator.json); GitHub comments HOLD")
+    return None
+
+
 def armed_at(store: Any) -> float | None:
     raw = store.meta_get(ARMED_META_KEY)
     if not raw:
@@ -290,6 +320,9 @@ def post_review_comment(*, run_dir: Path | str, store: Any,
         return {"outcome": "refused", "reason":
                 f"{SWITCH_ENV} is {switch()!r}; GitHub comments HOLD "
                 f"(needs {SWITCH_ENV}=on)"}
+    op_hold = operator_pause_reason()
+    if op_hold is not None:
+        return {"outcome": "refused", "reason": op_hold}
     armed = armed_at(store)
     if armed is None:
         return {"outcome": "refused", "reason":
