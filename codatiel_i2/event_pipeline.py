@@ -309,6 +309,19 @@ def classify_event(ev: dict, cp: dict | None,
     if ev.get("draft") is True and ev.get("action") != "ready_for_review":
         ctx["defer"] = True
         return "skipped:draft", "draft PR deferred until ready_for_review", ctx
+    if (ev["event"] == "pull_request" and status == "draft"
+            and not reviewed_head
+            and (ev.get("draft") is False
+                 or ev.get("action") == "ready_for_review")):
+        # Readiness transition with an UNCHANGED head: the deferred draft
+        # baseline is the review range. This must review even though the
+        # head matches the deferred pointer — an unchanged-head skip
+        # here would deadlock draft->ready forever (the poller re-ingests
+        # the same head with draft=false under the same delivery ID,
+        # which process_event re-roots via the skipped:draft row).
+        ctx["range"] = "full"
+        return "review_full", \
+            "draft marked ready with no prior review; review full diff once", ctx
     if head and head == reviewed_head and (not base or not cp.get(
             "last_reviewed_base") or base == cp["last_reviewed_base"]):
         if ev.get("action") in METADATA_ACTIONS:
@@ -695,6 +708,42 @@ def _count_terra(run_dir: str) -> int:
 
 
 # -- orchestration ---------------------------------------------------------------
+
+def _is_readiness_rerun(ev: dict, store: store_mod.Store,
+                        prior: dict) -> bool:
+    """True when a duplicate delivery carries a draft->ready transition.
+
+    The poller keys delivery IDs by (repo, PR, head), so the
+    mark-ready tick for an unchanged head repeats the deferred
+    skipped:draft delivery ID. Replay-blocking it would deadlock
+    draft->ready forever. Only this narrow shape re-roots: a
+    pull_request event that is no longer a draft, for a checkpoint
+    still draft-deferred with no reviewed head, superseding a
+    skipped:draft row (directly, or via a skipped:replay wrapper that
+    preserved the original decision in its detail).
+    """
+    dec = str(prior.get("decision") or "")
+    if dec == "skipped:replay":
+        try:
+            detail = json.loads(prior.get("detail") or "{}")
+        except Exception:
+            detail = {}
+        dec = str(detail.get("original_decision") or "")
+    if dec != "skipped:draft":
+        return False
+    if ev.get("event") != "pull_request" or not ev.get("pr_number"):
+        return False
+    if ev.get("draft") is not False and ev.get("action") != \
+            "ready_for_review":
+        return False
+    try:
+        cp = store.checkpoint_get(ev["repo"], int(ev["pr_number"]))
+    except Exception:
+        return False
+    return (cp is not None and cp.get("status") == "draft"
+            and not cp.get("last_reviewed_head"))
+
+
 def _record(store: store_mod.Store, ev: dict, decision: str, reason: str,
              cost: float | None, detail: dict | None = None,
              now: float | None = None) -> dict:
@@ -721,9 +770,19 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     store.require_enabled()
     prior = store.delivery_get(ev["delivery_id"])
     if prior is not None and prior.get("decision") not in ("in_progress",):
-        # Webhook retry / worker restart: the stored decision stands and
-        # the duplicate is recorded as a blocked replay. No inference.
-        return store.delivery_mark_replay(ev["delivery_id"], prior)
+        if _is_readiness_rerun(ev, store, prior):
+            # Draft->ready readiness transition re-ingested under the
+            # same poller delivery ID (same head, draft now false): the
+            # deferred skipped:draft row is superseded and the event is
+            # processed as new work. Every other repeat stays a blocked
+            # replay with no inference.
+            store.delivery_reopen_draft(ev["delivery_id"], now=now)
+            prior = None
+        else:
+            # Webhook retry / worker restart: the stored decision stands
+            # and the duplicate is recorded as a blocked replay.
+            # No inference.
+            return store.delivery_mark_replay(ev["delivery_id"], prior)
     if prior is None:
         _record(store, ev, "in_progress", "claimed", None, now=now)
     cp = None
@@ -850,13 +909,21 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     if result.get("semdup_status", "off") != "off":
         semdup_bits = (f", semdup {result.get('semdup_status')}/"
                        f"{result.get('semdup_published', 0)}")
+    # GitHub comment publisher (PROD-01 Track A): email already
+    # attempted above and its outcome recorded; publishing runs second
+    # in try/except and can never change the email outcome. Default
+    # HOLD (CODATIEL_GITHUB_COMMENTS=off) makes this a no-op.
+    publish_bits = _maybe_publish_comment(
+        cfg=cfg, store=store, run_dir=result.get("run_dir") or "",
+        now=now)
     final = _finalize_delivery(
         store, ev, "completed",
         f"{kind} review {result['status']} "
         f"(terra {result.get('terra_findings', 0)}, "
         f"luna-exclusive {result.get('added', 0)}{semdup_bits}; "
         f"notified={notified}"
-        + ("" if notified else f" ({notify_detail[:160]})") + ")", cost)
+        + ("" if notified else f" ({notify_detail[:160]})")
+        + publish_bits + ")", cost)
     # Drain a queued newer delta as its own run (separate evidence).
     if done.get("queued"):
         qb, qh = done["queued"]
@@ -872,6 +939,28 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                                 transport=transport)
             final = {**final, "drained": out.get("decision")}
     return final
+
+
+def _maybe_publish_comment(*, cfg: EventConfig, store: store_mod.Store,
+                           run_dir: str, now: float | None = None) -> str:
+    """Best-effort GitHub comment post. Returns reason bits, never
+    raises, never affects the email outcome recorded by the caller."""
+    from codatiel_i2.github import comments as comments_mod
+    if not comments_mod.is_enabled():
+        return ""
+    if not run_dir:
+        return "; github-comment refused (no run dir)"
+    try:
+        pub = comments_mod.post_review_comment(
+            run_dir=run_dir, store=store, now=now)
+    except Exception as exc:  # noqa: BLE001 - publish never blocks email
+        return (f"; github-comment error "
+                f"({type(exc).__name__}: {exc}"[:160] + ")")
+    outcome = str(pub.get("outcome") or "unknown")
+    if outcome == "posted":
+        return (f"; github-comment posted "
+                f"(comment {pub.get('comment_id') or '?'})")
+    return f"; github-comment {outcome} ({str(pub.get('reason') or '')[:160]})"
 
 
 def _find_by_branch(store: store_mod.Store, repo: str,

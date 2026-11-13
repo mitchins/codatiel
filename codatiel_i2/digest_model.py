@@ -214,11 +214,27 @@ def _semdup_entry(sem: dict) -> dict:
     else:
         reasons = "; ".join(sorted({str(s.get("reason") or "")
                                     for s in skipped if s.get("reason")}))
-        state = (f"Partial: {examined_targets} changed units examined, "
-                 f"{pairs_display}, {len(skipped)} skipped "
-                 f"({reasons or 'see semdup.json'}). "
-                 "Nothing found in the examined code — this is not proof "
-                  "that no duplication exists elsewhere in the change.")
+        stored_reason = str(sem.get("reason") or "")[:200]
+        why = reasons or stored_reason or "see semdup.json"
+        examined_bits = (f"Partial: {examined_targets} changed units "
+                         f"examined, {pairs_display}, {len(skipped)} "
+                         f"skipped ({why}). ")
+        if published:
+            # A partial examination that still approved reuse suggestions
+            # must never claim "nothing found": name the approved reuse
+            # below and limit the caveat to the UNEXAMINED remainder.
+            n_pub = len(published)
+            state = (examined_bits +
+                     f"{n_pub} reuse "
+                     f"{'suggestion' if n_pub == 1 else 'suggestions'} "
+                     "approved below; unexamined code may still contain "
+                     "further reuse opportunities — absence of additional "
+                     "findings proves nothing.")
+        else:
+            state = (examined_bits +
+                     "Nothing found in the examined code — this is not "
+                     "proof that no duplication exists elsewhere in the "
+                     "change.")
     coverage_word = ("not completed" if status != "ok"
                      else "complete" if effective_full else "partial")
     pubs = []
@@ -329,7 +345,7 @@ def build_review_model(run_dir: Path | str,
     verified = sum(1 for f in advisories
                    if f.get("disposition") == "verified_proof"
                    or f.get("publish_eligible") is True)
-    return {
+    model = {
         "model_version": MODEL_VERSION,
         "repo_slug": slug,
         "repo_label": slug or str(run.get("repo") or ""),
@@ -355,14 +371,27 @@ def build_review_model(run_dir: Path | str,
         "silence": (shadow.get("silence") or {}) if isinstance(
             shadow.get("silence"), dict) else {},
         "semdup": _semdup_entry(sem) if sem else {"present": False},
-        "overview": _overview(slug, pr_number, status, findings,
-                              verified, sem),
     }
+    _groups = [g for g in (model["semdup"].get("opportunity_groups") or [])
+               if isinstance(g, dict)]
+    model["n_reuse"] = len(model["semdup"].get("published", []))
+    model["n_opportunities"] = len(_groups) or model["n_reuse"]
+    model["overview"] = _overview(slug, pr_number, status, findings,
+                                  verified, sem,
+                                  n_opportunities=model["n_opportunities"])
+    return model
 
 
 def _overview(slug: str, pr: int | None, status: str,
-              findings: list[dict], verified: int, sem: dict) -> str:
-    """Deterministic 2-3 sentence summary. Derived only, never invented."""
+              findings: list[dict], verified: int, sem: dict,
+              n_opportunities: int = 0) -> str:
+    """Deterministic short summary. Derived only, never invented.
+
+    Ordinary correctness findings and reuse/refactoring opportunities
+    are named as separate categories: a reuse suggestion is never
+    counted as a correctness finding, and correctness silence is never
+    claimed when reuse suggestions were approved.
+    """
     where = f"{slug}#{pr}" if slug and pr else "this change"
     if status != "complete":
         return (f"Codatiel's review of {where} did not complete, so the "
@@ -375,8 +404,8 @@ def _overview(slug: str, pr: int | None, status: str,
               else [])
     group = ""
     if len(pubs) > 3:
-        # Longer reviews get a grouping line: area counts by target file,
-        # top three named. Deterministic, derived only from stored rows.
+        # Longer reviews get an area breakdown: counts by target file,
+        # top three named. Derived only from stored rows.
         from collections import Counter
         areas = Counter(str(((p.get("target") or {}).get("path") or "?"))
                         for p in pubs if isinstance(p, dict))
@@ -386,13 +415,23 @@ def _overview(slug: str, pr: int | None, status: str,
         group = (f" The {len(pubs)} reuse suggestions span "
                  f"{n_files} {'file' if n_files == 1 else 'files'}, "
                  f"most in {top}.")
+    if 0 < n_opportunities < len(pubs):
+        # Whenever the deterministic grouping actually collapsed
+        # overlapping pairs, say so at every size: the count below is
+        # distinct opportunities, with every supporting location kept.
+        group += (f" Overlapping suggestions are collapsed into "
+                  f"{n_opportunities} distinct "
+                  f"{'opportunity' if n_opportunities == 1 else 'opportunities'} "
+                  f"below; every supporting location is preserved.")
     if not findings:
         if pubs:
             return (f"Codatiel's ordinary review of {where} surfaced no "
-                    f"findings, but the duplication check approved "
-                    f"{len(pubs)} reuse "
+                    f"correctness findings, but the duplication check "
+                    f"approved {len(pubs)} reuse "
                     f"{'suggestion' if len(pubs) == 1 else 'suggestions'} "
-                    f"(see Possible existing functionality below).{group}")
+                    f"(reuse/refactoring opportunities, not correctness "
+                    f"defects — see Possible existing functionality "
+                    f"below).{group}")
         return (f"Codatiel completed its review of {where} with no material "
                 f"findings. Silence here means the investigated surface "
                 f"produced nothing worth surfacing — see Review completeness "
@@ -401,7 +440,7 @@ def _overview(slug: str, pr: int | None, status: str,
     loc = (f"{first['path']}:{first['line_start']}"
            if first["path"] else "the change")
     s = (f"Codatiel's review of {where} surfaced {len(findings)} "
-         f"candidates with verified code citations; "
+         f"correctness candidates with verified code citations; "
          f"{verified} {'is' if verified == 1 else 'are'} corroborated, the "
          f"rest need{'' if verified else 's'} a human verdict "
          f"before acting. ")
@@ -415,7 +454,12 @@ def _overview(slug: str, pr: int | None, status: str,
             sem.get("coverage") != "full" or sem.get("skipped")):
         s += (" Duplication examination was partial, so unexamined code "
               "may still contain reuse opportunities.")
-    pubs = sem.get("published", []) if sem else []
+    if pubs:
+        s += (f" Separately, the duplication check approved {len(pubs)} "
+              f"reuse/refactoring "
+              f"{'suggestion' if len(pubs) == 1 else 'suggestions'} "
+              f"(see Possible existing functionality below); these are "
+              f"reuse opportunities, not correctness defects.")
     s += group
     return s
 
@@ -910,7 +954,8 @@ def _render_pub_markdown(L: list, p: dict, indent: str = "") -> None:
                  f"{p['differences']}")
 
 
-# -- Markdown (future PR comments; NOT wired to GitHub) --------------------
+# -- Markdown (PR comments via codatiel_i2.github.comments; posting stays
+# -- gated behind CODATIEL_GITHUB_COMMENTS=on + arming) -------------------------
 
 def render_markdown(model: dict) -> str:
     L: list[str] = []
@@ -977,12 +1022,13 @@ def render_markdown(model: dict) -> str:
             L.append(f"Dismissed candidates ({len(sem['suppressed'])}):")
             for s in sem["suppressed"][:6]:
                 L.append(f"- {s['target']} → {s['counterpart']}: "
-                         f"{_gloss_reason(s['reason'])}")
+                         f"{_gloss_reason(s['reason'])}"
+                         + (f" ({s['detail']})" if s["detail"] else ""))
         if sem["skipped"]:
             L.append("")
             L.append(f"Not examined for duplication ({len(sem['skipped'])}):")
             for s in sem["skipped"][:6]:
-                L.append(f"- {s['unit']}: {s['reason']}")
+                L.append(f"- {s['unit']}: {_gloss_reason(s['reason'])}")
     L.append("")
     L.append("## Review completeness")
     L.append("")
