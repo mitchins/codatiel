@@ -965,13 +965,17 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             cost if not unknown else None)
         # A newer head queued during this run must not strand: drain
         # it through the same verified path (stale queues drop $0).
+        # The follow range starts at the queued BASE (not this run's
+        # unsealed head), so a first-review supersede cannot silently
+        # skip the A..H1 segment.
         cp_after = (store.checkpoint_get(ev["repo"], pr)
                     if ev.get("pr_number") else None)
         qh_after = (cp_after or {}).get("queued_head") or ""
         if qh_after:
             qb_after = (cp_after or {}).get("queued_base") or ""
             final = _drain_queued(
-                cfg=cfg, store=store, ev=ev, pr=pr, to_sha=to_sha,
+                cfg=cfg, store=store, ev=ev, pr=pr,
+                to_sha=(qb_after or to_sha),
                 queued=(qb_after, qh_after), final=final, access=access,
                 model_factory=model_factory, transport=transport, now=now)
         return final

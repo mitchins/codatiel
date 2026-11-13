@@ -297,3 +297,41 @@ def test_complete_review_clears_satisfied_queue(tmp_path):
         assert cp["queued_head"] == ""
     finally:
         st.close()
+
+
+def test_superseded_run_drains_stranded_live_queue(cfg_store, chain,
+                                                   monkeypatch):
+    """PROD-02 review: a newer head queued during a superseded run is
+    still reviewed (from its queued base, not the unsealed head), so
+    no segment is silently skipped and nothing strands."""
+    from tests.test_prod01_lifecycle import _git  # noqa: E402
+    cfg, store = cfg_store
+    root = chain["root"]
+    (root / "app.py").write_text("LIMIT = 1\n")
+    _git(root, "commit", "-qam", "D")
+    d = _git(root, "rev-parse", "HEAD")
+    monkeypatch.setattr(P, "get_live_head",
+                        _live(chain["B"], chain["B"], chain["C"],
+                              d, d, d))
+    spy = _NotifySpy()
+    monkeypatch.setattr(P, "_notify", spy)
+    kw = {"model_factory": _terra_factory()}
+    row = _ingest(cfg, store,
+                   pr_event("opened", 23, chain["A"], chain["B"]),
+                   "e1", **kw)
+    assert row["decision"] == "completed", row
+    # A newer head queued while the next run is in flight.
+    store.checkpoint_upsert({
+        "repo": REPO, "pr": 23,
+        "status": store.checkpoint_get(REPO, 23)["status"],
+        "last_reviewed_head": chain["B"],
+        "queued_base": chain["B"], "queued_head": d})
+    row = _ingest(cfg, store,
+                   pr_event("synchronize", 23, chain["B"], chain["C"]),
+                   "e2", **kw)
+    assert row["decision"] == "skipped:stale_superseded", row
+    assert row.get("drained") == "completed", row
+    cp = store.checkpoint_get(REPO, 23)
+    assert cp["last_reviewed_head"] == d
+    assert cp["status"] == "reviewed"
+    assert len(_runs(cfg)) == 3

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -1184,16 +1185,23 @@ def cmd_events(args) -> dict:
                 live_head = _pm.get_live_head(repo, number)
                 head_norm = head.strip()
                 live_norm = (live_head or "").strip()
+                if not re.fullmatch(r"[0-9a-fA-F]{40}", head_norm or ""):
+                    return {"status": "failed", "stage": "review",
+                            "error": "explicit --head needs the full "
+                                     "40-char SHA (abbreviations cannot be "
+                                     "identity-bound); no spend"}
                 if live_norm and not (
-                        head_norm == live_norm
-                        or live_norm.startswith(head_norm)
-                        or head_norm.startswith(live_norm)):
+                        head_norm.lower() == live_norm.lower()
+                        or live_norm.lower().startswith(
+                            head_norm.lower())
+                        or head_norm.lower().startswith(
+                            live_norm.lower())):
                     return {"status": "failed", "stage": "review",
                             "error": f"explicit head {head_norm[:12]} does "
                                      f"not match the live PR head "
                                      f"({live_norm[:12]}); refresh the SHA "
                                      "and re-drive (PROD-02: no backwards "
-                                     "seals; abbreviations allowed)"}
+                                     "seals)"}
                 access, err = _pm.resolve_access(cfg, repo)
                 if access is None:
                     return {"status": "failed", "stage": "repo_access",
