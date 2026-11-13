@@ -89,6 +89,14 @@ class EventConfig:
     semdup_max_pairs: int = 0
     semdup_allow_embeddings: bool = True
     whole_pr_ceiling_usd: float = 2.0
+    # PROD-01 Track B (additive operator layer): effective controls
+    # resolved from [state_dir]/operator.json when present, else env
+    # behaviour unchanged. daily_cap_usd None = no daily budget;
+    # email_enabled False = digests suppressed (records the refusal);
+    # operator_source records which layer produced this config.
+    daily_cap_usd: float | None = None
+    email_enabled: bool = True
+    operator_source: str = "env"
 
 
 def _env_list(name: str) -> list[str]:

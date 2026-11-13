@@ -198,6 +198,20 @@ def build_parser() -> argparse.ArgumentParser:
     semdup.add_argument("--send", action="store_true",
                         help="report: digest to the configured DEV "
                              "destination only (never a PR comment)")
+
+    dash = sub.add_parser("dashboard", help="Local operator dashboard "
+                                           "(loopback-only HTTP; overview + "
+                                           "settings).")
+    dash.add_argument("--port", type=int, default=8487,
+                      help="local port to bind (default 8487; 0 = "
+                           "ephemeral)")
+    dash.add_argument("--host", default="127.0.0.1",
+                      help="bind address; loopback only "
+                           "(non-loopback hosts are refused)")
+    dash.add_argument("--state-dir", default="",
+                      help="env state dir holding events.sqlite "
+                           "(default: CODATIEL_DEV_STATE or "
+                           "CODATIEL_TEST_STATE)")
     return parser
 
 
@@ -258,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
                                               "partial", "skipped",
                                               "grandfathered", "deferred",
                                               "indexing") else 1
+    if args.cmd == "dashboard":
+        return cmd_dashboard(args)
     return 1
 
 
@@ -1029,6 +1045,48 @@ def cmd_deliver_shadow(args) -> dict:
                 "error": f"{type(exc).__name__}: {exc}"}
 
 
+def cmd_dashboard(args: Any) -> int:
+    """Serve the local operator dashboard (loopback-only HTTP).
+
+    Prints a one-line JSON record with the URL, then serves until
+    interrupted. Binds 127.0.0.1 by default; non-loopback hosts are
+    refused before any socket opens.
+    """
+    from codatiel_i2 import operator_config as opcfg_mod
+    from codatiel_i2 import operator_dashboard as dash_mod
+
+    state_dir = opcfg_mod.state_dir_from_env(
+        (getattr(args, "state_dir", "") or "").strip() or None)
+    if state_dir is None:
+        print(json.dumps({"status": "failed", "stage": "config",
+                          "error": "no state dir: pass --state-dir or set "
+                                   "CODATIEL_DEV_STATE/CODATIEL_TEST_STATE"},
+                         ensure_ascii=False, sort_keys=True))
+        return 1
+    try:
+        server = dash_mod.build_server(
+            state_dir,
+            getattr(args, "host", "127.0.0.1") or "127.0.0.1",
+            int(getattr(args, "port", 8487)))
+    except opcfg_mod.OperatorConfigError as exc:
+        print(json.dumps({"status": "failed", "stage": "config",
+                          "error": str(exc)},
+                         ensure_ascii=False, sort_keys=True))
+        return 1
+    host, port = server.server_address[0], server.server_address[1]
+    print(json.dumps({"status": "ok",
+                      "url": f"http://{host}:{port}/",
+                      "state_dir": str(state_dir)},
+                     ensure_ascii=False, sort_keys=True), flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
 def cmd_events(args) -> dict:
     """Event-driven incremental review pipeline (TEST/DEV)."""
     import os
@@ -1039,6 +1097,15 @@ def cmd_events(args) -> dict:
         cfg = pipe_mod.config_from_env()
     except store_mod.StoreError as exc:
         return {"status": "failed", "stage": "config", "error": str(exc)}
+    # PROD-01 Track B: layer operator.json over env config when present
+    # (absent file = env behaviour unchanged). An invalid file refuses
+    # loudly before any store or inference work.
+    from codatiel_i2 import operator_config as opcfg_mod
+    try:
+        cfg = opcfg_mod.apply_to_event_config(cfg)
+    except opcfg_mod.OperatorConfigError as exc:
+        return {"status": "failed", "stage": "operator-config",
+                "error": str(exc)}
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     try:
         store = store_mod.Store(cfg.state_dir / "events.sqlite")
@@ -1136,6 +1203,31 @@ def cmd_events(args) -> dict:
                     return {"status": "skipped",
                             "decision": "skipped:ceiling",
                             "reason": "spend cap reached"}
+                # PROD-01 Track B: the effective daily budget also gates
+                # explicit re-drives (pause_reviews does not: an explicit
+                # operator command is not the automatic path).
+                daily_cap = getattr(cfg, "daily_cap_usd", None)
+                if daily_cap is not None:
+                    import datetime as _dt_daily
+                    _today = _dt_daily.datetime.now(
+                        _dt_daily.timezone.utc).strftime("%Y-%m-%d")
+                    try:
+                        _spent = opcfg_mod.spend_on_day(store, _today)
+                    except opcfg_mod.OperatorConfigError as exc:
+                        return {"status": "failed",
+                                "stage": "operator-config",
+                                "error": str(exc)}
+                    if (_spent["codatiel_ledger_usd"] + cfg.reserve_usd
+                            > float(daily_cap)):
+                        return {
+                            "status": "skipped",
+                            "decision": "skipped:ceiling",
+                            "reason": (
+                                "daily Codatiel budget "
+                                f"${float(daily_cap):.2f} reached "
+                                f"(ledger ${_spent['codatiel_ledger_usd']:.4f} "
+                                f"on {_today}); re-drive refused"),
+                        }
                 claim = store.claim_for_review(repo, number, base=use_base,
                                                head=head)
                 if claim != "claimed":
@@ -1331,6 +1423,26 @@ def cmd_events(args) -> dict:
             except store_mod.StoreError as exc:
                 return {"status": "failed", "stage": "recover",
                         "error": str(exc)}
+            # PROD-01 Track B: operator pre-inference gate (pause,
+            # allowlist narrowing, effective daily budget). Records a
+            # $0 decision with no inference when closed.
+            try:
+                gate = opcfg_mod.ingest_gate(cfg, store, ev)
+            except opcfg_mod.OperatorConfigError as exc:
+                return {"status": "failed", "stage": "operator-config",
+                        "error": str(exc)}
+            if gate is not None:
+                row = store.delivery_record(
+                    delivery_id=ev["delivery_id"],
+                    event_type=ev["event"],
+                    action=ev.get("action") or "",
+                    repo=ev.get("repo") or "",
+                    pr=int(ev.get("pr_number") or 0),
+                    head_sha=ev.get("head_sha") or "",
+                    decision=gate["decision"], reason=gate["reason"],
+                    cost_usd=0.0, detail={"operator_gate": True},
+                    now=cfg.clock())
+                return {"status": "skipped", **row}
             transport_kind = os.environ.get("CODATIEL_EVENTS_TRANSPORT",
                                             "fixture")
             transport = None
@@ -1348,6 +1460,16 @@ def cmd_events(args) -> dict:
                 return {"status": "failed", "stage": "ingest",
                         "error": f"unknown CODATIEL_EVENTS_TRANSPORT "
                                  f"{transport_kind!r}: fixture|smtp2go"}
+            # PROD-01 Track B: operator email master toggle. Disabled
+            # digests refuse loudly at send time so the delivery row
+            # records notified=False with the reason (never silently
+            # "sent").
+            if not getattr(cfg, "email_enabled", True):
+                def transport(to_addrs: list[str], subject: str,
+                              body: str, html: str | None = None) -> dict:
+                    raise opcfg_mod.OperatorConfigError(
+                        "digest emails disabled by operator settings "
+                        "(email_enabled=false); refusing send")
             try:
                 row = pipe_mod.process_event(
                     cfg=cfg, store=store, ev=ev, transport=transport)
