@@ -57,3 +57,21 @@ def two_commit_repo(tmp_path: Path):
     _git(repo, "commit", "-m", "head: bump timeout 30->60, add feature")
     head_sha = _git(repo, "rev-parse", "HEAD")
     return {"repo": repo, "base_sha": base_sha, "head_sha": head_sha}
+
+
+@pytest.fixture(autouse=True)
+def _stub_live_github_head(monkeypatch):
+    """PROD-02: hermetic freshness oracle by default.
+
+    The pipeline consults the live GitHub head before/after inference.
+    Unstubbed, every review test would shell out to the real `gh`
+    binary. Default to "unverifiable" (None): pre-existing tests keep
+    their exact old behavior, and the local-ancestry fallback still
+    applies. Tests exercising freshness script their own mapping.
+    """
+    try:
+        from codatiel_i2 import event_pipeline as _pipe
+    except Exception:
+        return
+    monkeypatch.setattr(_pipe, "get_live_head",
+                        lambda repo, pr: None)

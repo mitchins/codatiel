@@ -1173,7 +1173,7 @@ def cmd_events(args) -> dict:
                                  "event first"}
             if cp.get("status") not in ("interrupted", "failed",
                                         "reviewed", "grandfathered",
-                                        "draft"):
+                                        "draft", "deferred"):
                 return {"status": "failed", "stage": "review",
                         "error": f"PR status {cp.get('status')!r} is not "
                                  "explicitly re-drivable"}
@@ -1181,6 +1181,19 @@ def cmd_events(args) -> dict:
                 head = args.head.strip()
                 base = (args.base or "").strip() or None
                 from codatiel_i2 import event_pipeline as _pm
+                live_head = _pm.get_live_head(repo, number)
+                head_norm = head.strip()
+                live_norm = (live_head or "").strip()
+                if live_norm and not (
+                        head_norm == live_norm
+                        or live_norm.startswith(head_norm)
+                        or head_norm.startswith(live_norm)):
+                    return {"status": "failed", "stage": "review",
+                            "error": f"explicit head {head_norm[:12]} does "
+                                     f"not match the live PR head "
+                                     f"({live_norm[:12]}); refresh the SHA "
+                                     "and re-drive (PROD-02: no backwards "
+                                     "seals; abbreviations allowed)"}
                 access, err = _pm.resolve_access(cfg, repo)
                 if access is None:
                     return {"status": "failed", "stage": "repo_access",
