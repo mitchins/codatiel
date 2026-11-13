@@ -471,6 +471,15 @@ class Store:
                     " updated_ts=? WHERE repo=? AND pr=?", (ts, repo, pr))
                 self.cx.execute(_COMMIT)
                 return {"queued": (qb, qh)}
+            if qh and qh == head:
+                # Queue entry already satisfied by this review (PROD-02:
+                # a stale queue row equalling the reviewed head must not
+                # survive to be drained backwards later). Drop it.
+                self.cx.execute(
+                    "UPDATE checkpoints SET queued_base='', queued_head='',"
+                    " updated_ts=? WHERE repo=? AND pr=?", (ts, repo, pr))
+                self.cx.execute(_COMMIT)
+                return {"queued": None}
             self.cx.execute(_COMMIT)
             return {"queued": None}
         except Exception as exc:
@@ -502,6 +511,62 @@ class Store:
             except Exception:
                 pass
             raise StoreError(f"interrupt mark failed: {exc}")
+
+    def release_claim(self, repo: str, pr: int, note: str,
+                      prior_status: str | None = None) -> str:
+        """Release a held in_progress claim without sealing a review.
+
+        PROD-02: a run superseded mid-flight (live head moved on) must
+        not seal, must not email, and must not leave the checkpoint
+        pinned. Restores the pre-claim status when the caller supplies
+        it (never guesses reviewed-vs-draft); falls back to
+        reviewed/deferred only when unknown. Returns the prior status
+        ("" when nothing was held).
+        """
+        try:
+            self.cx.execute(_BEGIN)
+            row = self.cx.execute(
+                "SELECT status, last_reviewed_head FROM checkpoints"
+                " WHERE repo=? AND pr=?", (repo, pr)).fetchone()
+            if row is None or row[0] != "in_progress":
+                self.cx.execute(_COMMIT)
+                return (row[0] if row else "")
+            if prior_status in ("reviewed", "draft", "deferred",
+                                "grandfathered", "failed", "interrupted"):
+                status = prior_status
+            else:
+                status = ("reviewed" if row[1] else "deferred")
+            self.cx.execute(
+                "UPDATE checkpoints SET status=?, note=?,"
+                " in_progress_base='', in_progress_head='',"
+                " in_progress_run='', updated_ts=? "
+                "WHERE repo=? AND pr=?",
+                (status, note, time.time(), repo, pr))
+            self.cx.execute(_COMMIT)
+            return "in_progress"
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"claim release failed: {exc}")
+
+    def clear_queued(self, repo: str, pr: int) -> None:
+        """Drop a queued delta without reviewing it (PROD-02: the queued
+        head proved stale against the live GitHub head)."""
+        try:
+            self.cx.execute(_BEGIN)
+            self.cx.execute(
+                "UPDATE checkpoints SET queued_base='', queued_head='',"
+                " updated_ts=? WHERE repo=? AND pr=?",
+                (time.time(), repo, pr))
+            self.cx.execute(_COMMIT)
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"queued clear failed: {exc}")
 
     def list_checkpoints(self) -> list[dict]:
         try:

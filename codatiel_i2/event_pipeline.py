@@ -717,6 +717,26 @@ def _count_terra(run_dir: str) -> int:
 
 # -- orchestration ---------------------------------------------------------------
 
+def get_live_head(repo: str, pr_number: int) -> str | None:
+    """Current GitHub PR head SHA, or None when unknown.
+
+    PROD-02 freshness oracle: a short gh call, never raising. None
+    means "unverifiable" (network/gh failure) — callers proceed with
+    the existing behavior and the post-inference check still guards.
+    Tests monkeypatch this module attribute with a scripted mapping.
+    """
+    try:
+        proc = subprocess.run(
+            ["gh", "api", f"repos/{repo}/pulls/{pr_number}",
+             "--jq", ".head.sha"],
+            capture_output=True, text=True, timeout=30)
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return (proc.stdout or "").strip() or None
+
+
 def _is_readiness_rerun(ev: dict, store: store_mod.Store,
                         prior: dict) -> bool:
     """True when a duplicate delivery carries a draft->ready transition.
@@ -861,6 +881,39 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             f"spend cap ${cfg.spend_cap_usd:.2f} reached "
             f"(settled ${totals['settled_usd']:.4f}); inference stopped, "
             f"event recorded; no backlog processing on reset", 0.0)
+    live = get_live_head(ev["repo"], pr)
+    if live is not None and live != to_sha:
+        # PROD-02: the event's head is no longer the PR's head (older
+        # poll/event, or a stale queued drain). Reviewing it would redo
+        # a superseded range and email misleading "regressions". $0, no
+        # checkpoint mutation, no email, no comment. A legitimate
+        # force-push/rebase whose head IS live still reviews (equality
+        # only; ancestry is irrelevant).
+        return _finalize_delivery(
+            store, ev, "skipped:stale_head",
+            f"event head {to_sha[:12]} is not the live PR head "
+            f"{live[:12]}; superseded event dropped with no "
+            "inference, no email, no checkpoint change", 0.0)
+    if live is None and cp is not None:
+        # gh unreachable: fall back to local ancestry (PROD-02 review).
+        # A head older than the reviewed head is stale even when the
+        # live head cannot be confirmed; anything else still reviews
+        # (a genuine backwards reset is re-driven when gh recovers, or
+        # via the explicit review op).
+        reviewed = cp.get("last_reviewed_head") or ""
+        if reviewed and to_sha != reviewed:
+            try:
+                back = access.ancestor(to_sha, reviewed)
+            except Exception:
+                back = None
+            if back is True:
+                return _finalize_delivery(
+                    store, ev, "skipped:stale_head",
+                    f"event head {to_sha[:12]} is an ancestor of the "
+                    f"reviewed head {reviewed[:12]} and the live head "
+                    "is unverifiable; superseded event dropped with "
+                    "no inference, no email, no checkpoint change",
+                    0.0)
     claim = store.claim_for_review(ev["repo"], pr, base=from_sha,
                                    head=to_sha, now=now)
     if claim == "queued":
@@ -882,6 +935,50 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     cost = result.get("cost_usd")
     unknown = bool(result.get("cost_unknown")) or cost is None
     store.settle(cfg.reserve_usd, None if unknown else float(cost or 0.0))
+    cp_now = (store.checkpoint_get(ev["repo"], pr)
+              if ev.get("pr_number") else None)
+    owned = bool(cp_now and cp_now.get("status") == "in_progress"
+                 and cp_now.get("in_progress_head") == to_sha)
+    live_after = (get_live_head(ev["repo"], pr)
+                  if ev.get("pr_number") else None)
+    if not owned or (live_after is not None and live_after != to_sha):
+        # PROD-02: the head went stale while inference ran (or another
+        # run owns the checkpoint). This run must not seal, must not
+        # email a "current-review" digest, must not publish, and must
+        # not overwrite the newer checkpoint. Spend is real: recorded
+        # on the delivery. The claim is released, not sealed.
+        if owned:
+            prior = (cp.get("status") if isinstance(cp, dict) else None)
+            store.release_claim(
+                ev["repo"], pr,
+                "run superseded mid-flight; claim released, checkpoint "
+                "left to the newer review",
+                prior_status=(prior if isinstance(prior, str)
+                              else None))
+        final = _finalize_delivery(
+            store, ev, "skipped:stale_superseded",
+            f"head {to_sha[:12]} went stale during inference "
+            f"(live {(live_after or '?')[:12]}, "
+            f"{'claim lost' if not owned else 'claim released'}); "
+            "no checkpoint change, no email, no comment; "
+            f"inference cost ${float(cost or 0.0):.4f} recorded",
+            cost if not unknown else None)
+        # A newer head queued during this run must not strand: drain
+        # it through the same verified path (stale queues drop $0).
+        # The follow range starts at the queued BASE (not this run's
+        # unsealed head), so a first-review supersede cannot silently
+        # skip the A..H1 segment.
+        cp_after = (store.checkpoint_get(ev["repo"], pr)
+                    if ev.get("pr_number") else None)
+        qh_after = (cp_after or {}).get("queued_head") or ""
+        if qh_after:
+            qb_after = (cp_after or {}).get("queued_base") or ""
+            final = _drain_queued(
+                cfg=cfg, store=store, ev=ev, pr=pr,
+                to_sha=(qb_after or to_sha),
+                queued=(qb_after, qh_after), final=final, access=access,
+                model_factory=model_factory, transport=transport, now=now)
+        return final
     if result["status"] not in ("complete", "inconclusive"):
         _remember_queued(store, ev, cp, from_sha, to_sha, "failed")
         store.review_record(
@@ -934,18 +1031,61 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         + publish_bits + ")", cost)
     # Drain a queued newer delta as its own run (separate evidence).
     if done.get("queued"):
-        qb, qh = done["queued"]
+        return _drain_queued(cfg=cfg, store=store, ev=ev, pr=pr,
+                             to_sha=to_sha, queued=done["queued"],
+                             final=final, access=access,
+                             model_factory=model_factory,
+                             transport=transport, now=now)
+    return final
+
+
+def _drain_queued(*, cfg, store, ev, pr, to_sha, queued, final,
+                  access, model_factory=None, transport=None, now=None):
+    """Run a queued delta after its parent sealed (or was superseded).
+
+    PROD-02: the queued head is verified before spending — against the
+    live GitHub head when reachable, else local ancestry. Stale queues
+    are dropped $0 and cleared, never drained backwards. Shared by the
+    seal path and the mid-flight-superseded path so a stranded queue
+    cannot wait on an unrelated future event.
+    """
+    qb, qh = queued
+    live_q = get_live_head(ev["repo"], pr)
+    stale_q = live_q is not None and live_q != qh
+    if not stale_q and live_q is None and qh != to_sha:
+        # gh unreachable: local ancestry fallback (PROD-02 review).
+        try:
+            back_q = access.ancestor(qh, to_sha)
+        except Exception:
+            back_q = None
+        stale_q = back_q is True
+    if stale_q:
+        # PROD-02: the queued head is stale against live GitHub
+        # (older event, or a residue that never matched a push).
+        # Drop it with $0: no inference, no email, no comment.
+        # The stale queue entry is cleared so it can never drain
+        # backwards later.
+        store.clear_queued(ev["repo"], pr)
         follow = dict(ev, delivery_id=ev["delivery_id"] + ":drain",
                       base_sha=to_sha, head_sha=qh, before_sha=to_sha,
                       action="synchronize")
-        sub = store.delivery_get(follow["delivery_id"])
-        if sub is None:
-            _record(store, follow, "in_progress", "queued-drain", None,
-                    now=now)
-            out = process_event(cfg=cfg, store=store, ev=follow,
-                                model_factory=model_factory,
-                                transport=transport)
-            final = {**final, "drained": out.get("decision")}
+        _record(store, follow, "skipped:stale_head",
+                f"queued head {qh[:12]} is stale "
+                f"({('not the live PR head ' + live_q[:12]) if live_q is not None else 'an ancestor of the just-reviewed head, live head unverifiable'}); "
+                "stale queue dropped and cleared, "
+                "no inference, no email", 0.0, now=now)
+        return final
+    follow = dict(ev, delivery_id=ev["delivery_id"] + ":drain",
+                  base_sha=to_sha, head_sha=qh, before_sha=to_sha,
+                  action="synchronize")
+    sub = store.delivery_get(follow["delivery_id"])
+    if sub is None:
+        _record(store, follow, "in_progress", "queued-drain", None,
+                now=now)
+        out = process_event(cfg=cfg, store=store, ev=follow,
+                            model_factory=model_factory,
+                            transport=transport)
+        final = {**final, "drained": out.get("decision")}
     return final
 
 
