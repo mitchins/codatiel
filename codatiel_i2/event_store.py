@@ -456,27 +456,60 @@ class Store:
                         diff_sha: str, files: int, terra_findings: int,
                         luna_added: int, cost_usd: float | None,
                         cost_unknown: bool, run_dir: str, result: str,
-                        now: float | None = None) -> dict:
+                        now: float | None = None,
+                        claim_base: str | None = None,
+                        claim_head: str | None = None) -> dict:
         """Seal a finished review; drain any queued newer head.
 
-        Returns {'queued': (base, head) | None}: a queued delta the
-        caller should review next (separate run, separate evidence).
+        Returns {'queued': (base, head) | None, 'sealed': bool}: a
+        queued delta the caller should review next (separate run,
+        separate evidence), and whether this call sealed.
+
+        When claim_base/claim_head are given, the seal is atomic: the
+        checkpoint advances only if the pinned in_progress claim is
+        still exactly the caller's (status, base, head). A replaced
+        claim (recovery + reclaim, even for the same head) seals
+        nothing — the caller must stand down instead of clearing a
+        newer worker's pin. Without them the historical unconditional
+        seal applies (automatic pipeline path, gated by its own
+        ownership checks).
         """
         ts = time.time() if now is None else now
         try:
             self.cx.execute(_BEGIN)
-            self.cx.execute(
-                "UPDATE checkpoints SET status='reviewed',"
-                " last_reviewed_base=?, last_reviewed_head=?,"
-                " reviewed_diff_sha=?, reviewed_files=?,"
-                " terra_findings=?, luna_added=?, last_cost_usd=?,"
-                " cost_unknown=?, last_run_dir=?, last_result=?,"
-                " in_progress_base='', in_progress_head='',"
-                " in_progress_run='', updated_ts=? "
-                "WHERE repo=? AND pr=?",
-                (base, head, diff_sha, files, terra_findings, luna_added,
-                 cost_usd, 1 if cost_unknown else 0, run_dir, result, ts,
-                 repo, pr))
+            if claim_base is not None or claim_head is not None:
+                changed = self.cx.execute(
+                    "UPDATE checkpoints SET status='reviewed',"
+                    " last_reviewed_base=?, last_reviewed_head=?,"
+                    " reviewed_diff_sha=?, reviewed_files=?,"
+                    " terra_findings=?, luna_added=?, last_cost_usd=?,"
+                    " cost_unknown=?, last_run_dir=?, last_result=?,"
+                    " in_progress_base='', in_progress_head='',"
+                    " in_progress_run='', updated_ts=? "
+                    "WHERE repo=? AND pr=? AND status='in_progress' "
+                    "AND in_progress_base=? AND in_progress_head=?",
+                    (base, head, diff_sha, files, terra_findings,
+                     luna_added, cost_usd, 1 if cost_unknown else 0,
+                     run_dir, result, ts, repo, pr,
+                     claim_base if claim_base is not None else base,
+                     claim_head if claim_head is not None else head)
+                    ).rowcount
+                if not changed:
+                    self.cx.execute(_COMMIT)
+                    return {"queued": None, "sealed": False}
+            else:
+                self.cx.execute(
+                    "UPDATE checkpoints SET status='reviewed',"
+                    " last_reviewed_base=?, last_reviewed_head=?,"
+                    " reviewed_diff_sha=?, reviewed_files=?,"
+                    " terra_findings=?, luna_added=?, last_cost_usd=?,"
+                    " cost_unknown=?, last_run_dir=?, last_result=?,"
+                    " in_progress_base='', in_progress_head='',"
+                    " in_progress_run='', updated_ts=? "
+                    "WHERE repo=? AND pr=?",
+                    (base, head, diff_sha, files, terra_findings,
+                     luna_added, cost_usd, 1 if cost_unknown else 0,
+                     run_dir, result, ts, repo, pr))
             row = self.cx.execute(
                 "SELECT queued_base, queued_head FROM checkpoints"
                 " WHERE repo=? AND pr=?", (repo, pr)).fetchone()
@@ -486,7 +519,7 @@ class Store:
                     "UPDATE checkpoints SET queued_base='', queued_head='',"
                     " updated_ts=? WHERE repo=? AND pr=?", (ts, repo, pr))
                 self.cx.execute(_COMMIT)
-                return {"queued": (qb, qh)}
+                return {"queued": (qb, qh), "sealed": True}
             if qh and qh == head:
                 # Queue entry already satisfied by this review (PROD-02:
                 # a stale queue row equalling the reviewed head must not
@@ -495,9 +528,9 @@ class Store:
                     "UPDATE checkpoints SET queued_base='', queued_head='',"
                     " updated_ts=? WHERE repo=? AND pr=?", (ts, repo, pr))
                 self.cx.execute(_COMMIT)
-                return {"queued": None}
+                return {"queued": None, "sealed": True}
             self.cx.execute(_COMMIT)
-            return {"queued": None}
+            return {"queued": None, "sealed": True}
         except Exception as exc:
             try:
                 self.cx.execute(_ROLLBACK)

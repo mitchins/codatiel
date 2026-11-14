@@ -1285,9 +1285,15 @@ def cmd_events(args) -> dict:
                             or _head_norm.lower().startswith(
                                 _live_after.lower()))
                 _cp_now = store.checkpoint_get(repo, number)
+                # Ownership means the exact pinned claim: same head is
+                # not enough — a recovery + reclaim may hold the same
+                # head under a different base, and sealing over it
+                # would clear the newer worker's pin.
                 _owned_now = bool(
                     _cp_now and _cp_now.get("status") == "in_progress"
-                    and (_cp_now.get("in_progress_head") or "") == head)
+                    and (_cp_now.get("in_progress_head") or "") == head
+                    and (_cp_now.get("in_progress_base") or "")
+                    == use_base)
                 if not _owned_now or not _live_ok:
                     try:
                         if _owned_now:
@@ -1331,14 +1337,22 @@ def cmd_events(args) -> dict:
                                       f"{'claim lost' if not _owned_now else 'released'}); "
                                       f"spend kept, checkpoint unchanged",
                             "cost_usd": cost}
-                store.complete_review(
+                _sealed = store.complete_review(
                     repo, number, base=use_base, head=head,
                     diff_sha=info["diff_sha"], files=info["files"],
                     terra_findings=int(result.get("terra_findings") or 0),
                     luna_added=int(result.get("added") or 0),
                     cost_usd=cost, cost_unknown=unknown,
                     run_dir=result.get("run_dir") or "",
-                    result=result["status"])
+                    result=result["status"],
+                    claim_base=use_base, claim_head=head)
+                if not _sealed.get("sealed", True):
+                    return {"status": "skipped",
+                            "decision": "skipped:stale_superseded",
+                            "reason": "claim replaced during explicit "
+                                      "review; atomic seal refused, spend "
+                                      "kept, checkpoint unchanged",
+                            "cost_usd": cost}
                 store.review_record(
                     repo=repo, pr=number,
                     kind=("incremental" if anchor else "full"),

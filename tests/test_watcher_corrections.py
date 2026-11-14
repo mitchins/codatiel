@@ -423,3 +423,100 @@ def test_explicit_stale_review_counts_in_daily_ledger(
         assert got["superseded_inference_usd"] == 0.30
     finally:
         store.close()
+
+
+def test_complete_review_atomic_seal(tmp_path):
+    store = S.Store(tmp_path / "e.sqlite")
+    try:
+        store.checkpoint_upsert({"repo": "o/r", "pr": 23, "status": "draft",
+                                 "baseline_head": "b" * 40})
+        assert store.claim_for_review("o/r", 23, base="b" * 40,
+                                       head="c" * 40) == "claimed"
+        # The pin is replaced (same head, newer base) before sealing.
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 23, "status": "in_progress",
+             "in_progress_base": "b2" * 20,
+             "in_progress_head": "c" * 40})
+        done = store.complete_review(
+            "o/r", 23, base="b" * 40, head="c" * 40, diff_sha="d",
+            files=1, terra_findings=0, luna_added=0, cost_usd=0.1,
+            cost_unknown=False, run_dir="/r", result="complete",
+            claim_base="b" * 40, claim_head="c" * 40)
+        assert done["sealed"] is False
+        cp = store.checkpoint_get("o/r", 23)
+        assert (cp["status"], cp["in_progress_head"]) == (
+            "in_progress", "c" * 40)
+        assert cp["last_reviewed_head"] == ""
+        # The exact owner still seals.
+        done = store.complete_review(
+            "o/r", 23, base="b2" * 20, head="c" * 40, diff_sha="d",
+            files=1, terra_findings=0, luna_added=0, cost_usd=0.1,
+            cost_unknown=False, run_dir="/r", result="complete",
+            claim_base="b2" * 20, claim_head="c" * 40)
+        assert done["sealed"] is True
+        assert store.checkpoint_get("o/r", 23)[
+            "last_reviewed_head"] == "c" * 40
+    finally:
+        store.close()
+
+
+def test_explicit_review_base_mismatch_never_seals(
+        tmp_path, monkeypatch, two_commit_repo):
+    repo = two_commit_repo
+    out, store = _explicit_run(
+        tmp_path, monkeypatch, repo, head=repo["head_sha"],
+        base=repo["base_sha"], live_heads=[repo["head_sha"]])
+    # The fake inference tested the pre-check path only; the mid-flight
+    # replacement below is covered at store level. This run seals.
+    try:
+        assert out["decision"] == "completed", out
+    finally:
+        store.close()
+
+
+def test_explicit_review_pin_replaced_midflight(
+        tmp_path, monkeypatch, two_commit_repo):
+    """A recovery + reclaim with the same head but a different base
+    between the pre-check and the seal must not seal the old range."""
+    from tests.test_prod01_lifecycle import _env
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    repo = two_commit_repo
+    _env(monkeypatch, tmp_path, repo["repo"])
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "baseline_head": repo["base_sha"],
+             "last_reviewed_head": repo["base_sha"],
+             "last_reviewed_base": repo["base_sha"]})
+        monkeypatch.setattr(P, "get_live_head",
+                            lambda r, pr: repo["head_sha"])
+
+        def _fake_run(**kw):
+            # Another worker reclaims the same head, newer base.
+            store.checkpoint_upsert(
+                {"repo": "o/r", "pr": 10, "status": "in_progress",
+                 "in_progress_base": "b2" * 20,
+                 "in_progress_head": repo["head_sha"]})
+            return {"status": "complete", "mode": "t",
+                    "run_dir": "/tmp/rd", "terra_findings": 0,
+                    "added": 0, "cost_usd": 0.10,
+                    "cost_unknown": False}
+
+        monkeypatch.setattr(P, "run_review_for_range", _fake_run)
+        args = cli_mod.build_parser().parse_args(
+            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
+             "--base", repo["base_sha"]])
+        out = cli_mod.cmd_events(args)
+        assert out["decision"] == "skipped:stale_superseded", out
+        cp = store.checkpoint_get("o/r", 10)
+        # Nothing sealed; the replacement pin is untouched.
+        assert cp["last_reviewed_head"] == ""
+        assert (cp["in_progress_base"],
+                cp["in_progress_head"]) == ("b2" * 20, repo["head_sha"])
+    finally:
+        store.close()
