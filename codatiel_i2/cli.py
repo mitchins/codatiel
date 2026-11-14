@@ -13,6 +13,20 @@ from typing import Any
 
 from codatiel_i2.core import coverage as coverage_mod
 from codatiel_i2.core import diff as diff_mod
+
+
+def _record_explicit_superseded(store, cfg, repo, number, head, cost, unknown, reason):
+    """Deduplicated superseded explicit-review delivery (collision-safe ID, unknown preserved)."""
+    delivery_id = f"explicit:{repo}:{number}:{head}:{int(cfg.clock()*1000000)}:{uuid.uuid4().hex[:8]}"
+    return store.delivery_record(
+        delivery_id=delivery_id,
+        event_type="explicit_review", action="redrive",
+        repo=repo, pr=number, head_sha=head,
+        decision="skipped:stale_superseded",
+        reason=reason,
+        cost_usd=(None if unknown else cost),
+        detail={"explicit": True, "cost_unknown": bool(unknown)},
+        now=cfg.clock())
 from codatiel_i2.core import files as files_mod
 from codatiel_i2.core import runs as runs_mod
 from codatiel_i2.core import workspace as workspace_mod
@@ -1319,29 +1333,10 @@ def cmd_events(args) -> dict:
                     except store_mod.StoreError as exc:
                         return {"status": "failed", "stage": "review",
                                 "error": str(exc)}
-                    # No delivery row exists on the explicit path, so
-                    # record one: the daily cap must see this spend.
-                    # Run-unique, collision-safe ID (same head re-driven
-                    # twice spends twice, even within one second);
-                    # replay-safe by construction. Preserve unknown-cost
-                    # status: unknown -> NULL cost, counted as
-                    # unknown_cost_reviews in the ledger.
-                    _explicit_id = (
-                        f"explicit:{repo}:{number}:{head}:"
-                        f"{int(cfg.clock()*1000000)}:"
-                        f"{uuid.uuid4().hex[:8]}")
                     try:
-                        store.delivery_record(
-                            delivery_id=_explicit_id,
-                            event_type="explicit_review", action="redrive",
-                            repo=repo, pr=number, head_sha=head,
-                            decision="skipped:stale_superseded",
-                            reason="explicit head went stale during "
-                                   "inference; spend kept, no seal",
-                            cost_usd=(None if unknown else cost),
-                            detail={"explicit": True,
-                                    "cost_unknown": bool(unknown)},
-                            now=cfg.clock())
+                        _record_explicit_superseded(
+                            store, cfg, repo, number, head, cost, unknown,
+                            "explicit head went stale during inference; spend kept, no seal")
                     except store_mod.StoreError as exc:
                         return {"status": "failed", "stage": "review",
                                 "error": str(exc)}
@@ -1378,26 +1373,13 @@ def cmd_events(args) -> dict:
                     # above. Unknown status is preserved. A persistence
                     # failure here must NOT return success; the settled
                     # spend remains in the ledger for reconciliation.
-                    _explicit_id2 = (
-                        f"explicit:{repo}:{number}:{head}:"
-                        f"{int(cfg.clock()*1000000)}:"
-                        f"{uuid.uuid4().hex[:8]}")
                     try:
-                        store.delivery_record(
-                            delivery_id=_explicit_id2,
-                            event_type="explicit_review", action="redrive",
-                            repo=repo, pr=number, head_sha=head,
-                            decision="skipped:stale_superseded",
-                            reason="claim replaced during explicit "
-                                   "review; atomic seal refused, spend "
-                                   "kept, checkpoint unchanged",
-                            cost_usd=(None if unknown else cost),
-                            detail={"explicit": True,
-                                    "cost_unknown": bool(unknown)},
-                            now=cfg.clock())
+                        _record_explicit_superseded(
+                            store, cfg, repo, number, head, cost, unknown,
+                            "claim replaced during explicit review; atomic seal refused, spend kept, checkpoint unchanged")
                     except store_mod.StoreError as exc:
                         return {"status": "failed", "stage": "review",
-                                "error": f"delivery record failed after atomic seal refusal: {exc}; settled spend ${cost if not unknown else 'unknown'} retained for reconciliation (delivery {_explicit_id2})",
+                                "error": f"delivery record failed after atomic seal refusal: {exc}; settled spend ${cost if not unknown else 'unknown'} retained for reconciliation",
                                 "cost_usd": cost, "cost_unknown": bool(unknown)}
                     # Stranded queued_head check (CodeRabbit): a newer
                     # webhook may have queued while this explicit review
