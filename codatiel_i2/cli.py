@@ -30,13 +30,13 @@ def _record_explicit_superseded(store, cfg, repo, number, head, cost, unknown, r
 
 
 def _queued_extra_for(store, repo, number):
-    """Surfaced queued head after explicit review (no auto-run)."""
+    """Surfaced queued head after explicit review (no auto-run, informational)."""
     cp = store.checkpoint_get(repo, number)
     qh = (cp or {}).get("queued_head") or ""
     qb = (cp or {}).get("queued_base") or ""
     if qh:
         return {"queued_remaining": {"base": qb, "head": qh},
-                "note": "newer head queued during explicit review; not auto-run (manual re-drive or next automatic event will review it)"}
+                "note": "queued head observed during explicit review; informational only — does not guarantee durable pending work or eventual processing; not auto-run from CLI (see issue #16)"}
     return {}
 
 
@@ -1410,7 +1410,7 @@ def cmd_events(args) -> dict:
                 if _queued3:
                     _qb3, _qh3 = _queued3
                     extra3["queued_remaining"] = {"base": _qb3, "head": _qh3}
-                    extra3["note"] = "newer head queued during explicit review; not auto-run (manual re-drive or next automatic event will review it)"
+                    extra3["note"] = "queued head was cleared on successful completion; informational only — does not guarantee durable pending work or eventual processing; not auto-run from CLI (see issue #16)"
                 return {"status": (result["status"]
                                    if result["status"] in
                                    ("complete", "incomplete",
