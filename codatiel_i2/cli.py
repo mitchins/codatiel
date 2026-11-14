@@ -27,6 +27,19 @@ def _record_explicit_superseded(store, cfg, repo, number, head, cost, unknown, r
         cost_usd=(None if unknown else cost),
         detail={"explicit": True, "cost_unknown": bool(unknown)},
         now=cfg.clock())
+
+
+def _queued_extra_for(store, repo, number):
+    """Surfaced queued head after explicit review (no auto-run)."""
+    cp = store.checkpoint_get(repo, number)
+    qh = (cp or {}).get("queued_head") or ""
+    qb = (cp or {}).get("queued_base") or ""
+    if qh:
+        return {"queued_remaining": {"base": qb, "head": qh},
+                "note": "newer head queued during explicit review; not auto-run (manual re-drive or next automatic event will review it)"}
+    return {}
+
+
 from codatiel_i2.core import files as files_mod
 from codatiel_i2.core import runs as runs_mod
 from codatiel_i2.core import workspace as workspace_mod
@@ -1340,13 +1353,7 @@ def cmd_events(args) -> dict:
                     except store_mod.StoreError as exc:
                         return {"status": "failed", "stage": "review",
                                 "error": str(exc)}
-                    _cp_q = store.checkpoint_get(repo, number)
-                    _qh = (_cp_q or {}).get("queued_head") or ""
-                    _qb = (_cp_q or {}).get("queued_base") or ""
-                    extra: dict = {}
-                    if _qh:
-                        extra["queued_remaining"] = {"base": _qb, "head": _qh}
-                        extra["note"] = "newer head queued during explicit review; not auto-run (manual re-drive or next automatic event will review it)"
+                    extra = _queued_extra_for(store, repo, number)
                     return {"status": "skipped",
                             "decision": "skipped:stale_superseded",
                             "reason": f"head {head[:12]} went stale during "
@@ -1381,23 +1388,7 @@ def cmd_events(args) -> dict:
                         return {"status": "failed", "stage": "review",
                                 "error": f"delivery record failed after atomic seal refusal: {exc}; settled spend ${cost if not unknown else 'unknown'} retained for reconciliation",
                                 "cost_usd": cost, "cost_unknown": bool(unknown)}
-                    # Stranded queued_head check (CodeRabbit): a newer
-                    # webhook may have queued while this explicit review
-                    # ran. Existing automatic processing does NOT
-                    # guarantee consumption after an explicit stale —
-                    # the queued delivery is already finalized as
-                    # "queued" and will not be auto-drained. The
-                    # smallest safe remedy is to surface it without
-                    # triggering surprise paid inference; the next
-                    # automatic event or an explicit re-drive will
-                    # review it. No auto-run here.
-                    _cp_q2 = store.checkpoint_get(repo, number)
-                    _qh2 = (_cp_q2 or {}).get("queued_head") or ""
-                    _qb2 = (_cp_q2 or {}).get("queued_base") or ""
-                    extra2: dict = {}
-                    if _qh2:
-                        extra2["queued_remaining"] = {"base": _qb2, "head": _qh2}
-                        extra2["note"] = "newer head queued during explicit review; not auto-run (manual re-drive or next automatic event will review it)"
+                    extra2 = _queued_extra_for(store, repo, number)
                     return {"status": "skipped",
                             "decision": "skipped:stale_superseded",
                             "reason": "claim replaced during explicit "
@@ -1414,13 +1405,7 @@ def cmd_events(args) -> dict:
                     luna_added=int(result.get("added") or 0),
                     cost_usd=cost, cost_unknown=unknown,
                     run_dir=result.get("run_dir") or "")
-                _cp_q3 = store.checkpoint_get(repo, number)
-                _qh3 = (_cp_q3 or {}).get("queued_head") or ""
-                _qb3 = (_cp_q3 or {}).get("queued_base") or ""
-                extra3: dict = {}
-                if _qh3:
-                    extra3["queued_remaining"] = {"base": _qb3, "head": _qh3}
-                    extra3["note"] = "newer head queued during explicit review; not auto-run (manual re-drive or next automatic event will review it)"
+                extra3 = _queued_extra_for(store, repo, number)
                 return {"status": (result["status"]
                                    if result["status"] in
                                    ("complete", "incomplete",
