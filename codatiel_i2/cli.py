@@ -1405,7 +1405,12 @@ def cmd_events(args) -> dict:
                     luna_added=int(result.get("added") or 0),
                     cost_usd=cost, cost_unknown=unknown,
                     run_dir=result.get("run_dir") or "")
-                extra3 = _queued_extra_for(store, repo, number)
+                _queued3 = _sealed.get("queued")
+                extra3: dict = {}
+                if _queued3:
+                    _qb3, _qh3 = _queued3
+                    extra3["queued_remaining"] = {"base": _qb3, "head": _qh3}
+                    extra3["note"] = "newer head queued during explicit review; not auto-run (manual re-drive or next automatic event will review it)"
                 return {"status": (result["status"]
                                    if result["status"] in
                                    ("complete", "incomplete",

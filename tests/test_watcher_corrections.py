@@ -837,3 +837,37 @@ def test_explicit_stale_surfaces_queued_without_autorun(
         assert not any(r["head_sha"] == "c" * 40 for r in store.reviews_list())
     finally:
         store.close()
+
+
+def test_explicit_success_reports_queued_via_sealed(
+        tmp_path, monkeypatch, two_commit_repo):
+    """Successful explicit review must report queued head from sealed return,
+    not from checkpoint after clear (which would be empty)."""
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    repo = two_commit_repo
+    cfg, store = _explicit_base(tmp_path, monkeypatch, repo)
+    try:
+        # Queue a newer head C while explicit for B will succeed
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "last_reviewed_head": repo["base_sha"],
+             "last_reviewed_base": repo["base_sha"],
+             "queued_base": repo["base_sha"],
+             "queued_head": "c" * 40})
+        monkeypatch.setattr(P, "get_live_head",
+                            lambda r, pr: repo["head_sha"])
+        monkeypatch.setattr(P, "run_review_for_range",
+                            lambda **kw: _fake_review(0.15))
+        args = cli_mod.build_parser().parse_args(
+            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
+             "--base", repo["base_sha"]])
+        out = cli_mod.cmd_events(args)
+        assert out["decision"] == "completed", out
+        # queued head is reported via sealed return, not lost after clear
+        assert out.get("queued_remaining") == {"base": repo["base_sha"], "head": "c" * 40}
+        # stored queue is cleared as intended (automatic drain path would handle next)
+        cp = store.checkpoint_get("o/r", 10)
+        assert cp["queued_head"] == ""
+    finally:
+        store.close()
