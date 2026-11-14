@@ -855,3 +855,27 @@ def test_unknown_holds_visible_across_lifecycles(tmp_path):
                >= 0 for e in evs)
     q.assert_invariants(conn)
     conn.close()
+
+
+def test_migration_quarantine_upgrades_existing_target(tmp_path):
+    from codatiel_i2 import event_store as v1_mod
+    from codatiel_i2.platform import migrate as migrate_mod
+    conn = _open(tmp_path, "p.sqlite")
+    # A pre-cutover signal created the target first (quarantine 0).
+    q.signal(conn, repo=REPO, pr=6, head="x" * 40, lifecycle="open",
+             now=1000.0)
+    v1p = tmp_path / "v1.sqlite"
+    v1 = v1_mod.Store(v1p)
+    v1.meta_set("enabled_at", "2026-11-14T00:00:00Z")
+    v1.checkpoint_upsert({"repo": REPO, "pr": 6, "status": "in_progress",
+                          "in_progress_head": "x" * 40})
+    v1.close()
+    summary = migrate_mod.migrate(conn, v1_db_path=str(v1p),
+                                  operator_doc={},
+                                  budgets_usd={"cycle": 25.0}, now=2000.0)
+    assert summary["stranded"] == [f"{REPO}#6"]
+    tgt = conn.execute("SELECT * FROM pl_pr_targets").fetchone()
+    assert int(tgt["quarantined"]) == 1
+    assert "explicit" in tgt["quarantine_note"]
+    q.assert_invariants(conn)
+    conn.close()

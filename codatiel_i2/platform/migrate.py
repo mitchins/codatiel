@@ -137,7 +137,12 @@ def migrate(db: sqlite3.Connection, *, v1_db_path: str,
                 "target_generation,dirty_rev,reviewed_head,reviewed_base,"
                 "last_signal_head,quarantined,quarantine_note,updated_ts) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?) "
-                "ON CONFLICT(repo,pr) DO NOTHING",
+                "ON CONFLICT(repo,pr) DO UPDATE SET "
+                "quarantined=excluded.quarantined,"
+                "quarantine_note=excluded.quarantine_note,"
+                "updated_ts=excluded.updated_ts "
+                "WHERE excluded.quarantined=1 "
+                "AND pl_pr_targets.quarantined=0",
                 (cp["repo"], cp["pr"], lifecycle,
                  1 if status in ("reviewed", "grandfathered") else 0,
                  1, reviewed, base,

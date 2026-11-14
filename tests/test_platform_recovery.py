@@ -307,9 +307,12 @@ def test_artifact_malformed_manifests_quarantined_selectively(tmp_path):
     }
     for name, path in bad_dirs.items():
         assert not art_mod.validate(path), name
-    # manifest_sha on a malformed run refuses loudly (no silent hash).
+    # manifest_sha on a malformed run refuses loudly (no silent hash),
+    # including structurally-valid-but-unvalidatable bundles.
     with pytest.raises(RuntimeError):
         art_mod.manifest_sha(runs / "r-nojson")
+    with pytest.raises(RuntimeError):
+        art_mod.manifest_sha(runs / "r-hashnum")
     # Recovery classifies each directory independently: one bad apple
     # never aborts the rest, and the good run is untouched.
     out = art_mod.recover_runs(staging, runs)
@@ -317,3 +320,18 @@ def test_artifact_malformed_manifests_quarantined_selectively(tmp_path):
     assert str(good_dest) not in out["quarantine"]
     assert sorted(out["quarantine"]) == sorted(
         str(runs / n) for n in bad_dirs.values())
+
+
+def test_artifact_deep_nesting_never_aborts_recovery(tmp_path):
+    good = art_mod.stage(tmp_path / "staging", "good", {"a": b"x"})
+    assert art_mod.validate(good)
+    evil = tmp_path / "runs" / "r-deep"
+    evil.mkdir(parents=True)
+    (evil / art_mod.MANIFEST_NAME).write_text(
+        "[" * 3000 + "]" * 3000, encoding="utf-8")
+    assert not art_mod.validate(evil)
+    with pytest.raises(RuntimeError):
+        art_mod.manifest_sha(evil)
+    out = art_mod.recover_runs(tmp_path / "staging", tmp_path / "runs")
+    assert out["complete_staging"] == ["good.staging"]
+    assert out["quarantine"] == [str(evil)]

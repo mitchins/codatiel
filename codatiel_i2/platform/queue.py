@@ -160,6 +160,10 @@ def _target(db: sqlite3.Connection, repo: str,
                 (repo, pr))
 
 
+def _job_by_id(db: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:
+    return _row(db, "SELECT * FROM pl_jobs WHERE id=?", (job_id,))
+
+
 # Lifecycle vocabulary is closed: ingress maps webhook actions to
 # exactly these values, and unknown actions never overwrite a known
 # lifecycle (Slice 2 enforces the mapping; the contract refuses
@@ -883,8 +887,7 @@ def complete(db: sqlite3.Connection, claim: Claim, *,
         if previous is not None:
             if previous["job"] != claim.job or previous["digest"] != digest:
                 raise Conflict("conflicting replay of completion")
-            job_row = _row(db, "SELECT * FROM pl_jobs WHERE id=?",
-                           (claim.job,))
+            job_row = _job_by_id(db, claim.job)
             if job_row is None:
                 raise Conflict("result without a job; refusing to seal")
             if job_row["state"] not in ("leased", "running",
@@ -1196,7 +1199,7 @@ def begin_effect(db: sqlite3.Connection, effect_id: int,
         if eff["channel"] == "email" and (eff["state"] == "unknown"
                                           or not pol.email_allowed):
             return None
-        job = _row(db, "SELECT * FROM pl_jobs WHERE id=?", (eff["job"],))
+        job = _job_by_id(db, eff["job"])
         tgt = (_target(db, job["repo"], job["pr"]) if job else None)
         current = bool(
             job is not None and tgt is not None
@@ -1254,7 +1257,7 @@ def authorize_send(db: sqlite3.Connection, effect: dict,
             # Already authorized (same token, still valid): idempotent,
             # no duplicate intent row, no second send permission minted.
             return True
-        job = _row(db, "SELECT * FROM pl_jobs WHERE id=?", (row["job"],))
+        job = _job_by_id(db, row["job"])
         tgt = (_target(db, job["repo"], job["pr"]) if job else None)
         current = bool(
             job is not None and tgt is not None

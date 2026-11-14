@@ -120,25 +120,24 @@ def validate(run_dir: Path) -> bool:
             if hashlib.sha256(data).hexdigest() != want:
                 return False
         return True
-    except (OSError, ValueError, AttributeError, TypeError):
+    except (OSError, ValueError, AttributeError, TypeError,
+            RecursionError):
         return False
 
 
 def manifest_sha(run_dir: Path) -> str:
     """Content hash binding a run directory to its database reference.
 
-    Refuses malformed manifests loudly: a hash over garbage would bind
-    the ledger to an unvalidatable bundle.
+    Refuses anything validate() rejects: a hash over an unvalidatable
+    bundle would bind the ledger to evidence that can never seal.
     """
+    if not validate(run_dir):
+        raise RuntimeError(f"run directory invalid: {run_dir}")
     try:
         blob = (Path(run_dir) / MANIFEST_NAME).read_bytes()
-        parsed = json.loads(blob.decode("utf-8"))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         raise RuntimeError(f"run has no readable manifest: {run_dir}: "
                            f"{exc}")
-    if not isinstance(parsed, dict) or not isinstance(
-            parsed.get("files"), dict):
-        raise RuntimeError(f"run manifest malformed: {run_dir}")
     return hashlib.sha256(blob).hexdigest()
 
 
