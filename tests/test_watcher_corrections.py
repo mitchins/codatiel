@@ -175,47 +175,55 @@ def test_drain_stale_keeps_newer_queue(tmp_path, monkeypatch):
 
 # -- D: explicit review freshness ------------------------------------------
 
-def _events_env(monkeypatch, tmp_path, root, cap="20"):
-    from tests.test_prod01_lifecycle import _env
-    _env(monkeypatch, tmp_path, root, cap=cap)
+def _explicit_run(tmp_path, monkeypatch, repo, *, head, base,
+                   live_heads, cost=0.30, reviewed=None):
+    """Drive `events review` with scripted live heads + fake inference.
 
-
-def test_explicit_review_refuses_stale_seal(tmp_path, monkeypatch,
-                                            two_commit_repo):
+    Reviewed checkpoint defaults to (base, base). Returns (out,
+    store); the caller owns the store.
+    """
     from tests.test_prod01_lifecycle import _env
     from codatiel_i2 import cli as cli_mod
     from codatiel_i2 import event_pipeline as P
-    repo = two_commit_repo
     _env(monkeypatch, tmp_path, repo["repo"])
     cfg = P.config_from_env()
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     store = S.Store(cfg.state_dir / "events.sqlite")
+    P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+    anchor = reviewed or (repo["base_sha"], repo["base_sha"])
+    store.checkpoint_upsert(
+        {"repo": "o/r", "pr": 10, "status": "reviewed",
+         "baseline_head": anchor[0],
+         "last_reviewed_head": anchor[1],
+         "last_reviewed_base": anchor[0]})
+    calls = {"n": 0}
+
+    def _live(r, pr):
+        idx = min(calls["n"], len(live_heads) - 1)
+        calls["n"] += 1
+        return live_heads[idx]
+
+    monkeypatch.setattr(P, "get_live_head", _live)
+    monkeypatch.setattr(
+        P, "run_review_for_range",
+        lambda **kw: {"status": "complete", "mode": "t",
+                      "run_dir": "/tmp/rd", "terra_findings": 0,
+                      "added": 0, "cost_usd": cost,
+                      "cost_unknown": False})
+    extra = ["--base", base] if base is not None else []
+    args = cli_mod.build_parser().parse_args(
+        ["events", "review", "--pr", "10", "--head", head] + extra)
+    return cli_mod.cmd_events(args), store
+
+
+def test_explicit_review_refuses_stale_seal(tmp_path, monkeypatch,
+                                            two_commit_repo):
+    repo = two_commit_repo
+    out, store = _explicit_run(
+        tmp_path, monkeypatch, repo, head=repo["head_sha"],
+        base=repo["base_sha"],
+        live_heads=[repo["head_sha"], "c" * 40])
     try:
-        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
-        store.checkpoint_upsert(
-            {"repo": "o/r", "pr": 10, "status": "reviewed",
-             "baseline_head": repo["base_sha"],
-             "last_reviewed_head": repo["base_sha"],
-             "last_reviewed_base": repo["base_sha"]})
-        heads = [repo["head_sha"], "c" * 40]
-        calls = {"n": 0}
-
-        def _live(r, pr):
-            idx = min(calls["n"], len(heads) - 1)
-            calls["n"] += 1
-            return heads[idx]
-
-        monkeypatch.setattr(P, "get_live_head", _live)
-        monkeypatch.setattr(
-            P, "run_review_for_range",
-            lambda **kw: {"status": "complete", "mode": "t",
-                          "run_dir": "/tmp/rd", "terra_findings": 0,
-                          "added": 0, "cost_usd": 0.30,
-                          "cost_unknown": False})
-        args = cli_mod.build_parser().parse_args(
-            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
-             "--base", repo["base_sha"]])
-        out = cli_mod.cmd_events(args)
         assert out["decision"] == "skipped:stale_superseded", out
         assert out["cost_usd"] == 0.30  # real spend kept
         cp = store.checkpoint_get("o/r", 10)
@@ -231,33 +239,11 @@ def test_explicit_review_refuses_stale_seal(tmp_path, monkeypatch,
 
 def test_explicit_review_seals_when_fresh(tmp_path, monkeypatch,
                                           two_commit_repo):
-    from tests.test_prod01_lifecycle import _env
-    from codatiel_i2 import cli as cli_mod
-    from codatiel_i2 import event_pipeline as P
     repo = two_commit_repo
-    _env(monkeypatch, tmp_path, repo["repo"])
-    cfg = P.config_from_env()
-    cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    store = S.Store(cfg.state_dir / "events.sqlite")
+    out, store = _explicit_run(
+        tmp_path, monkeypatch, repo, head=repo["head_sha"],
+        base=repo["base_sha"], live_heads=[repo["head_sha"]])
     try:
-        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
-        store.checkpoint_upsert(
-            {"repo": "o/r", "pr": 10, "status": "reviewed",
-             "baseline_head": repo["base_sha"],
-             "last_reviewed_head": repo["base_sha"],
-             "last_reviewed_base": repo["base_sha"]})
-        monkeypatch.setattr(P, "get_live_head",
-                            lambda r, pr: repo["head_sha"])
-        monkeypatch.setattr(
-            P, "run_review_for_range",
-            lambda **kw: {"status": "complete", "mode": "t",
-                          "run_dir": "/tmp/rd", "terra_findings": 1,
-                          "added": 0, "cost_usd": 0.30,
-                          "cost_unknown": False})
-        args = cli_mod.build_parser().parse_args(
-            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
-             "--base", repo["base_sha"]])
-        out = cli_mod.cmd_events(args)
         assert out["decision"] == "completed", out
         assert store.checkpoint_get("o/r", 10)[
             "last_reviewed_head"] == repo["head_sha"]
@@ -347,33 +333,11 @@ def test_uppercase_sha_normalizes(tmp_path):
 
 def test_explicit_review_uppercase_head_matches_live(
         tmp_path, monkeypatch, two_commit_repo):
-    from tests.test_prod01_lifecycle import _env
-    from codatiel_i2 import cli as cli_mod
-    from codatiel_i2 import event_pipeline as P
     repo = two_commit_repo
-    _env(monkeypatch, tmp_path, repo["repo"])
-    cfg = P.config_from_env()
-    cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    store = S.Store(cfg.state_dir / "events.sqlite")
+    out, store = _explicit_run(
+        tmp_path, monkeypatch, repo, head=repo["head_sha"].upper(),
+        base=repo["base_sha"], live_heads=[repo["head_sha"]], cost=0.10)
     try:
-        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
-        store.checkpoint_upsert(
-            {"repo": "o/r", "pr": 10, "status": "reviewed",
-             "baseline_head": repo["base_sha"],
-             "last_reviewed_head": repo["base_sha"],
-             "last_reviewed_base": repo["base_sha"]})
-        monkeypatch.setattr(P, "get_live_head",
-                            lambda r, pr: repo["head_sha"])
-        monkeypatch.setattr(
-            P, "run_review_for_range",
-            lambda **kw: {"status": "complete", "mode": "t",
-                          "run_dir": "/tmp/rd", "terra_findings": 0,
-                          "added": 0, "cost_usd": 0.10,
-                          "cost_unknown": False})
-        args = cli_mod.build_parser().parse_args(
-            ["events", "review", "--pr", "10", "--head",
-             repo["head_sha"].upper(), "--base", repo["base_sha"]])
-        out = cli_mod.cmd_events(args)
         assert out["decision"] == "completed", out
         assert store.checkpoint_get("o/r", 10)[
             "last_reviewed_head"] == repo["head_sha"]
@@ -388,31 +352,12 @@ def test_explicit_redrive_backwards_reset_offline(
     """GitHub unreachable + head older than reviewed: the automatic
     path drops it (documented fail-safe), but an explicit operator
     re-drive with that exact head proceeds."""
-    from tests.test_prod01_lifecycle import _env
-    from codatiel_i2 import cli as cli_mod
-    from codatiel_i2 import event_pipeline as P
     repo = two_commit_repo
-    _env(monkeypatch, tmp_path, repo["repo"])
-    cfg = P.config_from_env()
-    cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    store = S.Store(cfg.state_dir / "events.sqlite")
+    out, store = _explicit_run(
+        tmp_path, monkeypatch, repo, head=repo["base_sha"], base=None,
+        live_heads=[None], cost=0.10,
+        reviewed=(repo["base_sha"], repo["head_sha"]))
     try:
-        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
-        store.checkpoint_upsert(
-            {"repo": "o/r", "pr": 10, "status": "reviewed",
-             "baseline_head": repo["base_sha"],
-             "last_reviewed_head": repo["head_sha"],
-             "last_reviewed_base": repo["base_sha"]})
-        monkeypatch.setattr(P, "get_live_head", lambda r, pr: None)
-        monkeypatch.setattr(
-            P, "run_review_for_range",
-            lambda **kw: {"status": "complete", "mode": "t",
-                          "run_dir": "/tmp/rd", "terra_findings": 0,
-                          "added": 0, "cost_usd": 0.10,
-                          "cost_unknown": False})
-        args = cli_mod.build_parser().parse_args(
-            ["events", "review", "--pr", "10", "--head", repo["base_sha"]])
-        out = cli_mod.cmd_events(args)
         assert out["decision"] == "completed", out
     finally:
         store.close()
@@ -464,40 +409,12 @@ def test_replayed_superseded_keeps_cost_in_ledger(tmp_path):
 
 def test_explicit_stale_review_counts_in_daily_ledger(
         tmp_path, monkeypatch, two_commit_repo):
-    from tests.test_prod01_lifecycle import _env
-    from codatiel_i2 import cli as cli_mod
-    from codatiel_i2 import event_pipeline as P
     repo = two_commit_repo
-    _env(monkeypatch, tmp_path, repo["repo"])
-    cfg = P.config_from_env()
-    cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    store = S.Store(cfg.state_dir / "events.sqlite")
+    out, store = _explicit_run(
+        tmp_path, monkeypatch, repo, head=repo["head_sha"],
+        base=repo["base_sha"],
+        live_heads=[repo["head_sha"], "c" * 40])
     try:
-        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
-        store.checkpoint_upsert(
-            {"repo": "o/r", "pr": 10, "status": "reviewed",
-             "baseline_head": repo["base_sha"],
-             "last_reviewed_head": repo["base_sha"],
-             "last_reviewed_base": repo["base_sha"]})
-        heads = [repo["head_sha"], "c" * 40]
-        calls = {"n": 0}
-
-        def _live(r, pr):
-            idx = min(calls["n"], len(heads) - 1)
-            calls["n"] += 1
-            return heads[idx]
-
-        monkeypatch.setattr(P, "get_live_head", _live)
-        monkeypatch.setattr(
-            P, "run_review_for_range",
-            lambda **kw: {"status": "complete", "mode": "t",
-                          "run_dir": "/tmp/rd", "terra_findings": 0,
-                          "added": 0, "cost_usd": 0.30,
-                          "cost_unknown": False})
-        args = cli_mod.build_parser().parse_args(
-            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
-             "--base", repo["base_sha"]])
-        out = cli_mod.cmd_events(args)
         assert out["decision"] == "skipped:stale_superseded", out
         import datetime as _dt
         today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
