@@ -497,7 +497,7 @@ def route(db: sqlite3.Connection, *, app: str, guid: str,
              tgt["live_base"] or tgt["reviewed_base"],
              tgt["reviewed_head"], tgt["live_head"],
              int(tgt["dirty_rev"]), ts))
-        if cur.rowcount:
+        if int(cur.rowcount or 0):
             db.execute("UPDATE pl_inbox SET state='routed' "
                        "WHERE app=? AND guid=?", (app, guid))
             event(db, "route", guid, now=ts, state="routed",
@@ -643,7 +643,7 @@ def claim(db: sqlite3.Connection, *, owner: str, reserve_usd: float,
         fence = int(row["fence"]) + 1
         cur = db.execute("INSERT INTO pl_attempts(job,fence,reserve_micro) "
                          "VALUES(?,?,?)", (row["id"], fence, reserve))
-        attempt = cur.lastrowid
+        attempt = int(cur.lastrowid or 0)
         db.executemany("INSERT INTO pl_scopes(attempt,scope) VALUES(?,?)",
                        [(attempt, s) for s in scopes])
         db.execute("UPDATE pl_jobs SET state='leased',owner=?,fence=?,"
@@ -861,7 +861,7 @@ def complete(db: sqlite3.Connection, claim: Claim, *,
                 # insert and the seal): the sealed evidence exists, the
                 # job is live — finalize through the normal gates
                 # instead of short-circuiting.
-                return _seal(db, claim, resumed, effects, ts)
+                return _seal(db, resumed, effects, ts)
             return "already_complete"
         job = owned(db, claim, ts)
         if job["state"] != "running":
@@ -889,10 +889,10 @@ def complete(db: sqlite3.Connection, claim: Claim, *,
             event(db, "complete", claim.job, now=ts,
                   state="needs_attention", overage_micro=overage)
             return "needs_attention"
-        return _seal(db, claim, job, effects, ts)
+        return _seal(db, job, effects, ts)
 
 
-def _seal(db: sqlite3.Connection, claim: Claim, job: sqlite3.Row,
+def _seal(db: sqlite3.Connection, job: sqlite3.Row,
           effects: list[dict] | None, ts: float) -> str:
     """Finalize a settled run: checkpoint + effect intents, or park.
 
@@ -959,7 +959,7 @@ def _finalize_parked(db: sqlite3.Connection, claim: Claim,
     capped = (actual if actual is None else min(
         actual, int(attempt["reserve_micro"])))
     _settle(db, claim.attempt, capped)
-    return _seal(db, claim, job, effects, ts)
+    return _seal(db, job, effects, ts)
 
 
 def resolve_unknown(db: sqlite3.Connection, *, attempt: int,
@@ -1230,11 +1230,11 @@ def finish_effect(db: sqlite3.Connection, effect: dict, outcome: str,
         if outcome == "pending" and last is not None and (
                 last["phase"] in ("post_intent", "receipt")):
             raise Conflict("cannot re-arm an effect after POST intent")
-        changed = db.execute(
+        changed = int(db.execute(
             "UPDATE pl_effects SET state=?,remote_id=?,"
             "uncertain=? WHERE id=? AND token=? AND state='sending'",
             (outcome, remote_id, 1 if outcome == "unknown" else 0,
-             effect["id"], effect["token"])).rowcount
+             effect["id"], effect["token"])).rowcount or 0)
         if not changed:
             raise LeaseLost("effect token no longer owns delivery")
         db.execute("INSERT INTO pl_effect_attempts(effect,phase,outcome,"
@@ -1259,7 +1259,7 @@ def deliver_effect(db: sqlite3.Connection, effect_id: int, remote,
         return "held_or_finished"
     if effect["channel"] == "comment":
         try:
-            existing = remote.lookup(effect_job_marker(db, effect))
+            existing = remote.lookup(effect_job_marker(effect))
         except (TimeoutError, ConnectionError):
             finish_effect(db, effect,
                           "unknown" if effect["uncertain"] else "pending",
@@ -1275,7 +1275,7 @@ def deliver_effect(db: sqlite3.Connection, effect_id: int, remote,
     if not authorize_send(db, effect, ts, policy):
         return "suppressed"
     try:
-        remote_id = remote.send(effect_job_marker(db, effect))
+        remote_id = remote.send(effect_job_marker(effect))
     except (TimeoutError, ConnectionError):
         finish_effect(db, effect, "unknown", now=ts)
         return "unknown"
@@ -1283,7 +1283,7 @@ def deliver_effect(db: sqlite3.Connection, effect_id: int, remote,
     return "confirmed"
 
 
-def effect_job_marker(db: sqlite3.Connection, effect: dict) -> str:
+def effect_job_marker(effect: dict) -> str:
     """Stable remote identity for reconciliation.
 
     (job, channel, destination, content_revision): two emails to
@@ -1322,7 +1322,7 @@ def reconcile_effect(db: sqlite3.Connection, effect_id: int, remote,
         eff = _row(db, "SELECT * FROM pl_effects WHERE id=?", (effect_id,))
         if eff is None or eff["state"] != "unknown":
             return "held_or_finished"
-        marker = effect_job_marker(db, dict(eff))
+        marker = effect_job_marker(dict(eff))
     try:
         existing = remote.lookup(marker)
     except (TimeoutError, ConnectionError):

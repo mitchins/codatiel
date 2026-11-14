@@ -163,6 +163,7 @@ def test_concurrent_duplicate_receipts_one_inbox(tmp_path):
     errors: list = []
 
     def worker(_):
+        local_errors: list = []
         try:
             c = _open(db_path, busy=10.0)
             barrier.wait(timeout=30)
@@ -170,10 +171,13 @@ def test_concurrent_duplicate_receipts_one_inbox(tmp_path):
                 c_out = q.accept(c, app="gh", guid="same", body=b"{}",
                                  repo=REPO, repo_id=1, pr=1,
                                  head="h" * 40)
-                assert c_out in ("accepted", "duplicate")
+                if c_out not in ("accepted", "duplicate"):
+                    local_errors.append(
+                        AssertionError(f"bad outcome {c_out!r}"))
             c.close()
-        except Exception as exc:  # noqa: BLE001
-            errors.append(exc)
+        except Exception as exc:  # noqa: BLE001 - thread error collection
+            local_errors.append(exc)
+        errors.extend(local_errors)
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
     for t in threads:

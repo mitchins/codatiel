@@ -33,7 +33,7 @@ def _append(db: sqlite3.Connection, doc: dict, actor: str, action: str,
     blob = json.dumps(doc, sort_keys=True)
     cur = db.execute("INSERT INTO pl_config_revisions(doc,actor,ts) "
                      "VALUES(?,?,?)", (blob, actor, ts))
-    rev = cur.lastrowid
+    rev = int(cur.lastrowid or 0)
     db.execute("INSERT INTO pl_config_audit(revision,action,actor,detail,ts)"
                " VALUES(?,?,?,?,?)",
                (rev, action, actor, json.dumps(detail, sort_keys=True), ts))

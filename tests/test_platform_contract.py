@@ -452,8 +452,8 @@ def test_effect_absent_marker_never_autoresends(tmp_path):
     assert remote.sends == []
     # Read-only reconcile can still confirm a late-arriving send.
     marker = q.effect_job_marker(
-        conn, dict(conn.execute("SELECT * FROM pl_effects WHERE id=?",
-                                (eff["id"],)).fetchone()))
+        dict(conn.execute("SELECT * FROM pl_effects WHERE id=?",
+                          (eff["id"],)).fetchone()))
     remote.marks[marker] = "late-0"
     assert q.reconcile_effect(conn, eff["id"], remote, now=1002.0) \
         == "confirmed"
