@@ -662,21 +662,16 @@ def test_explicit_stale_ids_collision_safe(
         tmp_path, monkeypatch, two_commit_repo):
     """Two explicit stale runs for the same head within one second
     must not collide on delivery_id (microsecond + uuid suffix)."""
-    from tests.test_prod01_lifecycle import _env
     from codatiel_i2 import cli as cli_mod
     from codatiel_i2 import event_pipeline as P
     repo = two_commit_repo
-    _env(monkeypatch, tmp_path, repo["repo"])
-    cfg = P.config_from_env()
-    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg, store = _explicit_base(tmp_path, monkeypatch, repo)
     # freeze clock to same second so old int() would collide
     fixed = 1700000000.123456
     cfg.clock = lambda: fixed
     import codatiel_i2.event_pipeline as P2
     monkeypatch.setattr(P2, "config_from_env", lambda: cfg)
-    store = S.Store(cfg.state_dir / "events.sqlite")
     try:
-        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
         for _ in range(2):
             store.checkpoint_upsert(
                 {"repo": "o/r", "pr": 10, "status": "reviewed",
