@@ -680,7 +680,9 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
                 "run_dir": out["run_dir"],
                 "terra_findings": _count_terra(out["run_dir"]),
                 "added": 0, "cost_usd": cost,
-                "cost_unknown": cost is None}
+                "cost_unknown": cost is None,
+                "terra_spend_usd": cost,
+                "luna_spend_usd": 0.0}
         try:
             _bind_review_identity(repo, pr, base, head, out["run_dir"])
         except Exception as exc:
@@ -722,7 +724,9 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
             "run_dir": out["run_dir"],
             "terra_findings": _count_terra(out["run_dir"]),
             "added": int(out.get("added") or 0),
-            "cost_usd": round(parent + sub, 4), "cost_unknown": False}
+            "cost_usd": round(parent + sub, 4), "cost_unknown": False,
+            "terra_spend_usd": round(parent, 4),
+            "luna_spend_usd": round(sub, 4)}
     try:
         _bind_review_identity(repo, pr, base, head, out["run_dir"])
     except Exception as exc:
@@ -858,6 +862,11 @@ def _provenance_detail(*, repo: str, pr: int, base: str, head: str,
         detail["semdup_status"] = result.get("semdup_status")
         detail["semdup_spend_usd"] = result.get("semdup_spend_usd")
         detail["semdup_published"] = result.get("semdup_published")
+        # Explicit Luna/Terra stage spend (Gate D)
+        if result.get("terra_spend_usd") is not None:
+            detail["terra_spend_usd"] = result.get("terra_spend_usd")
+        if result.get("luna_spend_usd") is not None:
+            detail["luna_spend_usd"] = result.get("luna_spend_usd")
         # Pair counts: prefer semdup.json when available (authoritative)
         try:
             if run_dir:
@@ -869,19 +878,34 @@ def _provenance_detail(*, repo: str, pr: int, base: str, head: str,
                     detail["pairs_cache_hits"] = sd.get("pairs_cache_hits")
                 detail["pairs_total"] = sd.get("pairs_total")
                 detail["semdup_wall_s"] = sd.get("wall_s")
+                # Semdup per-model breakdown from ledger files (explicit)
+                for side in ("terra", "luna"):
+                    p = Path(run_dir) / f"spend_semdup_{side}.jsonl"
+                    if p.exists():
+                        total = 0.0
+                        for line in p.read_text(encoding="utf-8").splitlines():
+                            if not line.strip():
+                                continue
+                            try:
+                                j = json.loads(line)
+                                total += float(j.get("priced_cost_usd") or j.get("cost_usd") or 0)
+                            except Exception:
+                                continue
+                        detail[f"semdup_{side}_spend_usd"] = round(total, 6)
         except Exception:
             # Fallback to result fields when semdup.json not yet written
             if "semdup_pairs_examined" in (result or {}):
                 detail["pairs_examined"] = result.get("semdup_pairs_examined")
-        # Terra/Luna per-stage costs when run artifacts exist
-        try:
-            if run_dir:
-                m = json.loads((Path(run_dir) / "metrics.json").read_text(encoding="utf-8"))
-                spend = (m.get("spend") or {})
-                if spend.get("usd_estimate") is not None:
-                    detail["terra_spend_usd"] = spend.get("usd_estimate")
-        except Exception:
-            pass
+        # Fallback Terra spend from metrics.json when not in result
+        if "terra_spend_usd" not in detail:
+            try:
+                if run_dir:
+                    m = json.loads((Path(run_dir) / "metrics.json").read_text(encoding="utf-8"))
+                    spend = (m.get("spend") or {})
+                    if spend.get("usd_estimate") is not None:
+                        detail["terra_spend_usd"] = spend.get("usd_estimate")
+            except Exception:
+                pass
     detail["finished_at"] = time.time()
     # Strip None values for compactness
     return {k: v for k, v in detail.items() if v is not None}
@@ -1033,13 +1057,19 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     _claimed_auto_run = (_claimed_auto or {}).get("in_progress_run") or ""
     _claimed_auto_base = (_claimed_auto or {}).get("in_progress_base") or ""
     store.reserve(cfg.reserve_usd)
-    # COST-01B: is_stale checks before semdup and before each pair
+    # COST-01B: persistent stale observation latch (CodeRabbit)
+    _stale_observed: list[str] = []
+
     def _is_stale() -> bool:
         try:
             live = get_live_head(ev["repo"], pr)
-            return live is not None and live != to_sha
+            stale = live is not None and live != to_sha
+            if stale:
+                _stale_observed.append(live)
+            return stale
         except Exception:
             return False
+
     result = run_review_for_range(
         cfg=cfg, repo=ev["repo"], pr=pr, base=from_sha, head=to_sha,
         kind=kind, repo_path=access.path,
@@ -1057,7 +1087,9 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         and (cp_now.get("in_progress_run") or "") == _claimed_auto_run)
     live_after = (get_live_head(ev["repo"], pr)
                   if ev.get("pr_number") else None)
-    if not owned or (live_after is not None and live_after != to_sha):
+    # Latch: earlier positive stale observation stands when final lookup is unknown
+    stale_unresolved = live_after is None and bool(_stale_observed)
+    if not owned or stale_unresolved or (live_after is not None and live_after != to_sha):
         # PROD-02: the head went stale while inference ran (or another
         # run owns the checkpoint). This run must not seal, must not
         # email a "current-review" digest, must not publish, and must

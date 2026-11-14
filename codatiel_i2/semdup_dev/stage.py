@@ -293,7 +293,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         # at $0; only new pairs are judged. An authorized rerun (or a
         # higher ceiling) never repeats completed paid work.
         known = _load_continuation(state_dir, repo, pr, base_rev, head_rev)
-        new_pairs, reused_rows = _partition_new(pairs, known)
+        new_pairs, continuation_reused = _partition_new(pairs, known)
         # COST-01B: cross-revision content-addressed reuse (per-PR cache).
         # Continuation covers same base/head reruns; the cache covers
         # genuinely unchanged evidence across different revisions.
@@ -341,17 +341,24 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                     rebound = CACHE.rebind_row(cached, Path(merged["db"]), repo, pr, head_rev)
                     if rebound is not None:
                         # Validate suggestion still applicable at current head
+                        # CODE-01B: only reuse verdicts that did not depend on
+                        # external tool reads (conservative) and were successful
+                        if rebound.get("terra_tool_calls") or rebound.get("luna_tool_calls"):
+                            # Depends on files outside the pair; decline reuse
+                            still_new.append(p)
+                            continue
                         cache_hits.append(rebound)
                         continue
                 still_new.append(p)
             new_pairs = still_new
-            if cache_hits:
-                reused_rows = list(reused_rows) + list(cache_hits)
         except Exception:
             # Cache is best-effort; never break judging.
             pass
-        outcome["pairs_reused"] = len(reused_rows)
+        # Keep continuation and cache hits separate for publication policy
+        reused_rows = list(continuation_reused)
+        outcome["pairs_reused"] = len(continuation_reused) + len(cache_hits)
         outcome["pairs_cache_hits"] = len(cache_hits)
+        outcome["continuation_reused"] = len(continuation_reused)
         outcome["pairs_total"] = len(pairs)
         # Incremental persist: every CONTINUATION_EVERY judged pairs
         # merge into the record, so even a killed run keeps completed
@@ -359,10 +366,19 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         cont_buf: list[dict] = []
 
         def _on_pair(row: dict) -> None:
-            # Budget-stopped pairs hold no verdict (a higher ceiling may
-            # still examine them) and are never persisted for reuse.
-            if not isinstance(row, dict) or row.get("reason") == (
-                    "budget_stop"):
+            # Budget-stopped or provider-failure pairs hold no completed
+            # verdict and must not be cached (retryable).
+            if not isinstance(row, dict):
+                return
+            try:
+                from codatiel_i2.semdup_dev import cache as CACHE_CHK
+                if CACHE_CHK.is_budget_stop_row(row) or CACHE_CHK.is_provider_failure_row(row):
+                    return
+            except Exception:
+                if row.get("reason") == "budget_stop":
+                    return
+            # Tool-dependent verdicts are not reused across revisions
+            if row.get("terra_tool_calls") or row.get("luna_tool_calls"):
                 return
             cont_buf.append(row)
             if len(cont_buf) >= CONTINUATION_EVERY:
@@ -440,15 +456,32 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         _persist(run_dir, outcome)
         return outcome
     # Merge reused verdicts (prior paid work, $0 this run) with fresh
-    # judgments. No numerical cap: every Luna-approved pair publishes.
+    # judgments. No numerical cap: every Luna-approved pair publishes
+    # for same-revision continuation; cross-revision cache hits that
+    # were previously published are suppressed as already reported on
+    # this PR (COST-01B duplicate suppression).
     new_rows = [r for r in judged.get("pairs", []) if isinstance(r, dict)]
     published = list(judged.get("published", []))
     suppressed = list(judged.get("suppressed", []))
-    for r in reused_rows:
+    # Continuation: same base/head rerun — republish as before
+    for r in continuation_reused:
         if not isinstance(r, dict):
             continue
         if r.get("path") == "published":
             published.append(ES._public_row(r))
+        else:
+            suppressed.append(ES._suppressed_row(r))
+    # Cross-revision cache: suppress duplicates across commits
+    for r in cache_hits:
+        if not isinstance(r, dict):
+            continue
+        if r.get("path") == "published":
+            row_sup = ES._suppressed_row(r)
+            row_sup = dict(row_sup)
+            row_sup["reason"] = "already_reported_on_pr"
+            row_sup["detail"] = "reused verdict already reported on this PR; suppressed as duplicate across commits"
+            row_sup["reused"] = True
+            suppressed.append(row_sup)
         else:
             suppressed.append(ES._suppressed_row(r))
     # Mirror consolidation: when both directions of the same unordered

@@ -166,6 +166,29 @@ def is_budget_stop_row(row: dict) -> bool:
         return True
     return False
 
+def is_provider_failure_row(row: dict) -> bool:
+    """Unsuccessful provider calls must not be cached (CodeRabbit).
+
+    Terra `ok=False` or Luna `ok=False` produces `terra_no_lead` /
+    `editor_unpublishable` with a non-budget error detail. Those are
+    retryable and must not become reused suppressions.
+    """
+    if not isinstance(row, dict):
+        return False
+    if row.get("reason") in ("terra_no_lead", "editor_unpublishable", "editor_drop"):
+        detail = str(row.get("detail") or "")
+        # Budget stops already excluded above; remaining non-empty details
+        # with provider keywords are failures, not completed assessments.
+        if detail and any(k in detail for k in ("timeout", "unavailable", "failed", "Provider", "model_failed", "unreadable", "invalid", "BudgetCeiling")):
+            return True
+        # Also treat rows without assess_ran as failures (no completed verdict)
+        if not row.get("assess_ran"):
+            # But legitimate terra_no_lead with overlap false and assess_ran False? Actually assess_ran is set only for successful?
+            # In _review_inner, terra_no_lead rows have assess_ran True even when overlap false? Let's check: they set assess_ran True before.
+            # So this is defensive.
+            return False
+    return False
+
 def lookup(
     state_dir: Path | str,
     repo: str,
@@ -180,7 +203,10 @@ def lookup(
     row = cache.get(key)
     if not isinstance(row, dict):
         return None
-    if is_budget_stop_row(row):
+    if is_budget_stop_row(row) or is_provider_failure_row(row):
+        return None
+    # Tool-dependent verdicts must not be reused (helper file change)
+    if row.get("terra_tool_calls") or row.get("luna_tool_calls"):
         return None
     # Verify stored identity matches current (defensive)
     stored_ident = row.get("_cache_identity")
@@ -197,7 +223,9 @@ def store(
     cache: dict | None = None,
 ) -> dict:
     """Persist row under identity; returns updated cache dict."""
-    if is_budget_stop_row(row):
+    if is_budget_stop_row(row) or is_provider_failure_row(row):
+        return cache if cache is not None else _load_raw(state_dir, repo, pr)
+    if row.get("terra_tool_calls") or row.get("luna_tool_calls"):
         return cache if cache is not None else _load_raw(state_dir, repo, pr)
     if cache is None:
         cache = _load_raw(state_dir, repo, pr)

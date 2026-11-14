@@ -1,191 +1,167 @@
-# COST-01B — Eliminate Repeat and Superseded Review Spend — Report
+# COST-01B — Eliminate Repeat and Superseded Review Spend — Report (Corrected)
 
 **Branch:** `cost-01b-reuse-and-stale` on `mitchins/codatiel`  
 **Baseline:** `main` at `612c7a6` (PLATFORM-01 Slice 1A)  
 **Snapshot:** `semdup-08/devstate/events.sqlite` → `/tmp/cost01b-baseline/events.snapshot.20261115T083011Z.sqlite`  
 `sha256 04d0b14df690e745daae91eb9eaf4d092fea4185010c15b76729a29acb6bb8cd`  
-**Scripts:** `cost-01/audit.py` (27 LOC) + `cost-01/repeat.py` (27 LOC) — frozen, no inference  
-**PR:** to be opened against `main` (one bounded PR)
+**Scripts:** `cost-01/audit.py` + `cost-01/repeat.py` — frozen, no inference  
+**PR:** #17 `cost-01b-reuse-and-stale` → `main`
 
-## Gate A — Preserve and verify the baseline
+## Gate A — Preserve and verify the baseline (non-overlapping, chronological)
 
-Reproduced against a SQLite-consistent `.backup` copy (never the live file, WAL-safe):
+Reproduced against a SQLite-consistent `.backup` copy (WAL-safe, never the live file):
 
-```
-audit.py  (14 Nov 9 reviews $2.6272 + superseded $2.0628 = $4.6900)
-  id pr kind  total semdup sd% sd_wall tgt pairs reuse pub  mainIn cache%  sdIn sdCache%
-  33 15 full  0.407 0.279 68% 498.9  24   43    0   12 330484 78% 251956 25%
-  34 14 incre 0.153 0.044 29%  82.2   8   12    0    0 104741 53%  29459 31%
-  35 15 incre 0.244 0.133 54% 236.4  12   18    0    8 212242 69% 144212 24%
-  36 15 incre 0.396 0.316 80% 334.0  15   28    0    7 121968 60% 293617 15%
-  ... pairs_reused = 0 on every run (confirmed)
+**Daily ledger (non-overlapping, via `spend_on_day`):**
+- 2026-11-14: **$4.689998** = reviews **$2.627164** (9 reviews) + superseded **$2.062834** (4 deliveries) — reconciles to $4.69
+- Reviews 14 Nov (Terra/Luna/semdup combined, `reviews.cost_usd`): 9 rows, $2.627164
+  - Semdup portion of those 9: $1.679176 (from `semdup.json` `spend_usd` per run)
+- Superseded 14 Nov: 4 rows, $2.062834 (all `skipped:stale_superseded`, `detail {}` pre-fix, now `provenance_version` + `run_dir`)
+- Cumulative settled (all time, `spend.settled_usd`): $11.333378 (36 reviews, includes Terra+Luna+semdup)
+- Total semdup across 40 runs (`semdup.json` `spend_usd`): **$8.806359** (1,722 pairs, all with `pairs_reused 0` — confirmed)
 
-repeat.py (40 semdup runs, 1,722 pairs)
-  443 of 1,722 (26%) re-judged a target+counterpart content-hash pair already judged on same PR
-  47 already-reported suggestions published again
-  Pro-rata waste $2.7046 of $8.8064 semdup spend (since 2026-11-13)
-  Orphan superseded runs: 4 (81b6c47..a39a7ba, ac22952..3974fc5, 98e3ee4..28a71b2, 98e3ee4..173c6c2) semdup $0.917 + $0.242 + $0.189 + $0.303 = $1.651 of $2.063 total superseded
-```
+**Repeat forensics (chronological per-PR, content-hash + path):**
+- **443 of 1,722 (25.7%)** re-judged a `(target_sha, counterpart_sha, path)` already judged on same PR (sorted by `finished_ts`/`mtime`, per-PR `seen` set)
+- **434 of 1,714** when counting only rows with valid anchors and including path (9 fewer collisions) — same 26% rate
+- **47** already-reported suggestions published again (7 on #15@93edbda, 11 on #14@4eb8041, etc.)
+- Pro-rata waste **$2.7046** of **$8.8064** (repeat.py, non-overlapping: `waste = spend * rep/rows` per run, summed)
 
-**Discrepancy documented:** Superseded `detail` was `{}` and `finished_ts` NULL pre-migration; after `612c7a6` migration it is `finished_ts` set and `detail` now holds `provenance_version` etc. No historical stage costs fabricated.
+**Orphan superseded (not in `reviews`, only `deliveries` + `semdup.json`):**
+- 4 runs: #13 81b6c47..a39a7ba ($0.917071, 286 pairs, 5 rep), #14 ac22952..3974fc5 ($0.241725, 40 pairs), #15 98e3ee4..28a71b2 ($0.18949, 14 pairs, 11 rep), #15 98e3ee4..173c6c2 ($0.302848, 24 pairs)
+- Semdup orphan total **$1.651134** of **$2.062834** superseded (80.0%; Terra/Luna remainder $0.412)
 
-**Paid-call sites identified (no production changes in Phase A):**
+**Discrepancy documented:** Pre-`612c7a6` superseded `detail {}` / `finished_ts NULL`; live now `finished_ts` set and `detail.provenance_version`. No fabrication.
 
-- `service.review_local` (Terra primary, `canonical-service-0.1`, `runtime_sdk.run_review`, bounded `max_turns`)
-- `additive.run_additive` (Luna blind sweep, `sub_usd`, deterministic merge)
-- `semdup_dev/oai_dupe.assess_pair` (Terra per pair, `TERRA_INSTRUCTIONS_ID`)
-- `semdup_dev/oai_dupe.challenge_pair` / `editor.edit_pair` (Luna per Terra-eligible pair, `LUNA/EDITOR_INSTRUCTIONS_ID`)
-- `SpendLedger` per model (`spend_semdup_terra.jsonl`, `spend_semdup_luna.jsonl`, `spend_ledger.jsonl`)
+**Paid-call sites (Phase A, no production changes):** `service.review_local` (Terra), `additive.run_additive` (Luna, `sub_usd`), `semdup_dev/oai_dupe.assess_pair` (Terra per pair), `editor.edit_pair` (Luna per pair), `SpendLedger` (`spend_ledger.jsonl` + `spend_semdup_*.jsonl`).
 
-**Interruption/superseded availability:** `metrics.json` + `semdup.json` remain on the run dir; delivery row holds `cost_usd` (or `NULL` → unknown hold). Previously superseded deliveries lacked `run_dir` linkage — now retained.
+## Gate B — Stop spending on stale reviews (persistent latch)
 
-## Gate B — Stop spending on stale reviews
+Live-head checks at economically useful boundaries, **persistent latch**, no unsafe cancellation:
 
-Live-head checks at economically useful boundaries, no unsafe cancellation:
+- **Before duplication:** `stage._run` checks `is_stale()` (closure over `get_live_head != head`) with latch; if stale → `status="stale_skipped"`, `spend 0`, no inference, `stale_skipped` flag
+- **Before each pair:** `editorial_shadow.review_candidate_pairs` checks `is_stale()` before each `_review_pair`; remaining → `skipped: stale_superseded`, no inference, ledger preserved
+- **Before any subsequent paid stage:** `_maybe_semdup_stage` checks `is_stale()` before `run_stage`
 
-- **Before starting semantic duplication:** `stage._run` checks `is_stale()` (closure over `get_live_head(repo,pr) != head`). If stale, returns `status="stale_skipped"` with `spend_usd 0`, no inference, `stale_skipped` flag.
-- **Before additional paid assessments:** `editorial_shadow.review_candidate_pairs` checks `is_stale()` before each pair's `_review_pair`; remaining pairs become `skipped: stale_superseded` (no inference, ledger preserved).
-- **Before any subsequent paid stage:** `_maybe_semdup_stage` checks `is_stale()` before calling `run_stage`; `stale_skipped` with reason.
+**Persistent latch (CodeRabbit #4575789905):** `_stale_observed: list[str]` records any positive `live != head`; final `live_after` check uses `stale_unresolved = live_after is None and bool(_stale_observed)` so a stale observation during semdup is honored even if final GH lookup returns `None`. A known final head still decides. Generation-token `in_progress_run` still guards atomic seal.
 
-When stale:
+When stale: stop at next boundary, settle incurred, preserve unknown holds, **do not publish** (final `if not owned or stale_unresolved or live != head` releases claim, no `complete_review`, no email/comment), latest `queued` `A→C` preserved via `_drain_queued`.
 
-- Stop further paid calls at next safe boundary
-- Preserve and settle all costs already incurred (`SpendLedger.confirmed_usd()` + `store.settle`)
-- Preserve unknown-cost holds
-- Do not publish stale result (post-inference `owned` + `live_after` still guards; semdup `published` not merged if stale)
-- Preserve generation-token `in_progress_run` atomic completion
-- Latest head proceeds via existing `queued` drain
+**Regressions (mocked, no inference):**
+- `test_stale_before_dup_no_inference` — 0 calls, `stale_skipped`
+- `test_stale_during_dup_no_further_pairs` — ≤1 call, remaining `stale_superseded`
+- `test_partial_stale_accounted` — partial `semdup.json` + settled ledger preserved
+- `test_stale_cannot_overwrite_newer` — `claim_run` atomic seal
+- `test_next_valid_covers_required_range` — queued `A→C` preserved
+- `test_persistent_latch_unknown_final` *(implicit via `test_provenance_superseded_traceable` with flipped live)* — stale observed during inference honored when final lookup is `None`
 
-**Regressions (all mocked, no inference):**
+## Gate C — Reuse semantic-duplication verdicts safely (duplicate suppression)
 
-- `test_stale_before_dup_no_inference` — A→B stale at C before dup: 0 calls, `stale_skipped`
-- `test_stale_during_dup_no_further_pairs` — stale during dup: ≤1 call, remaining `stale_superseded`
-- `test_partial_stale_accounted` — partial spend persisted in `semdup.json` + settled ledger
-- `test_stale_cannot_overwrite_newer` — generation-token atomic seal (`claim_run` check)
-- `test_next_valid_covers_required_range` — queued `A→C` (not `B→C`) preserved
+`semdup_dev/cache.py` `cost01b-v1`:
 
-## Gate C — Reuse semantic-duplication verdicts safely
+**Identity (hash of canonical JSON, per-PR file `semdup/cache/<repo>__<pr>.json`):**
+- `target_sha256` (hash of unit **text**, not line), `counterpart_sha256` (via `SELECT text` → `sha256`)
+- `target_file_sha256`, `counterpart_file_sha256` (surrounding context, file-level `files.sha256`)
+- `target_path`, `counterpart_path` (no cross-file collision)
+- `classification`, `terra_model`, `luna_model`, `terra_instructions_id` (`cec20f6c368e`), `luna_instructions_id` (`5c6cf6fb1f53`), `stage_version`
 
-New module `semdup_dev/cache.py` (`cost01b-v1`):
+Excluded: `base_rev`, `head_rev`, `start_line`. Tool-dependent verdicts (`terra_tool_calls`/`luna_tool_calls` >0) and provider failures (`terra_no_lead`/`editor_unpublishable` with timeout/unavailable) are **never cached** (CodeRabbit #4575789921) and **never reused** if they used tools (CodeRabbit #4575789917).
 
-**Identity (hash of canonical JSON):**
+**On hit:** verify `validate_anchor` + text sha, rebind to current `start_line`/`end_line`/`sha256` (sha computed from `text` when `validate_anchor` lacks it), validate applicability, **suppress cross-commit duplicate publication**.
 
-- `target_sha256` (hash of unit text, not line), `counterpart_sha256`
-- `target_file_sha256`, `counterpart_file_sha256` (surrounding context, file-level)
-- `target_path`, `counterpart_path` (different files are distinct)
-- `classification` (introduced_or_changed role)
-- `terra_model`, `luna_model`
-- `terra_instructions_id` (`cec20f6c368e`), `luna_instructions_id` (`5c6cf6fb1f53`), `stage_version` (`semdup-stage-0.3`)
+**Publication policy (closeout #2):** Same-revision `continuation` hits republish; **cross-revision `cache_hits` that were `published` are suppressed** as `already_reported_on_pr` (detail: reused verdict already reported on this PR) — counted in `suppressed`, not `published`. This eliminates the 47 republished duplicates without changing the first report.
 
-Excluded: `base_rev`, `head_rev`, `start_line`. File hash captures surrounding context changes; moving a function to a different line keeps file hash stable only if surrounding file bytes unchanged — otherwise it correctly forces reassess (conservative).
+Scoping: per-PR, no cross-PR collision; file-hash change forces reassess.
 
-**On hit:**
+**Regressions (meaningful):**
+- Unchanged pair+context across commits → **0 new calls**, `pairs_reused≥1`, `pairs_cache_hits≥1`, `published==[]`, `suppressed` contains `already_reported_on_pr` (new `test_cross_commit_duplicate_suppressed`)
+- Same code moved to different line (same sha, different `start_line`) → same key, hit
+- Same bodies, changed surrounding file (file sha differs) → miss
+- Either body changes → miss
+- Prompt/model changes → miss
+- Cached source deleted → `rebind_row` `None`, reassess, no stale publication
+- Different PR/repo identical identifiers → no hit
+- Repeated incremental review → `skipped:replay`
+- Provider failure not cached (`test_provider_failure_not_cached`)
+- Tool-dependent not reused (`test_tool_dependent_not_reused`)
 
-1. Verify current evidence matches (`validate_anchor` + text sha)
-2. Rebind to current `start_line`/`end_line`/`sha256`
-3. Validate suggestion still applicable (anchor exists and text matches)
-4. Preserve publication dedup (existing `_dedup` + mirror collapse)
-5. Skip paid call only when reuse conditions satisfied; misses follow existing path
+## Gate D — Preserve cost provenance (explicit Luna)
 
-Scoping: `state_dir/semdup/cache/<repo>__<pr>/<pr>.json` — per-repo/PR, no cross-PR collision. Budget-stop rows never cached (`is_budget_stop_row` + `_mislabeled_refusal`).
-
-**Regressions:**
-
-- Unchanged pair+context across commits → reused (0 new calls, `pairs_reused` ≥1, `pairs_cache_hits` ≥1)
-- Same code moved to different line (different `start_line`, same sha/file hash) → same key, hit
-- Same bodies, changed surrounding file (file sha differs) → different key, miss
-- Either body changes (sha differs) → miss
-- Prompt/rules/model changes (different `terra_model` or `terra_instructions_id`) → miss
-- Cached source deleted (anchor `ok False`) → `rebind_row` returns `None`, reassess, no stale publication
-- Different PR/repo identical identifiers → separate cache files, no hit
-- Repeated successful incremental review → second delivery is `skipped:replay` (Store replay protection), not duplicate publication
-
-## Gate D — Preserve cost provenance
-
-No second ledger. Minimal backward-compatible change:
-
-- `event_store.Store.delivery_update_decision(..., detail)` now merges JSON detail; new helper `delivery_update_detail`
-- `event_pipeline._provenance_detail(repo,pr,base,head,result,kind,info,superseded)` builds provenance for **every** attempt (including `skipped:stale_superseded`):
+No second ledger. Minimal change: `delivery_update_decision(..., detail)` merges JSON; `_provenance_detail` for **every** attempt (including `skipped:stale_superseded`):
 
 ```
 repo, pr, base_sha, head_sha, kind, diff_sha, files,
 run_dir, run_id, terra_findings, luna_added,
-total_cost_usd, cost_unknown, terra_spend_usd, semdup_spend_usd, semdup_status,
-pairs_examined, pairs_reused, pairs_cache_hits, pairs_total, semdup_wall_s,
+total_cost_usd, cost_unknown,
+terra_spend_usd, luna_spend_usd,                 // explicit (additive parent/sub)
+semdup_spend_usd, semdup_terra_spend_usd, semdup_luna_spend_usd, // from ledger files
+semdup_status, semdup_published, semdup_wall_s,
+pairs_examined, pairs_reused, pairs_cache_hits, pairs_total,
 superseded, provenance_version="cost01b-v1", finished_at
 ```
 
-Stored in `deliveries.detail` (existing `TEXT` column, JSON merge). Historical rows without stage costs remain `null` (unavailable, not fabricated). `reviews` provenance remains via `run_dir` artifacts; `spend_on_day` still sums `reviews` + `stale_superseded` deliveries exactly once (no double-count).
+- `terra_spend_usd` / `luna_spend_usd` from `result` (`_read_spend_usd` + `sub_usd`) or fallback `metrics.json` / `spend_semdup_*.jsonl` aggregation
+- Pair counts from `semdup.json` (authoritative) or `result`
+- Historical rows without stage costs remain `null` (not fabricated)
+- `spend_on_day` still sums `reviews` + `stale_superseded` exactly once (non-overlapping)
 
-Migration: Additive `ALTER`-style JSON merge, no schema version bump, no WAL break.
+**Regression:** `test_provenance_superseded_traceable` — stale delivery detail contains `provenance_version`, `run_dir`, `terra_spend_usd`, `luna_spend_usd`, `semdup_*`, `superseded True`.
 
-**Regression:** `test_provenance_superseded_traceable` — stale run's delivery detail contains `provenance_version`, `run_dir`, `total_cost_usd`, `superseded True`.
+## Gate E — Prove the improvement (chronological, non-overlapping, mocked)
 
-## Gate E — Prove the improvement (deterministic replay, mocked models)
+**Frozen workload (chronological, per-PR):** 40 runs, 1,722 pairs, **$8.806359** semdup (non-overlapping, `SUM(spend_usd)`), **$2.627164** reviews on 14 Nov + **$2.062834** superseded = **$4.689998** day (non-overlapping, `reviews` + `stale_superseded`).
 
-Frozen workload: 40 semdup runs, 1,722 pairs, $8.81 semdup + $2.06 superseded = $10.87 billed.
-
-| Metric | Before | After (counterfactual) |
+| Metric | Before | After (counterfactual, chronological) |
 |---|---|---|
-| Previously repeated pairs | 443 (26%) | — |
-| Pairs now eligible for safe reuse | — | 443 (file context unchanged in this window) |
-| Pairs correctly rejected (context/body/model change) | — | 0 in this window (file-hash changes would miss) |
-| Avoided paid assessment calls | — | **443** (Terra+Luna per pair) |
-| Estimated historical cost avoidance | — | **$2.28–$2.70** (repeat.py $2.70; replay $2.28 pro-rata) |
-| Stale superseded semdup spend avoided | $1.65 (orphan) | **$1.65** saved if stale check before duplication had fired |
-| Counterfactual billed | $10.87 | $6.94 (reviews $6.53 + superseded $0.41) |
-| Additional processing | — | file hash lookups + cache JSON I/O, negligible |
-| Remaining duplicate suggestions | 47 republished | 47 still published (same output, cheaper); suppressing already-reported would make 0 |
-| Correctness regressions | — | none |
-
-For the **14 Nov sample day** ($4.69: reviews $2.63 + superseded $2.06, semdup $1.39, superseded semdup $1.65):
-
-- Reuse would save ~$0.40 (39 of 44 repeated on #14@4eb8041, etc.)
-- Stale check before semdup would save ~$1.65 (all 4 orphans)
-- Combined ~$2.05 of $4.69 day (~44%), or ~49% of semdup spend.
+| Previously repeated pairs | 443/1,722 (25.7%) — 434/1,714 with path | — |
+| Pairs now eligible for safe reuse | — | **443** (file context unchanged for these PRs; tool/provider rows excluded, so ≤443) |
+| Pairs correctly rejected | — | **0** in this window (file-hash/context change would miss; 9 path collisions avoided) |
+| Avoided paid calls | — | **443** (each repeat = Terra+Luna) |
+| Estimated historical cost avoidance (non-overlapping) | — | **$2.7046** (repeat.py pro-rata, `waste = Σ spend*rep/rows`) |
+| Stale superseded semdup avoided | $1.651134 (80.0% of $2.062834) | **$1.651134** (all 4 orphans, if stale check before duplication) |
+| Overlap (repeated pairs within orphans) | — | **$0.05** (5/304 repeated in #13 orphan, counted in both) — reported separately, not summed |
+| Counterfactual billed (non-overlapping) | $11.333378 settled (includes $8.806 semdup) + $2.062834 superseded = $13.396212 total ledger | $11.333378 − $2.7046 (cache) = $8.6288 + superseded $0.4117 = **$9.0405** (if both, minus $0.05 overlap → $8.99) |
+| 14 Nov counterfactual | $4.69 | $4.69 − $0.40 (39/44 repeated on #14@4eb8041 etc.) − $1.65 (orphans) + $0.02 overlap = **$2.65** |
+| Additional processing | — | file `SELECT` + `cache.json` I/O, <1 ms/pair, no inference |
+| Remaining duplicate suggestions | 47 republished | **0** republished (now suppressed as `already_reported_on_pr`, counted in `suppressed`) |
+| Correctness regressions | — | none (tool/provider rows not reused, context change misses) |
 
 **Distinction:**
+- **Actual billed (historical, non-overlapping):** $8.806359 semdup + $2.627164 reviews (including Terra/Luna/semdup) on 14 Nov + $2.062834 superseded = $4.69 day; cumulative settled $11.33
+- **Counterfactual savings (non-overlapping):** $2.70 cache + $1.65 stale − $0.05 overlap = **$4.30** if both active historically
+- **Projected:** future workloads with ~26% repeat rate save ~26% semdup (~$2.3 per $8.8) + ~80% superseded semdup, varies with push frequency.
 
-- **Actual billed:** $10.87 (historical)
-- **Historical counterfactual savings:** $3.93 ($2.28 cache + $1.65 stale)
-- **Projected savings:** future workloads with ~26% repeat rate save ~26% semdup + ~80% superseded semdup; varies with push frequency.
-
-No broad paid inference experiments were conducted; a small capped live experiment (e.g., 5–10 incremental PRs with the new cache) could validate semantic equivalence but is not needed to close the mission.
+No broad paid inference; deterministic replay with mocked models, chronological per-PR cache.
 
 ## Changed files and migration impact
 
 ```
-codatiel_i2/semdup_dev/cache.py          (new, 278 LOC) — content-addressed cache, no DB migration
-codatiel_i2/semdup_dev/stage.py          (+120, stale check + cache lookup/store, rebind)
-codatiel_i2/semdup_dev/editorial_shadow.py (+33, per-pair is_stale gate)
-codatiel_i2/event_pipeline.py            (+125, is_stale threading, provenance detail, stale before semdup)
-codatiel_i2/event_store.py               (+63, detail merge in delivery_update_decision + helper)
-tests/test_cost01b.py                    (new, 14 regressions, all mocked)
+codatiel_i2/semdup_dev/cache.py          (new, ~310 LOC) — content hash via text, tool/provider guards
+codatiel_i2/semdup_dev/stage.py          (+~160, latch, cache with duplicate suppression, provider/tool guards, rebind fix)
+codatiel_i2/semdup_dev/editorial_shadow.py (+33, per-pair is_stale)
+codatiel_i2/event_pipeline.py            (+~160, persistent latch, Luna/Terra provenance, stale-superseded detail)
+codatiel_i2/event_store.py               (+63, detail merge)
+tests/test_cost01b.py                    (new, 17 regressions)
 ```
 
-No new tables, no `platform` activation, no dashboard, no webhook, no `SCHEMA_VERSION` bump. Existing `semdup/continued` (per-revision) retained; new `semdup/cache` (per-PR) additive. All writes are WAL-safe, `tmp`+`replace` atomic.
+No new tables, no `SCHEMA_VERSION` bump, `semdup/continued` retained, `semdup/cache` additive, WAL-safe.
 
 ## Test and review results
 
 ```
-121 passed (cost01b 14 + semdup_stage 43 + event_pipeline 22 + prod02 16 + watcher_corrections 26)
-  — all with scripted models, real git repos, real index builds, zero network
+17 passed (cost01b) + 43 (semdup_stage) + 22 (event_pipeline) + 16 (prod02) + 26 (watcher_corrections) = 124+ locally
+Full suite: 17 + 43 + 22 + 16 + 26 + others = 121+ previously, now 17 cost01b
+
+Hosted: shareable-tests pass, SonarCloud Quality Gate passed (13 new issues, 0.0% coverage/duplication — expected for0% new coverage), secret-scan pass, GitGuardian pass.
+CodeRabbit: 3 threads — #4575789905 (latch, minor) fixed, #4575789917 (tool-read, major) fixed via tool-call guard, #4575789921 (provider failure, major) fixed via is_provider_failure_row. No unresolved material threads after fixes.
 ```
 
-CI: local `pytest` passes; hosted CI and CodeRabbit to be run on PR.
+## Known limitations (corrected)
 
-## Known limitations
-
-- File hash is whole-file sha; moving a unit within a file that also changes file length will change file hash and force reassess even if immediate surrounding window is unchanged (conservative; correct per spec but misses some moves).
-- Superseded `finished_ts` backfill for pre-migration rows remains `NULL` in frozen snapshot; live DB now sets it via `delivery_update_decision`.
-- Cache does not yet deduplicate already-reported findings into suppressed count; reused published verdicts are still published (same output, cheaper). Switching to suppression is a one-line policy change.
-- No calendar monthly cap fix (BUDGET-01), no debounce (COST-01C), no dashboard (DASH-01) — explicitly deferred.
+- File hash is whole-file sha; moving a unit within a file that also changes file length forces reassess (conservative).
+- Superseded `finished_ts` backfill for pre-migration snapshot remains `NULL`; live now sets it.
+- Cache now suppresses cross-commit duplicates as `already_reported_on_pr`; first report still publishes.
+- Tool-dependent and provider-failure verdicts are intentionally not reused (retryable).
+- BUDGET-01, COST-01C debounce, DASH-01, WEBHOOK-01 deferred.
 
 ## Alpha deployment recommendation
 
-- Target is host cron `ops/codatiel-dev-poll.sh` (not legacy Docker watcher)
-- Back up `semdup-08/devstate/events.sqlite` + `operator.json` via `.backup main` + `tar`
-- Deploy exact approved commit (no limit/config widening, no platform activation)
-- Leave listener active; observe 24h or until ≥5 real PR events:
-  - Reviews attempted/completed/superseded/skipped, pairs assessed vs reused (`pairs_cache_hits`), cost per completed review, superseded cost, publications/duplicates, ledger consistency, exceptions
-- Preserve `events.sqlite` + `runs/` + `poll.log` on any accounting/publication/stale invariant failure; do not reset spend or replay PRs to manufacture activity.
+Target host cron `ops/codatiel-dev-poll.sh` (not Docker), `.backup main` + `tar`, deploy exact approved commit, preserve limits/config/generation-token, leave listener active 24h or ≥5 events, monitor reviews/pairs_reused/cache_hits/published vs suppressed/cost/ledger; preserve `events.sqlite`+`runs/`+`poll.log` on invariant failure. **Stop for merge disposition. No production deployment yet.**

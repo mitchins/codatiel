@@ -247,6 +247,28 @@ def test_cache_unchanged_reused(tmp_path: Path, dupe_repo, monkeypatch):
     # Since head_c is different from head_b, but target pair unchanged, cache should hit
     assert calls2["n"] == 0, "unchanged pair should be reused without inference"
     assert out3["pairs_reused"] >= 1
+    # Cross-commit duplicate suppression: published from first run should not be republished
+    assert out3["published"] == [], "reused published verdict should be suppressed as duplicate across commits"
+    assert any(r.get("reason") == "already_reported_on_pr" for r in out3.get("suppressed", [])), "suppressed should contain already_reported_on_pr"
+
+def test_cross_commit_duplicate_suppressed(tmp_path: Path, dupe_repo, monkeypatch):
+    """Cross-commit duplicate: second run suppresses already-reported finding, no new inference."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    root = dupe_repo["root"]; base = dupe_repo["base"]; head_b = dupe_repo["head_b"]; head_c = dupe_repo["head_c"]
+    state = tmp_path / "state2"
+    run1 = tmp_path / "run1"; run1.mkdir()
+    out1 = ST.run_stage(repo_path=root, repo=REPO, pr=5, base_rev=base, head_rev=head_b, run_dir=run1, state_dir=state, allow_embeddings=False, assess_fn=_fake_assess, edit_fn=_fake_edit)
+    assert out1["published"] and len(out1["published"]) >= 1
+    calls = {"n": 0}
+    def _count(**kw):
+        calls["n"] += 1
+        return _fake_assess(**kw)
+    run2 = tmp_path / "run2"; run2.mkdir()
+    out2 = ST.run_stage(repo_path=root, repo=REPO, pr=5, base_rev=base, head_rev=head_c, run_dir=run2, state_dir=state, allow_embeddings=False, assess_fn=_count, edit_fn=_fake_edit)
+    assert calls["n"] == 0
+    assert out2["published"] == []
+    assert out2["pairs_cache_hits"] >= 1
+    assert any(r.get("reason") == "already_reported_on_pr" for r in out2["suppressed"])
 
 def test_cache_same_line_reused(tmp_path: Path, dupe_repo):
     """Same code moved to a different line: verdict reused if decision evidence is unchanged."""
@@ -365,6 +387,53 @@ def test_cache_no_cross_scope_collision(tmp_path: Path):
     assert hit_diff_pr is None
     hit_diff_repo = CACHE.lookup(state, "o/other", 1, ident)
     assert hit_diff_repo is None
+
+def test_provider_failure_not_cached(tmp_path: Path, dupe_repo, monkeypatch):
+    """Provider failures are not cached as completed verdicts."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    state = tmp_path / "state_pf"
+    # Simulate a provider timeout row
+    db = tmp_path / "db_pf.sqlite"
+    import sqlite3
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE files (path TEXT PRIMARY KEY, sha256 TEXT, bytes INT, language TEXT, parse_status TEXT)")
+    conn.execute("INSERT INTO files VALUES (?,?,?,?,?)", ("a.py", "fh", 100, "python", "ok"))
+    conn.execute("INSERT INTO files VALUES (?,?,?,?,?)", ("b.py", "fh2", 100, "python", "ok"))
+    conn.commit(); conn.close()
+    ident = CACHE.build_identity(merged_db=db, target={"path": "a.py", "symbol": "f", "sha256": "h1"}, counterpart={"path": "b.py", "symbol": "g", "sha256": "h2"}, classification="introduced", terra_model="m", luna_model="m2", terra_instructions_id="tid", luna_instructions_id="lid", stage_version=ST.STAGE_VERSION)
+    row = {"target": {"path": "a.py", "symbol": "f"}, "counterpart": {"path": "b.py", "symbol": "g"}, "path": "suppressed", "reason": "terra_no_lead", "detail": "ProviderTimeout: request timed out", "assess_ran": True, "terra_tool_calls": 0}
+    # Should not be stored
+    before = CACHE.load_cache(state, "o/r", 9)
+    CACHE.store(state, "o/r", 9, ident, row)
+    after = CACHE.load_cache(state, "o/r", 9)
+    assert after == before, "provider failure should not be cached"
+    # Also direct check
+    assert CACHE.is_provider_failure_row(row) is True
+    assert CACHE.lookup(state, "o/r", 9, ident) is None
+
+def test_tool_dependent_not_reused(tmp_path: Path, dupe_repo, monkeypatch):
+    """Tool-dependent verdicts are not reused across revisions."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    root = dupe_repo["root"]; base = dupe_repo["base"]; head_b = dupe_repo["head_b"]
+    state = tmp_path / "state_tool"
+    # First run with tool calls
+    def _assess_with_tool(**kw):
+        # Simulate tool use by setting tool_calls in row
+        return {"ok": True, "terra": {"overlap": True, "relationship": "equivalent", "strength": "likely", "shared_behavior": "x", "shared_component": "y", "opportunity": "direct_reuse", "differences": [], "wrapper_or_delegation": False, "ownership_lifecycle_difference": False, "uncertainty": ""}, "transcript": {"tool_calls": [{"name": "read_file", "arguments": {"path": "helper.py"}}]}}
+    # Use a custom edit that will be called but we need to ensure tool calls are recorded
+    # Instead directly test cache store with tool_calls flag
+    db = tmp_path / "db_tool.sqlite"
+    import sqlite3
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE files (path TEXT PRIMARY KEY, sha256 TEXT, bytes INT, language TEXT, parse_status TEXT)")
+    conn.execute("INSERT INTO files VALUES (?,?,?,?,?)", ("a.py", "fh", 100, "python", "ok"))
+    conn.execute("INSERT INTO files VALUES (?,?,?,?,?)", ("b.py", "fh2", 100, "python", "ok"))
+    conn.commit(); conn.close()
+    ident = CACHE.build_identity(merged_db=db, target={"path": "a.py", "symbol": "f", "sha256": "h1"}, counterpart={"path": "b.py", "symbol": "g", "sha256": "h2"}, classification="introduced", terra_model="m", luna_model="m2", terra_instructions_id="tid", luna_instructions_id="lid", stage_version=ST.STAGE_VERSION)
+    row = {"target": {"path": "a.py", "symbol": "f"}, "counterpart": {"path": "b.py", "symbol": "g"}, "path": "published", "anchors": {"target": {"path": "a.py", "symbol": "f", "sha256": "h1"}, "counterpart": {"path": "b.py", "symbol": "g", "sha256": "h2"}}, "terra_tool_calls": 1, "luna_tool_calls": 0}
+    CACHE.store(state, "o/r", 10, ident, row)
+    # Should not be stored due to tool dependency
+    assert CACHE.lookup(state, "o/r", 10, ident) is None
 
 def test_no_duplicate_publication_on_repeat(tmp_path: Path):
     """Repeated successful incremental review: no duplicate publication (replay)."""
