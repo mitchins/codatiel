@@ -759,3 +759,114 @@ def test_same_range_generation_not_sealed(tmp_path):
         assert done["sealed"] is True
     finally:
         store.close()
+
+
+def test_explicit_atomic_seal_delivery_failure_is_failed(
+        tmp_path, monkeypatch, two_commit_repo):
+    """Delivery persistence failure after an atomic-seal race must
+    not be swallowed as success; settled spend stays in ledger."""
+    from tests.test_prod01_lifecycle import _env
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    from codatiel_i2 import event_store as S2
+    repo = two_commit_repo
+    _env(monkeypatch, tmp_path, repo["repo"])
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "baseline_head": repo["base_sha"],
+             "last_reviewed_head": repo["base_sha"],
+             "last_reviewed_base": repo["base_sha"]})
+        monkeypatch.setattr(P, "get_live_head",
+                            lambda r, pr: repo["head_sha"])
+        monkeypatch.setattr(
+            P, "run_review_for_range",
+            lambda **kw: {"status": "complete", "mode": "t",
+                          "run_dir": "/tmp/rd", "terra_findings": 0,
+                          "added": 0, "cost_usd": 0.33,
+                          "cost_unknown": False})
+        orig_complete = S.Store.complete_review
+        def _patched(self, *a, **kw):
+            self.cx.execute(
+                "UPDATE checkpoints SET in_progress_run='other-gen' "
+                "WHERE repo='o/r' AND pr=10")
+            self.cx.commit()
+            return orig_complete(self, *a, **kw)
+        monkeypatch.setattr(S.Store, "complete_review", _patched)
+        # Fail the accounting write
+        orig_record = S2.Store.delivery_record
+        def _fail_record(self, *a, **kw):
+            if kw.get("decision") == "skipped:stale_superseded":
+                raise S2.StoreError("injected delivery failure")
+            return orig_record(self, *a, **kw)
+        monkeypatch.setattr(S2.Store, "delivery_record", _fail_record)
+        args = cli_mod.build_parser().parse_args(
+            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
+             "--base", repo["base_sha"]])
+        out = cli_mod.cmd_events(args)
+        assert out["status"] == "failed", out
+        assert "delivery record failed" in out.get("error", "").lower()
+        # settled spend remains for reconciliation even though accounting row failed
+        assert store.spend_totals()["settled_usd"] == 0.33
+        assert "0.33" in out["error"] or "retained" in out["error"].lower() or "reconciliation" in out["error"].lower()
+    finally:
+        store.close()
+
+
+def test_explicit_stale_surfaces_queued_without_autorun(
+        tmp_path, monkeypatch, two_commit_repo):
+    """A newer head queued while an explicit review runs must not be
+    silently dropped nor auto-run with surprise spend. It is surfaced
+    for the operator / next automatic ingest."""
+    from tests.test_prod01_lifecycle import _env
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    repo = two_commit_repo
+    _env(monkeypatch, tmp_path, repo["repo"])
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        # Reviewed at base, then a newer head C is queued via automatic claim
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "baseline_head": repo["base_sha"],
+             "last_reviewed_head": repo["base_sha"],
+             "last_reviewed_base": repo["base_sha"]})
+        # Simulate automatic queuing of C while explicit for B runs
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "last_reviewed_head": repo["base_sha"],
+             "last_reviewed_base": repo["base_sha"],
+             "queued_base": repo["base_sha"],
+             "queued_head": "c" * 40})
+        # Explicit review for B goes stale (live is C)
+        calls = {"n": 0}
+        def _live(r, pr):
+            calls["n"] += 1
+            return repo["head_sha"] if calls["n"] == 1 else "c" * 40
+        monkeypatch.setattr(P, "get_live_head", _live)
+        monkeypatch.setattr(
+            P, "run_review_for_range",
+            lambda **kw: {"status": "complete", "mode": "t",
+                          "run_dir": "/tmp/rd", "terra_findings": 0,
+                          "added": 0, "cost_usd": 0.20,
+                          "cost_unknown": False})
+        args = cli_mod.build_parser().parse_args(
+            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
+             "--base", repo["base_sha"]])
+        out = cli_mod.cmd_events(args)
+        assert out["decision"] == "skipped:stale_superseded", out
+        # queued work is surfaced, not auto-consumed, not dropped
+        assert out.get("queued_remaining") == {"base": repo["base_sha"], "head": "c" * 40}
+        cp = store.checkpoint_get("o/r", 10)
+        assert cp["queued_head"] == "c" * 40
+        # no review row for the queued head was created (no surprise inference)
+        assert not any(r["head_sha"] == "c" * 40 for r in store.reviews_list())
+    finally:
+        store.close()
