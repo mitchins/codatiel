@@ -761,26 +761,33 @@ def test_same_range_generation_not_sealed(tmp_path):
         store.close()
 
 
-def test_explicit_atomic_seal_delivery_failure_is_failed(
-        tmp_path, monkeypatch, two_commit_repo):
-    """Delivery persistence failure after an atomic-seal race must
-    not be swallowed as success; settled spend stays in ledger."""
+def _explicit_base(tmp_path, monkeypatch, repo):
+    """Shared explicit-review boilerplate (deduplicated for Sonar)."""
     from tests.test_prod01_lifecycle import _env
-    from codatiel_i2 import cli as cli_mod
     from codatiel_i2 import event_pipeline as P
-    from codatiel_i2 import event_store as S2
-    repo = two_commit_repo
     _env(monkeypatch, tmp_path, repo["repo"])
     cfg = P.config_from_env()
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     store = S.Store(cfg.state_dir / "events.sqlite")
+    P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+    store.checkpoint_upsert(
+        {"repo": "o/r", "pr": 10, "status": "reviewed",
+         "baseline_head": repo["base_sha"],
+         "last_reviewed_head": repo["base_sha"],
+         "last_reviewed_base": repo["base_sha"]})
+    return cfg, store
+
+
+def test_explicit_atomic_seal_delivery_failure_is_failed(
+        tmp_path, monkeypatch, two_commit_repo):
+    """Delivery persistence failure after an atomic-seal race must
+    not be swallowed as success; settled spend stays in ledger."""
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    from codatiel_i2 import event_store as S2
+    repo = two_commit_repo
+    cfg, store = _explicit_base(tmp_path, monkeypatch, repo)
     try:
-        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
-        store.checkpoint_upsert(
-            {"repo": "o/r", "pr": 10, "status": "reviewed",
-             "baseline_head": repo["base_sha"],
-             "last_reviewed_head": repo["base_sha"],
-             "last_reviewed_base": repo["base_sha"]})
         monkeypatch.setattr(P, "get_live_head",
                             lambda r, pr: repo["head_sha"])
         monkeypatch.setattr(
@@ -822,22 +829,11 @@ def test_explicit_stale_surfaces_queued_without_autorun(
     """A newer head queued while an explicit review runs must not be
     silently dropped nor auto-run with surprise spend. It is surfaced
     for the operator / next automatic ingest."""
-    from tests.test_prod01_lifecycle import _env
     from codatiel_i2 import cli as cli_mod
     from codatiel_i2 import event_pipeline as P
     repo = two_commit_repo
-    _env(monkeypatch, tmp_path, repo["repo"])
-    cfg = P.config_from_env()
-    cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    store = S.Store(cfg.state_dir / "events.sqlite")
+    cfg, store = _explicit_base(tmp_path, monkeypatch, repo)
     try:
-        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
-        # Reviewed at base, then a newer head C is queued via automatic claim
-        store.checkpoint_upsert(
-            {"repo": "o/r", "pr": 10, "status": "reviewed",
-             "baseline_head": repo["base_sha"],
-             "last_reviewed_head": repo["base_sha"],
-             "last_reviewed_base": repo["base_sha"]})
         # Simulate automatic queuing of C while explicit for B runs
         store.checkpoint_upsert(
             {"repo": "o/r", "pr": 10, "status": "reviewed",
