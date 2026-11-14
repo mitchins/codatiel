@@ -243,13 +243,19 @@ def test_cli_review_local_end_to_end(repo: dict, tmp_path: Path):
 def test_cli_review_rejects_unknown_model(repo: dict, tmp_path: Path):
     from codatiel_i2.cli import build_parser, cmd_review
 
+    # "not-a-backend" is in no registry (BACKENDS today: luna,
+    # haiku, gemma, deepseek, glm, terra, sol), so this exercises the
+    # unsupported-model branch deterministically: no credentials, no
+    # network, no provider resolution involved either way.
     args = build_parser().parse_args([
         "review", "--repo-root", str(repo["root"]), "--base", repo["base"],
-        "--head", repo["head"], "--model", "sol",
+        "--head", repo["head"], "--model", "not-a-backend",
         "--runs-root", str(tmp_path / "runs"),
         "--work-root", str(tmp_path / "work")])
     payload = cmd_review(args)
     assert payload["status"] == "failed"
+    assert payload["stage"] == "model"
+    assert "unsupported model 'not-a-backend'" in payload["error"]
     assert "luna|haiku|gemma" in payload["error"]
 
 
