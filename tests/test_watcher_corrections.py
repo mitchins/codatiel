@@ -596,12 +596,8 @@ def test_automatic_superseded_uses_completion_day(
             live_calls["n"] += 1
             return B if live_calls["n"] == 1 else C
         monkeypatch.setattr(P, "get_live_head", _live_midflight)
-        monkeypatch.setattr(
-            P, "run_review_for_range",
-            lambda **kw: {"status": "complete", "mode": "t",
-                          "run_dir": "/tmp/rd", "terra_findings": 0,
-                          "added": 0, "cost_usd": 0.33,
-                          "cost_unknown": False})
+        monkeypatch.setattr(P, "run_review_for_range",
+                            lambda **kw: _fake_review(0.33))
         row = _ingest(cfg, store, pr_event("opened", 23, A, B), "e-sup")
         assert row["decision"] == "skipped:stale_superseded", row
         got14 = OP.spend_on_day(store, "2026-11-14")
@@ -625,12 +621,8 @@ def test_explicit_atomic_seal_refusal_records_spend(
     try:
         monkeypatch.setattr(P, "get_live_head",
                             lambda r, pr: repo["head_sha"])
-        monkeypatch.setattr(
-            P, "run_review_for_range",
-            lambda **kw: {"status": "complete", "mode": "t",
-                          "run_dir": "/tmp/rd", "terra_findings": 0,
-                          "added": 0, "cost_usd": 0.33,
-                          "cost_unknown": False})
+        monkeypatch.setattr(P, "run_review_for_range",
+                            lambda **kw: _fake_review(0.33))
         # Make the atomic seal fail: replace the generation after the
         # freshness recheck but before the UPDATE.
         orig_complete = S.Store.complete_review
@@ -685,11 +677,7 @@ def test_explicit_stale_ids_collision_safe(
                 return repo["head_sha"] if calls["n"] == 1 else "c" * 40
             monkeypatch.setattr(P, "get_live_head", _live)
             monkeypatch.setattr(P, "run_review_for_range",
-                                lambda **kw: {"status": "complete", "mode": "t",
-                                              "run_dir": "/tmp/rd",
-                                              "terra_findings": 0, "added": 0,
-                                              "cost_usd": 0.11,
-                                              "cost_unknown": False})
+                                lambda **kw: _fake_review(0.11))
             args = cli_mod.build_parser().parse_args(
                 ["events", "review", "--pr", "10", "--head", repo["head_sha"],
                  "--base", repo["base_sha"]])
@@ -763,6 +751,12 @@ def _explicit_base(tmp_path, monkeypatch, repo):
     return cfg, store
 
 
+def _fake_review(cost, unknown=False):
+    return {"status": "complete", "mode": "t", "run_dir": "/tmp/rd",
+            "terra_findings": 0, "added": 0, "cost_usd": cost,
+            "cost_unknown": unknown}
+
+
 def test_explicit_atomic_seal_delivery_failure_is_failed(
         tmp_path, monkeypatch, two_commit_repo):
     """Delivery persistence failure after an atomic-seal race must
@@ -775,12 +769,8 @@ def test_explicit_atomic_seal_delivery_failure_is_failed(
     try:
         monkeypatch.setattr(P, "get_live_head",
                             lambda r, pr: repo["head_sha"])
-        monkeypatch.setattr(
-            P, "run_review_for_range",
-            lambda **kw: {"status": "complete", "mode": "t",
-                          "run_dir": "/tmp/rd", "terra_findings": 0,
-                          "added": 0, "cost_usd": 0.33,
-                          "cost_unknown": False})
+        monkeypatch.setattr(P, "run_review_for_range",
+                            lambda **kw: _fake_review(0.33))
         orig_complete = S.Store.complete_review
         def _patched(self, *a, **kw):
             self.cx.execute(
@@ -832,12 +822,8 @@ def test_explicit_stale_surfaces_queued_without_autorun(
             calls["n"] += 1
             return repo["head_sha"] if calls["n"] == 1 else "c" * 40
         monkeypatch.setattr(P, "get_live_head", _live)
-        monkeypatch.setattr(
-            P, "run_review_for_range",
-            lambda **kw: {"status": "complete", "mode": "t",
-                          "run_dir": "/tmp/rd", "terra_findings": 0,
-                          "added": 0, "cost_usd": 0.20,
-                          "cost_unknown": False})
+        monkeypatch.setattr(P, "run_review_for_range",
+                            lambda **kw: _fake_review(0.20))
         args = cli_mod.build_parser().parse_args(
             ["events", "review", "--pr", "10", "--head", repo["head_sha"],
              "--base", repo["base_sha"]])
