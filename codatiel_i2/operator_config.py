@@ -81,6 +81,10 @@ KNOWN_KEYS = frozenset({
     "schema_version", "monthly_budget_usd", "daily_budget_usd",
     "per_pr_breaker_usd", "alert_thresholds", "repos",
     "pause_reviews", "pause_github_comments",
+    # Platform-01 migration: unified publication pause (email under the
+    # same dispatch gate as comments). New key; the legacy comment key
+    # keeps working via the settings import mapping.
+    "pause_publication",
     "email_enabled", "email_on_complete",
     "notify_to", "notify_sender", "model_profile",
     "openai_project_limit_usd", "openai_billing_url",
@@ -117,6 +121,9 @@ class OperatorSettings:
     repos: dict[str, bool] = field(default_factory=dict)
     pause_reviews: bool = False
     pause_github_comments: bool = True
+    # Platform-01 unified publication pause (email under the same gate
+    # as comments). None = fall back to pause_github_comments.
+    pause_publication: bool | None = None
     email_enabled: bool = True
     email_on_complete: bool = True
     notify_to: list[str] = field(default_factory=list)
@@ -139,6 +146,7 @@ class OperatorSettings:
             "repos": dict(self.repos),
             "pause_reviews": self.pause_reviews,
             "pause_github_comments": self.pause_github_comments,
+            "pause_publication": self.pause_publication,
             "email_enabled": self.email_enabled,
             "email_on_complete": self.email_on_complete,
             "notify_to": list(self.notify_to),
@@ -254,6 +262,11 @@ def validate_doc(doc: Any,
                 "email_enabled", "email_on_complete"):
         if key in doc and not isinstance(doc[key], bool):
             errors.append(f"{key} must be true/false, got {doc[key]!r}")
+    if ("pause_publication" in doc and doc["pause_publication"] is not None
+            and not isinstance(doc["pause_publication"], bool)):
+        errors.append("pause_publication must be true/false or unset "
+                      f"(inherit pause_github_comments), got "
+                      f"{doc['pause_publication']!r}")
     notify_to = doc.get("notify_to")
     if notify_to is not None:
         if not isinstance(notify_to, list) or not all(
@@ -309,6 +322,8 @@ def parse(doc: dict[str, Any]) -> OperatorSettings:
         repos=dict(doc.get("repos") or {}),
         pause_reviews=bool(doc.get("pause_reviews", False)),
         pause_github_comments=bool(doc.get("pause_github_comments", True)),
+        pause_publication=(None if doc.get("pause_publication") is None
+                           else bool(doc.get("pause_publication"))),
         email_enabled=bool(doc.get("email_enabled", True)),
         email_on_complete=bool(doc.get("email_on_complete", True)),
         notify_to=list(doc.get("notify_to") or []),
