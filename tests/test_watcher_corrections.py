@@ -1,0 +1,418 @@
+"""Production watcher corrections (v1 event pipeline/store/CLI).
+
+Deterministic, no inference, no network. Each test reproduces the
+reported defect against current behavior first.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+
+import pytest
+
+from codatiel_i2 import event_store as S
+from codatiel_i2 import operator_config as OP
+
+DAY = "2026-11-14"
+NOON = _dt.datetime(2026, 11, 14, 12, 0,
+                    tzinfo=_dt.timezone.utc).timestamp()
+
+
+def _store(tmp_path, name="e.sqlite"):
+    return S.Store(tmp_path / name)
+
+
+def _review(store, cost, n, unknown=False, ts=NOON):
+    return store.review_record(
+        repo="o/r", pr=10, kind="incremental", base_sha="b" * 40,
+        head_sha="h" * 40, diff_sha="d%d" % n, files=1,
+        pipeline="terra_luna_additive", status="complete",
+        terra_findings=0, luna_added=0, cost_usd=cost,
+        cost_unknown=unknown, run_dir=f"/r/{n}", now=ts)
+
+
+def test_spend_on_day_sums_actual_costs(tmp_path):
+    store = _store(tmp_path)
+    try:
+        _review(store, 0.10, 1)
+        _review(store, 0.90, 2)
+        got = OP.spend_on_day(store, DAY)
+        assert got["codatiel_ledger_usd"] == 1.0, got
+        assert got["reviews"] == 2
+    finally:
+        store.close()
+
+
+def test_spend_on_day_includes_superseded_once(tmp_path):
+    store = _store(tmp_path)
+    try:
+        _review(store, 0.40, 1)
+        store.delivery_record(
+            delivery_id="d-sup", event_type="pull_request",
+            action="synchronize", repo="o/r", pr=10,
+            head_sha="h" * 40, decision="skipped:stale_superseded",
+            reason="superseded mid-flight", cost_usd=0.25,
+            detail={}, now=NOON)
+        # A completed delivery's cost lives in reviews; it must not
+        # be added again from the deliveries side.
+        store.delivery_record(
+            delivery_id="d-done", event_type="pull_request",
+            action="synchronize", repo="o/r", pr=10,
+            head_sha="h" * 40, decision="completed",
+            reason="done", cost_usd=0.40, detail={}, now=NOON)
+        got = OP.spend_on_day(store, DAY)
+        assert got["codatiel_ledger_usd"] == 0.65, got
+        assert got["superseded_inference_usd"] == 0.25
+    finally:
+        store.close()
+
+
+def test_spend_on_day_unknown_holds_preserved(tmp_path):
+    store = _store(tmp_path)
+    try:
+        _review(store, None, 1, unknown=True)
+        _review(store, 0.20, 2)
+        store.delivery_record(
+            delivery_id="d-u", event_type="pull_request",
+            action="synchronize", repo="o/r", pr=10,
+            head_sha="h" * 40, decision="skipped:stale_superseded",
+            reason="unknown true cost", cost_usd=None,
+            detail={}, now=NOON)
+        got = OP.spend_on_day(store, DAY)
+        assert got["codatiel_ledger_usd"] == 0.20, got
+        assert got["unknown_cost_reviews"] == 2, got
+    finally:
+        store.close()
+
+
+# -- B: release_claim ownership -------------------------------------------
+
+def test_release_claim_exact_owner_only(tmp_path):
+    from codatiel_i2 import event_store as S2
+    st = S2.Store(tmp_path / "e.sqlite")
+    try:
+        st.checkpoint_upsert({"repo": "o/r", "pr": 23, "status": "draft",
+                              "baseline_head": "b" * 40})
+        assert st.claim_for_review("o/r", 23, base="b" * 40,
+                                   head="c" * 40) == "claimed"
+        # A stranger with the wrong base cannot release.
+        assert st.release_claim("o/r", 23, "stranger",
+                                base="x" * 40, head="c" * 40) is False
+        # A newer claim for the SAME head (rebased base) cannot be
+        # released by the expired worker holding the older base.
+        st.checkpoint_upsert({
+            "repo": "o/r", "pr": 23, "status": "in_progress",
+            "in_progress_base": "b2" * 20, "in_progress_head": "c" * 40})
+        assert st.release_claim("o/r", 23, "expired worker",
+                                base="b" * 40, head="c" * 40) is False
+        cp = st.checkpoint_get("o/r", 23)
+        assert (cp["status"], cp["in_progress_head"]) == (
+            "in_progress", "c" * 40)
+        # The exact owner releases.
+        assert st.release_claim("o/r", 23, "owner",
+                                base="b2" * 20, head="c" * 40,
+                                prior_status="draft") is True
+        assert st.checkpoint_get("o/r", 23)["status"] == "draft"
+        # Nothing held: False, never an error.
+        assert st.release_claim("o/r", 23, "nobody",
+                                base="b" * 40, head="c" * 40) is False
+    finally:
+        st.close()
+
+
+# -- C: clear_queued identity ----------------------------------------------
+
+def test_clear_queued_keeps_newer_arrival(tmp_path):
+    from codatiel_i2 import event_store as S2
+    st = S2.Store(tmp_path / "e.sqlite")
+    try:
+        st.checkpoint_upsert({"repo": "o/r", "pr": 23, "status": "reviewed",
+                              "last_reviewed_head": "a" * 40,
+                              "queued_base": "a" * 40,
+                              "queued_head": "b" * 40})
+        assert st.clear_queued("o/r", 23, base="a" * 40,
+                               head="b" * 40) is True
+        assert st.checkpoint_get("o/r", 23)["queued_head"] == ""
+        st.checkpoint_upsert({"repo": "o/r", "pr": 23, "status": "reviewed",
+                              "last_reviewed_head": "a" * 40,
+                              "queued_base": "b" * 40,
+                              "queued_head": "c" * 40})
+        # A stale verification for the older capture must not clear
+        # the newer arrival.
+        assert st.clear_queued("o/r", 23, base="a" * 40,
+                               head="b" * 40) is False
+        cp = st.checkpoint_get("o/r", 23)
+        assert (cp["queued_base"], cp["queued_head"]) == ("b" * 40,
+                                                          "c" * 40)
+    finally:
+        st.close()
+
+
+def test_drain_stale_keeps_newer_queue(tmp_path, monkeypatch):
+    """A newer queued head arriving between the stale check and the
+    clear survives: _drain_queued clears only its captured identity."""
+    from codatiel_i2 import event_pipeline as P
+    store = S.Store(tmp_path / "e.sqlite")
+    A, B, C = "a" * 40, "b" * 40, "c" * 40
+    store.checkpoint_upsert({"repo": "o/r", "pr": 23, "status": "reviewed",
+                             "last_reviewed_head": B,
+                             "queued_base": B, "queued_head": C})
+    monkeypatch.setattr(P, "get_live_head", lambda repo, pr: "z" * 40)
+    ev = {"delivery_id": "e1", "event": "pull_request", "action": "",
+          "repo": "o/r", "pr_number": 23, "head_sha": B}
+    try:
+        P._drain_queued(cfg=None, store=store, ev=ev, pr=23,
+                        to_sha=B, queued=(A, B), final={},
+                        access=None, now=1000.0)
+        drain = store.delivery_get("e1:drain")
+        assert drain is not None and drain["decision"] \
+            == "skipped:stale_head", drain
+        cp = store.checkpoint_get("o/r", 23)
+        assert (cp["queued_base"], cp["queued_head"]) == (B, C)
+    finally:
+        store.close()
+
+
+# -- D: explicit review freshness ------------------------------------------
+
+def _events_env(monkeypatch, tmp_path, root, cap="20"):
+    from tests.test_prod01_lifecycle import _env
+    _env(monkeypatch, tmp_path, root, cap=cap)
+
+
+def test_explicit_review_refuses_stale_seal(tmp_path, monkeypatch,
+                                            two_commit_repo):
+    from tests.test_prod01_lifecycle import _env
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    repo = two_commit_repo
+    _env(monkeypatch, tmp_path, repo["repo"])
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "baseline_head": repo["base_sha"],
+             "last_reviewed_head": repo["base_sha"],
+             "last_reviewed_base": repo["base_sha"]})
+        heads = [repo["head_sha"], "c" * 40]
+        calls = {"n": 0}
+
+        def _live(r, pr):
+            idx = min(calls["n"], len(heads) - 1)
+            calls["n"] += 1
+            return heads[idx]
+
+        monkeypatch.setattr(P, "get_live_head", _live)
+        monkeypatch.setattr(
+            P, "run_review_for_range",
+            lambda **kw: {"status": "complete", "mode": "t",
+                          "run_dir": "/tmp/rd", "terra_findings": 0,
+                          "added": 0, "cost_usd": 0.30,
+                          "cost_unknown": False})
+        args = cli_mod.build_parser().parse_args(
+            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
+             "--base", repo["base_sha"]])
+        out = cli_mod.cmd_events(args)
+        assert out["decision"] == "skipped:stale_superseded", out
+        assert out["cost_usd"] == 0.30  # real spend kept
+        cp = store.checkpoint_get("o/r", 10)
+        assert cp["last_reviewed_head"] == repo["base_sha"]
+        assert cp["status"] == "reviewed"
+        assert [r for r in store.reviews_list()
+                if r["head_sha"] == repo["head_sha"]] == []
+        totals = store.spend_totals()
+        assert totals["settled_usd"] == 0.30  # settled, not lost
+    finally:
+        store.close()
+
+
+def test_explicit_review_seals_when_fresh(tmp_path, monkeypatch,
+                                          two_commit_repo):
+    from tests.test_prod01_lifecycle import _env
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    repo = two_commit_repo
+    _env(monkeypatch, tmp_path, repo["repo"])
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "baseline_head": repo["base_sha"],
+             "last_reviewed_head": repo["base_sha"],
+             "last_reviewed_base": repo["base_sha"]})
+        monkeypatch.setattr(P, "get_live_head",
+                            lambda r, pr: repo["head_sha"])
+        monkeypatch.setattr(
+            P, "run_review_for_range",
+            lambda **kw: {"status": "complete", "mode": "t",
+                          "run_dir": "/tmp/rd", "terra_findings": 1,
+                          "added": 0, "cost_usd": 0.30,
+                          "cost_unknown": False})
+        args = cli_mod.build_parser().parse_args(
+            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
+             "--base", repo["base_sha"]])
+        out = cli_mod.cmd_events(args)
+        assert out["decision"] == "completed", out
+        assert store.checkpoint_get("o/r", 10)[
+            "last_reviewed_head"] == repo["head_sha"]
+    finally:
+        store.close()
+
+
+# -- E1: unsealed first review drains from the queued base ---------------
+
+def test_unsealed_first_review_drains_from_queued_base(tmp_path,
+                                                       monkeypatch):
+    """First review superseded before sealing, with a queued newer
+    head: the follow-up must span queued_base..queued_head — never
+    skip the unsealed segment by re-rooting at the dead head."""
+    from tests.test_prod01_lifecycle import (_env, _git, _ingest,
+                                             _terra_factory, pr_event)
+    from codatiel_i2 import event_pipeline as P
+    from pathlib import Path as _P
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.email", "evt@t")
+    _git(root, "config", "user.name", "evt")
+    (root / "app.py").write_text("LIMIT = 100\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "A")
+    A = _git(root, "rev-parse", "HEAD")
+    (root / "app.py").write_text("LIMIT = 10\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "B")
+    B = _git(root, "rev-parse", "HEAD")
+    (root / "app.py").write_text("LIMIT = 1\n")
+    _git(root, "commit", "-qam", "D")
+    D = _git(root, "rev-parse", "HEAD")
+    _env(monkeypatch, tmp_path, root)
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        # A newer head queued for the first (unsealed) run.
+        store.checkpoint_upsert({"repo": "o/r", "pr": 23,
+                                 "status": "deferred",
+                                 "baseline_head": A,
+                                 "queued_base": A, "queued_head": D})
+        live = [B, D, D]
+
+        def _live(repo, pr):
+            return live.pop(0) if live else D
+
+        monkeypatch.setattr(P, "get_live_head", _live)
+        from tests.test_prod02_stale_head import _NotifySpy
+        spy = _NotifySpy()
+        monkeypatch.setattr(P, "_notify", spy)
+        kw = {"model_factory": _terra_factory()}
+        row = _ingest(cfg, store, pr_event("opened", 23, A, B), "e1",
+                       **kw)
+        assert row["decision"] == "skipped:stale_superseded", row
+        assert row.get("drained") == "completed", row
+        follow = store.delivery_get("e1:drain")
+        assert follow is not None and follow["decision"] == "completed"
+        # The follow-up spans the QUEUED base, not the dead head B.
+        assert follow["head_sha"] == D
+        cp = store.checkpoint_get("o/r", 23)
+        assert cp["last_reviewed_head"] == D
+    finally:
+        store.close()
+
+
+# -- E2: uppercase SHAs normalize to lowercase -----------------------------
+
+def test_uppercase_sha_normalizes(tmp_path):
+    from codatiel_i2 import event_pipeline as P
+    ev, err = P.normalize_event(
+        {"action": "opened",
+         "repository": {"full_name": "o/r"},
+         "pull_request": {
+             "number": 10, "state": "open", "draft": False,
+             "merged": False, "created_at": "9999-01-01T00:00:00Z",
+             "base": {"sha": "AA" * 20}, "head": {"sha": "BB" * 20,
+                                                  "ref": "f"}}},
+        "d-upper")
+    assert err == "", err
+    assert ev["head_sha"] == "bb" * 20, ev
+    assert ev["base_sha"] == "aa" * 20, ev
+
+
+def test_explicit_review_uppercase_head_matches_live(
+        tmp_path, monkeypatch, two_commit_repo):
+    from tests.test_prod01_lifecycle import _env
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    repo = two_commit_repo
+    _env(monkeypatch, tmp_path, repo["repo"])
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "baseline_head": repo["base_sha"],
+             "last_reviewed_head": repo["base_sha"],
+             "last_reviewed_base": repo["base_sha"]})
+        monkeypatch.setattr(P, "get_live_head",
+                            lambda r, pr: repo["head_sha"])
+        monkeypatch.setattr(
+            P, "run_review_for_range",
+            lambda **kw: {"status": "complete", "mode": "t",
+                          "run_dir": "/tmp/rd", "terra_findings": 0,
+                          "added": 0, "cost_usd": 0.10,
+                          "cost_unknown": False})
+        args = cli_mod.build_parser().parse_args(
+            ["events", "review", "--pr", "10", "--head",
+             repo["head_sha"].upper(), "--base", repo["base_sha"]])
+        out = cli_mod.cmd_events(args)
+        assert out["decision"] == "completed", out
+        assert store.checkpoint_get("o/r", 10)[
+            "last_reviewed_head"] == repo["head_sha"]
+    finally:
+        store.close()
+
+
+# -- E3: genuine backwards reset via explicit re-drive (gh down) ---------
+
+def test_explicit_redrive_backwards_reset_offline(
+        tmp_path, monkeypatch, two_commit_repo):
+    """GitHub unreachable + head older than reviewed: the automatic
+    path drops it (documented fail-safe), but an explicit operator
+    re-drive with that exact head proceeds."""
+    from tests.test_prod01_lifecycle import _env
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    repo = two_commit_repo
+    _env(monkeypatch, tmp_path, repo["repo"])
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "baseline_head": repo["base_sha"],
+             "last_reviewed_head": repo["head_sha"],
+             "last_reviewed_base": repo["base_sha"]})
+        monkeypatch.setattr(P, "get_live_head", lambda r, pr: None)
+        monkeypatch.setattr(
+            P, "run_review_for_range",
+            lambda **kw: {"status": "complete", "mode": "t",
+                          "run_dir": "/tmp/rd", "terra_findings": 0,
+                          "added": 0, "cost_usd": 0.10,
+                          "cost_unknown": False})
+        args = cli_mod.build_parser().parse_args(
+            ["events", "review", "--pr", "10", "--head", repo["base_sha"]])
+        out = cli_mod.cmd_events(args)
+        assert out["decision"] == "completed", out
+    finally:
+        store.close()

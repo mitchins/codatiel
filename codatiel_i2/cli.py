@@ -1179,8 +1179,11 @@ def cmd_events(args) -> dict:
                         "error": f"PR status {cp.get('status')!r} is not "
                                  "explicitly re-drivable"}
             try:
-                head = args.head.strip()
-                base = (args.base or "").strip() or None
+                # Canonical lowercase: an uppercase --head/--base must
+                # match, seal, and checkpoint identically (see
+                # normalize_event for the webhook path).
+                head = args.head.strip().lower()
+                base = (args.base or "").strip().lower() or None
                 from codatiel_i2 import event_pipeline as _pm
                 live_head = _pm.get_live_head(repo, number)
                 head_norm = head.strip()
@@ -1268,6 +1271,46 @@ def cmd_events(args) -> dict:
                 unknown = bool(result.get("cost_unknown")) or cost is None
                 store.settle(cfg.reserve_usd,
                              None if unknown else float(cost or 0.0))
+                # Freshness recheck before sealing: the head may have
+                # moved (or another run taken the pin) during
+                # inference. Spend is real and stays settled; a stale
+                # run records evidence but never seals, publishes, or
+                # overwrites the checkpoint.
+                _live_after = (_pm.get_live_head(repo, number) or "").strip()
+                _head_norm = (head or "").strip()
+                _live_ok = (not _live_after
+                            or _live_after.lower() == _head_norm.lower()
+                            or _live_after.lower().startswith(
+                                _head_norm.lower())
+                            or _head_norm.lower().startswith(
+                                _live_after.lower()))
+                _cp_now = store.checkpoint_get(repo, number)
+                _owned_now = bool(
+                    _cp_now and _cp_now.get("status") == "in_progress"
+                    and (_cp_now.get("in_progress_head") or "") == head)
+                if not _owned_now or not _live_ok:
+                    try:
+                        if _owned_now:
+                            _prior = (cp.get("status")
+                                      if isinstance(cp, dict) else None)
+                            store.release_claim(
+                                repo, number,
+                                "explicit review superseded before seal; "
+                                "spend kept, checkpoint left",
+                                base=use_base, head=head,
+                                prior_status=(_prior if isinstance(
+                                    _prior, str) else None))
+                    except store_mod.StoreError as exc:
+                        return {"status": "failed", "stage": "review",
+                                "error": str(exc)}
+                    return {"status": "skipped",
+                            "decision": "skipped:stale_superseded",
+                            "reason": f"head {head[:12]} went stale during "
+                                      f"explicit review (live "
+                                      f"{(_live_after or '?')[:12]}, "
+                                      f"{'claim lost' if not _owned_now else 'released'}); "
+                                      f"spend kept, checkpoint unchanged",
+                            "cost_usd": cost}
                 store.complete_review(
                     repo, number, base=use_base, head=head,
                     diff_sha=info["diff_sha"], files=info["files"],

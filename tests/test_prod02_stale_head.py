@@ -260,15 +260,17 @@ def test_release_claim_restores_prior_status(tmp_path):
         cp = st.checkpoint_get(REPO, 23)
         assert cp["status"] == "in_progress"
         prior = st.release_claim(REPO, 23, "superseded in test",
+                                 base="b" * 40, head="c" * 40,
                                  prior_status="draft")
-        assert prior == "in_progress"
+        assert prior is True
         cp = st.checkpoint_get(REPO, 23)
         assert cp["status"] == "draft"
         assert cp["in_progress_head"] == ""
         # Unknown prior falls back without pinning.
         assert st.claim_for_review(REPO, 23, base="b" * 40,
                                    head="c" * 40) == "claimed"
-        st.release_claim(REPO, 23, "superseded in test")
+        st.release_claim(REPO, 23, "superseded in test",
+                         base="b" * 40, head="c" * 40)
         cp = st.checkpoint_get(REPO, 23)
         assert cp["status"] in ("reviewed", "deferred")
         assert cp["in_progress_head"] == ""

@@ -512,38 +512,46 @@ class Store:
                 pass
             raise StoreError(f"interrupt mark failed: {exc}")
 
-    def release_claim(self, repo: str, pr: int, note: str,
-                      prior_status: str | None = None) -> str:
-        """Release a held in_progress claim without sealing a review.
+    def release_claim(self, repo: str, pr: int, note: str, *,
+                      base: str, head: str,
+                      prior_status: str | None = None) -> bool:
+        """Release exactly the held claim matching (base, head).
 
-        PROD-02: a run superseded mid-flight (live head moved on) must
-        not seal, must not email, and must not leave the checkpoint
-        pinned. Restores the pre-claim status when the caller supplies
-        it (never guesses reviewed-vs-draft); falls back to
-        reviewed/deferred only when unknown. Returns the prior status
-        ("" when nothing was held).
+        Atomic ownership check: the UPDATE only clears a checkpoint
+        whose pinned in_progress range is exactly the caller's. An
+        expired or replaced worker — including one holding the same
+        head from an older base — cannot release a newer claim.
+        Returns True when this caller's claim was released, False when
+        nothing was held or the pinned claim belongs to someone else.
         """
         try:
             self.cx.execute(_BEGIN)
             row = self.cx.execute(
-                "SELECT status, last_reviewed_head FROM checkpoints"
+                "SELECT status, last_reviewed_head, in_progress_base,"
+                " in_progress_head FROM checkpoints"
                 " WHERE repo=? AND pr=?", (repo, pr)).fetchone()
             if row is None or row[0] != "in_progress":
                 self.cx.execute(_COMMIT)
-                return (row[0] if row else "")
+                return False
+            if row[2] != base or row[3] != head:
+                # A different (newer or older) run owns the pin.
+                self.cx.execute(_COMMIT)
+                return False
             if prior_status in ("reviewed", "draft", "deferred",
                                 "grandfathered", "failed", "interrupted"):
                 status = prior_status
             else:
                 status = ("reviewed" if row[1] else "deferred")
-            self.cx.execute(
+            changed = self.cx.execute(
                 "UPDATE checkpoints SET status=?, note=?,"
                 " in_progress_base='', in_progress_head='',"
                 " in_progress_run='', updated_ts=? "
-                "WHERE repo=? AND pr=?",
-                (status, note, time.time(), repo, pr))
+                "WHERE repo=? AND pr=? AND status='in_progress' "
+                "AND in_progress_base=? AND in_progress_head=?",
+                (status, note, time.time(), repo, pr, base,
+                 head)).rowcount
             self.cx.execute(_COMMIT)
-            return "in_progress"
+            return bool(changed)
         except Exception as exc:
             try:
                 self.cx.execute(_ROLLBACK)
@@ -551,16 +559,25 @@ class Store:
                 pass
             raise StoreError(f"claim release failed: {exc}")
 
-    def clear_queued(self, repo: str, pr: int) -> None:
+    def clear_queued(self, repo: str, pr: int, *,
+                     base: str, head: str) -> bool:
         """Drop a queued delta without reviewing it (PROD-02: the queued
-        head proved stale against the live GitHub head)."""
+        head proved stale against the live GitHub head).
+
+        Atomic identity compare: only the exact captured (base, head)
+        is cleared. A newer queued head arriving during stale-head
+        verification survives. Returns True when the captured entry
+        was cleared.
+        """
         try:
             self.cx.execute(_BEGIN)
-            self.cx.execute(
+            changed = self.cx.execute(
                 "UPDATE checkpoints SET queued_base='', queued_head='',"
-                " updated_ts=? WHERE repo=? AND pr=?",
-                (time.time(), repo, pr))
+                " updated_ts=? WHERE repo=? AND pr=?"
+                " AND queued_base=? AND queued_head=?",
+                (time.time(), repo, pr, base, head)).rowcount
             self.cx.execute(_COMMIT)
+            return bool(changed)
         except Exception as exc:
             try:
                 self.cx.execute(_ROLLBACK)

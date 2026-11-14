@@ -233,8 +233,17 @@ def normalize_event(raw: dict, delivery_id: str,
         except (TypeError, ValueError):
             return None, "pull_request number invalid"
         ev["branch"] = str((pr.get("head") or {}).get("ref") or "") or None
-        ev["base_sha"] = str((pr.get("base") or {}).get("sha") or "") or None
-        ev["head_sha"] = str((pr.get("head") or {}).get("sha") or "") or None
+        # Git SHAs are case-insensitive; canonicalize to lowercase so
+        # an uppercase sender never forks identity (re-review loops,
+        # missed replay detection, checkpoint mismatch).
+        ev["base_sha"] = (str((pr.get("base") or {}).get("sha") or "")
+                          or None)
+        if ev["base_sha"] is not None:
+            ev["base_sha"] = ev["base_sha"].lower()
+        ev["head_sha"] = (str((pr.get("head") or {}).get("sha") or "")
+                          or None)
+        if ev["head_sha"] is not None:
+            ev["head_sha"] = ev["head_sha"].lower()
         ev["draft"] = pr.get("draft")
         ev["merged"] = bool(pr.get("merged"))
         ev["closed"] = bool(ev["action"] == "closed" or pr.get("state")
@@ -244,10 +253,14 @@ def normalize_event(raw: dict, delivery_id: str,
         ev["event"] = "push"
         ref = str(raw.get("ref") or "")
         ev["branch"] = ref.split("refs/heads/", 1)[1] if "refs/heads/" in ref else None
-        ev["before_sha"] = str(raw.get("before") or "") or None
+        ev["before_sha"] = (str(raw.get("before") or "") or None)
+        if ev["before_sha"] is not None:
+            ev["before_sha"] = ev["before_sha"].lower()
         after = str(raw.get("after") or "") or None
         head_commit = raw.get("head_commit") or {}
         ev["head_sha"] = after or (str(head_commit.get("id") or "") or None)
+        if ev["head_sha"] is not None:
+            ev["head_sha"] = ev["head_sha"].lower()
         ev["forced"] = bool(raw.get("forced"))
         if isinstance(raw.get("pr_number"), int):
             ev["pr_number"] = raw["pr_number"]
@@ -953,6 +966,7 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                 ev["repo"], pr,
                 "run superseded mid-flight; claim released, checkpoint "
                 "left to the newer review",
+                base=from_sha, head=to_sha,
                 prior_status=(prior if isinstance(prior, str)
                               else None))
         final = _finalize_delivery(
@@ -1064,8 +1078,9 @@ def _drain_queued(*, cfg, store, ev, pr, to_sha, queued, final,
         # (older event, or a residue that never matched a push).
         # Drop it with $0: no inference, no email, no comment.
         # The stale queue entry is cleared so it can never drain
-        # backwards later.
-        store.clear_queued(ev["repo"], pr)
+        # backwards later. Identity-compared: a newer queued head
+        # arriving during verification survives.
+        store.clear_queued(ev["repo"], pr, base=qb, head=qh)
         follow = dict(ev, delivery_id=ev["delivery_id"] + ":drain",
                       base_sha=to_sha, head_sha=qh, before_sha=to_sha,
                       action="synchronize")
