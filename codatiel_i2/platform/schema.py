@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS pl_pr_targets(
   recon_owner TEXT NOT NULL DEFAULT '',
   recon_fence INTEGER NOT NULL DEFAULT 0,
   recon_expires REAL NOT NULL DEFAULT 0,
+  quarantined INTEGER NOT NULL DEFAULT 0,
+  quarantine_note TEXT NOT NULL DEFAULT '',
   updated_ts REAL NOT NULL DEFAULT 0,
   PRIMARY KEY(repo,pr));
 CREATE TABLE IF NOT EXISTS pl_jobs(
@@ -151,8 +153,80 @@ def ensure(db: sqlite3.Connection) -> str:
     The version insert tolerates a lost first-start race: two
     concurrent fresh starts both create tables (IF NOT EXISTS), then
     exactly one wins the version row and the loser re-reads it.
+
+    Additive columns land via tolerant ALTERs so a database created
+    by an earlier Slice-1 revision upgrades in place; failures other
+    than duplicate-column are fatal.
+
+    Incompatible schemas fail closed BEFORE any write where that is
+    promised, with a non-destructive diagnostic: the operator
+    preserves the original file, backs it up, and — only then —
+    initializes a fresh database at a separate path. Nothing here
+    deletes, overwrites, or auto-migrates historical records. The
+    four-column uniqueness and the schema-version are preflighted
+    read-only before any DDL so an incompatible file is refused with
+    zero writes and all legacy rows intact.
     """
+    # Preflight read-only checks before any DDL, satisfying the
+    # "fail closed BEFORE any write" promise for the two
+    # incompatible-schema paths. No DDL has run yet.
+    try:
+        exists = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='pl_jobs'").fetchone()
+        if exists is not None and not _has_four_column_unique(db):
+            raise RuntimeError(_incompatible_diagnostic(
+                db, "pl_jobs lacks the "
+                "(repo,pr,target_generation,rerun_generation) uniqueness "
+                "constraint, which SQLite cannot add after table creation"))
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+    try:
+        row0 = db.execute(
+            "SELECT value FROM meta WHERE key='platform_schema_version'"
+            ).fetchone()
+        if row0 is not None and row0[0] != SCHEMA_VERSION:
+            raise RuntimeError(_incompatible_diagnostic(
+                db, f"schema version is {row0[0]!r}, need "
+                f"{SCHEMA_VERSION!r}"))
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
     db.executescript(SCHEMA_SQL)
+    _require_unique_constraint(db)
+    for table, column, ddl in (
+            ("pl_pr_targets", "live_base",
+             "ALTER TABLE pl_pr_targets ADD COLUMN live_base TEXT "
+             "NOT NULL DEFAULT ''"),
+            ("pl_pr_targets", "last_signal_head",
+             "ALTER TABLE pl_pr_targets ADD COLUMN last_signal_head TEXT "
+             "NOT NULL DEFAULT ''"),
+            ("pl_pr_targets", "last_signal_base",
+             "ALTER TABLE pl_pr_targets ADD COLUMN last_signal_base TEXT "
+             "NOT NULL DEFAULT ''"),
+            ("pl_pr_targets", "quarantined",
+             "ALTER TABLE pl_pr_targets ADD COLUMN quarantined INTEGER "
+             "NOT NULL DEFAULT 0"),
+            ("pl_pr_targets", "quarantine_note",
+             "ALTER TABLE pl_pr_targets ADD COLUMN quarantine_note TEXT "
+             "NOT NULL DEFAULT ''"),
+            ("pl_jobs", "comparison_base",
+             "ALTER TABLE pl_jobs ADD COLUMN comparison_base TEXT "
+             "NOT NULL DEFAULT ''"),
+            ("pl_jobs", "dirty_seen",
+             "ALTER TABLE pl_jobs ADD COLUMN dirty_seen INTEGER "
+             "NOT NULL DEFAULT 0"),
+            ("pl_jobs", "rerun_generation",
+             "ALTER TABLE pl_jobs ADD COLUMN rerun_generation INTEGER "
+             "NOT NULL DEFAULT 0")):
+        try:
+            db.execute(ddl)
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
     row = db.execute("SELECT value FROM meta WHERE key=?",
                      ("platform_schema_version",)).fetchone()
     if row is None:
@@ -166,8 +240,99 @@ def ensure(db: sqlite3.Connection) -> str:
         row = db.execute("SELECT value FROM meta WHERE key=?",
                          ("platform_schema_version",)).fetchone()
     if row is None or row[0] != SCHEMA_VERSION:
-        raise RuntimeError(
-            f"platform schema mismatch: have "
-            f"{(row[0] if row else None)!r}, need {SCHEMA_VERSION!r}; "
-            f"refusing to run")
+        raise RuntimeError(_incompatible_diagnostic(
+            db, f"schema version is {(row[0] if row else None)!r}, "
+            f"need {SCHEMA_VERSION!r}"))
+    _require_capabilities(db)
     return SCHEMA_VERSION
+
+
+def _db_path(db: sqlite3.Connection) -> str:
+    try:
+        rows = db.execute("PRAGMA database_list").fetchall()
+    except Exception:
+        return "<unknown>"
+    for row in rows:
+        if row[1] == "main":
+            return row[2] or "<memory>"
+    return "<unknown>"
+
+
+def _incompatible_diagnostic(db: sqlite3.Connection, reason: str) -> str:
+    """Non-destructive fail-closed diagnostic for unusable databases.
+
+    Historical review outputs, findings, checkpoints, costs and
+    publication records are valuable operational evidence and are
+    preserved by default — re-fetching GitHub PRs is not an adequate
+    replacement. Never delete or overwrite the original file.
+    """
+    return (
+        f"platform database at {_db_path(db)} cannot be interpreted "
+        f"safely ({reason}); refusing to run. "
+        f"Operator action, in order, none destructive: "
+        f"(1) preserve the original database file exactly as it is — "
+        f"it still holds all historical reviews, checkpoints, spend "
+        f"and publication records; "
+        f"(2) take a SQLite-consistent backup BEFORE anything else "
+        f"(e.g. sqlite3 original.db \".backup main 'backup.db'\" "
+        f"with the database quiesced, keeping any -wal/-shm files "
+        f"with it); "
+        f"(3) initialize any fresh platform database at a SEPARATE "
+        f"destination and import preserved history only through the "
+        f"explicit, operator-run cutover import — never by replacing "
+        f"this file. No automatic migration, backup management, or "
+        f"version upgrade is performed by this release."
+    )
+
+
+def _columns(db: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in
+            db.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _has_four_column_unique(db: sqlite3.Connection) -> bool:
+    sql = (db.execute("SELECT sql FROM sqlite_master WHERE type='table' "
+                      "AND name='pl_jobs'").fetchone() or ("",))[0] or ""
+    need = {"repo", "pr", "target_generation", "rerun_generation"}
+    uniques = [part for part in sql.replace("\n", " ").split("UNIQUE(")
+               if ")" in part]
+    return any(need == {c.strip().strip('"').strip("'").strip("[]").lower()
+                        for c in part.split(")", 1)[0].split(",")}
+               for part in uniques)
+
+
+def _require_unique_constraint(db: sqlite3.Connection) -> None:
+    """Pre-write gate: the four-column job uniqueness cannot be added
+    after the fact, and without it routing's ON CONFLICT target is
+    invalid and reruns cannot be distinguished. Checked before any
+    ALTER so an incompatible database is refused with zero writes.
+    """
+    if not _has_four_column_unique(db):
+        raise RuntimeError(_incompatible_diagnostic(
+            db, "pl_jobs lacks the "
+            "(repo,pr,target_generation,rerun_generation) uniqueness "
+            "constraint, which SQLite cannot add after table creation"))
+
+
+def _require_capabilities(db: sqlite3.Connection) -> None:
+    """Fail closed on platform databases that cannot safely be used.
+
+    Additive columns upgrade in place (tolerant ALTERs above). The
+    uniqueness gate already ran pre-write; this final check confirms
+    the columns landed and the constraint is present. Anything missing
+    refuses with the non-destructive operator diagnostic — never with
+    an instruction to delete history.
+    """
+    missing = {"quarantined", "quarantine_note", "live_base",
+               "last_signal_head", "last_signal_base"} - _columns(
+                   db, "pl_pr_targets")
+    missing |= {"rerun_generation", "dirty_seen",
+                "comparison_base"} - _columns(db, "pl_jobs")
+    if missing:
+        raise RuntimeError(_incompatible_diagnostic(
+            db, f"pl_* tables lack columns {sorted(missing)}"))
+    if not _has_four_column_unique(db):
+        raise RuntimeError(_incompatible_diagnostic(
+            db, "pl_jobs lacks the "
+            "(repo,pr,target_generation,rerun_generation) uniqueness "
+            "constraint, which SQLite cannot add after table creation"))

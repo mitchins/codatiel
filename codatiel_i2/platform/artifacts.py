@@ -96,14 +96,23 @@ def commit(staging: Path, runs_root: Path) -> Path:
 
 
 def validate(run_dir: Path) -> bool:
-    """True when every manifest entry exists with the recorded hash."""
+    """True when every manifest entry exists with the recorded hash.
+
+    A pure predicate: never raises. Malformed manifests (not JSON, not
+    an object, files not a string->string map) are invalid, never
+    trusted — and never abort validation of other directories.
+    """
     try:
         manifest = json.loads((Path(run_dir) / MANIFEST_NAME).read_text(
             encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            return False
         files = manifest.get("files")
         if not isinstance(files, dict) or not files:
             return False
         for name, want in files.items():
+            if not isinstance(name, str) or not isinstance(want, str):
+                return False
             _safe_name(name, "manifest entry")
             if name == MANIFEST_NAME:
                 return False
@@ -111,16 +120,24 @@ def validate(run_dir: Path) -> bool:
             if hashlib.sha256(data).hexdigest() != want:
                 return False
         return True
-    except (OSError, ValueError):
+    except (OSError, ValueError, AttributeError, TypeError,
+            RecursionError):
         return False
 
 
 def manifest_sha(run_dir: Path) -> str:
-    """Content hash binding a run directory to its database reference."""
+    """Content hash binding a run directory to its database reference.
+
+    Refuses anything validate() rejects: a hash over an unvalidatable
+    bundle would bind the ledger to evidence that can never seal.
+    """
+    if not validate(run_dir):
+        raise RuntimeError(f"run directory invalid: {run_dir}")
     try:
         blob = (Path(run_dir) / MANIFEST_NAME).read_bytes()
-    except OSError as exc:
-        raise RuntimeError(f"run has no manifest: {run_dir}: {exc}")
+    except (OSError, ValueError, RecursionError) as exc:
+        raise RuntimeError(f"run has no readable manifest: {run_dir}: "
+                           f"{exc}")
     return hashlib.sha256(blob).hexdigest()
 
 

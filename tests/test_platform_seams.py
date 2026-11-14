@@ -638,3 +638,341 @@ def test_accept_synthetic_is_idempotent(tmp_path):
                               now=1001.0) == "duplicate"
     assert len(q.pending_receipts(conn, REPO, 1)) == 1
     conn.close()
+
+
+def test_complete_expired_lease_mutates_nothing(tmp_path):
+    conn = _open(tmp_path)
+    _budgets(conn, cycle=10.0)
+    _verify(conn, 1, "a" * 40)
+    q.accept(conn, app="gh", guid="g1", body=b"1", repo=REPO,
+             repo_id=1, pr=1, head="a" * 40, now=1000.0)
+    assert q.route(conn, app="gh", guid="g1", now=1000.0) == "routed"
+    claim = q.claim(conn, owner="w", reserve_usd=1.0, now=1000.0)
+    assert q.dispatch_intent(conn, claim, stage="t", call_id="c1",
+                             now=1000.0)
+    before = q.exposure(conn, "cycle")
+    assert before == 1_000_000
+    # The lease lapses with no recover running: the stale claim seals
+    # nothing — no result, no checkpoint, no effects, no settlement.
+    with pytest.raises(q.LeaseLost):
+        q.complete(conn, claim, actual_usd=0.2, run_path="/r",
+                   manifest_sha="m", digest="d", now=1000.0 + 61.0)
+    assert conn.execute("SELECT COUNT(*) FROM pl_results").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT reviewed_head FROM pl_pr_targets").fetchone()[0] == ""
+    assert conn.execute("SELECT COUNT(*) FROM pl_effects").fetchone()[0] == 0
+    assert q.exposure(conn, "cycle") == before
+    assert conn.execute("SELECT state FROM pl_attempts").fetchone()[0] \
+        == "reserved"
+    assert conn.execute("SELECT state FROM pl_jobs").fetchone()[0] \
+        == "running"
+    q.assert_invariants(conn)
+    conn.close()
+
+
+def test_migration_draft_queued_waits_for_readiness(tmp_path):
+    from codatiel_i2 import event_store as v1_mod
+    from codatiel_i2.platform import migrate as migrate_mod
+    v1p = tmp_path / "v1.sqlite"
+    v1 = v1_mod.Store(v1p)
+    v1.meta_set("enabled_at", "2026-11-14T00:00:00Z")
+    v1.checkpoint_upsert({"repo": REPO, "pr": 4, "status": "draft",
+                          "baseline_head": "d" * 40,
+                          "queued_head": "e" * 40,
+                          "queued_base": "d" * 40})
+    v1.close()
+    conn = _open(tmp_path, "p.sqlite")
+    migrate_mod.migrate(conn, v1_db_path=str(v1p), operator_doc={},
+                        budgets_usd={"cycle": 25.0}, now=2000.0)
+    tgt = conn.execute("SELECT * FROM pl_pr_targets").fetchone()
+    assert (tgt["lifecycle"], tgt["quarantined"]) == ("draft", 0)
+    # The synthetic receipt carries the draft lifecycle: routing waits,
+    # Nothing is scheduled and nothing spends.
+    pend = q.pending_receipts(conn, REPO, 4)
+    assert len(pend) == 1 and pend[0]["lifecycle"] == "draft"
+    _budgets(conn, cycle=25.0)
+    # The sweep verifies live while the PR is still a draft: routing
+    # still waits — drafts never schedule.
+    q.signal(conn, repo=REPO, pr=4, head="e" * 40, lifecycle="draft",
+             now=2001.0)
+    cl = q.reconcile_claim(conn, repo=REPO, pr=4, owner="recon", now=2001.0)
+    assert q.reconcile_commit(conn, repo=REPO, pr=4, owner="recon",
+                              fence=cl["fence"],
+                              generation=cl["generation"],
+                              dirty=cl["dirty"], head="e" * 40, now=2001.0)
+    assert q.route(conn, app="migration", guid=pend[0]["guid"],
+                   now=2001.0) == "pending"
+    assert q.claim(conn, owner="w", reserve_usd=1.0,
+                   now=2001.0) is None
+    assert q.exposure(conn, "cycle") == 0
+    # Readiness transition: the same receipt routes and admits.
+    q.signal(conn, repo=REPO, pr=4, head="e" * 40, lifecycle="open",
+             now=2002.0)
+    _verify(conn, 4, "e" * 40, now=2002.0)
+    assert q.reroute(conn, repo=REPO, pr=4, now=2002.0) \
+        == {pend[0]["guid"]: "routed"}
+    assert q.claim(conn, owner="w", reserve_usd=1.0,
+                   now=2002.0) is not None
+    q.assert_invariants(conn)
+    conn.close()
+
+
+def test_migration_interrupted_queued_needs_release(tmp_path):
+    from codatiel_i2 import event_store as v1_mod
+    from codatiel_i2.platform import migrate as migrate_mod
+    v1p = tmp_path / "v1.sqlite"
+    v1 = v1_mod.Store(v1p)
+    v1.meta_set("enabled_at", "2026-11-14T00:00:00Z")
+    v1.checkpoint_upsert({"repo": REPO, "pr": 6, "status": "in_progress",
+                          "last_reviewed_head": "y" * 40,
+                          "in_progress_head": "x" * 40,
+                          "queued_head": "w" * 40,
+                          "queued_base": "y" * 40})
+    v1.close()
+    conn = _open(tmp_path, "p.sqlite")
+    summary = migrate_mod.migrate(conn, v1_db_path=str(v1p),
+                                  operator_doc={},
+                                  budgets_usd={"cycle": 25.0}, now=2000.0)
+    assert summary["stranded"] == [f"{REPO}#6"]
+    tgt = conn.execute("SELECT * FROM pl_pr_targets").fetchone()
+    assert int(tgt["quarantined"]) == 1
+    assert "explicit" in tgt["quarantine_note"]
+    _budgets(conn, cycle=25.0)
+    # The sweep verifies live; routing parks a pending job; the claim
+    # gate refuses the quarantined target — zero spend, no auto-resume.
+    _verify(conn, 6, "w" * 40, now=2001.0)
+    assert q.reroute(conn, repo=REPO, pr=6,
+                     now=2001.0) == {"migrate:o/r:6:" + "w" * 40: "routed"}
+    assert q.claim(conn, owner="w", reserve_usd=1.0,
+                   now=2001.0) is None
+    assert q.exposure(conn, "cycle") == 0
+    assert conn.execute("SELECT state FROM pl_jobs").fetchone()[0] \
+        == "pending"
+    # Signals and sweeps never clear the flag; only the explicit,
+    # audited release does — then the parked job admits.
+    q.signal(conn, repo=REPO, pr=6, head="w" * 40, lifecycle="open",
+             now=2002.0)
+    assert conn.execute(
+        "SELECT quarantined FROM pl_pr_targets").fetchone()[0] == 1
+    assert q.release_quarantine(conn, repo=REPO, pr=6, actor="op",
+                                note="reconciled: head verified",
+                                now=2003.0) is True
+    assert q.release_quarantine(conn, repo=REPO, pr=6, actor="op",
+                                now=2004.0) is False
+    got = q.claim(conn, owner="w", reserve_usd=1.0, now=2004.0)
+    assert got is not None
+    evs = q.events_after(conn, cursor=0, limit=1000)
+    assert any(e["kind"] == "quarantine_release" for e in evs)
+    q.assert_invariants(conn)
+    conn.close()
+
+
+def test_migration_failed_import_retries_cleanly(tmp_path):
+    from codatiel_i2 import event_store as v1_mod
+    from codatiel_i2.platform import migrate as migrate_mod
+    v1p = tmp_path / "v1.sqlite"
+    v1 = v1_mod.Store(v1p)
+    v1.meta_set("enabled_at", "2026-11-14T00:00:00Z")
+    v1.spend_set("settled_usd", 2.0)
+    v1.checkpoint_upsert({"repo": REPO, "pr": 1, "status": "reviewed",
+                          "last_reviewed_head": "h" * 40})
+    v1.close()
+    conn = _open(tmp_path, "p.sqlite")
+    # Partial import aborts atomically: invalid settings roll back
+    # budgets, openings, targets and the revision alike.
+    with pytest.raises(ValueError):
+        migrate_mod.migrate(conn, v1_db_path=str(v1p),
+                            operator_doc={"pause_reviews": "eventually"},
+                            budgets_usd={"cycle": 25.0}, now=2000.0)
+    assert conn.execute("SELECT COUNT(*) FROM pl_budgets").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) FROM pl_openings").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) FROM pl_pr_targets").fetchone()[0] == 0
+    assert settings_mod.current_revision(conn) is None
+    # Retry with a valid document succeeds exactly once.
+    summary = migrate_mod.migrate(conn, v1_db_path=str(v1p),
+                                  operator_doc={},
+                                  budgets_usd={"cycle": 25.0}, now=2001.0)
+    assert summary["targets"] == 1 and summary["settled_micro"] == 2_000_000
+    assert q.exposure(conn, "cycle") == 2_000_000
+    with pytest.raises(RuntimeError):
+        migrate_mod.migrate(conn, v1_db_path=str(v1p),
+                            operator_doc={}, budgets_usd={"cycle": 25.0},
+                            now=2002.0)
+    q.assert_invariants(conn)
+    conn.close()
+
+
+def test_unknown_holds_visible_across_lifecycles(tmp_path):
+    conn = _open(tmp_path)
+    _budgets(conn, cycle=10.0)
+    assert q.unknown_holds(conn) == []
+    # Hold 1: post-intent expiry -> needs_attention + unknown.
+    _verify(conn, 1, "a" * 40)
+    q.accept(conn, app="gh", guid="g1", body=b"1", repo=REPO,
+             repo_id=1, pr=1, head="a" * 40, now=1000.0)
+    assert q.route(conn, app="gh", guid="g1", now=1000.0) == "routed"
+    c1 = q.claim(conn, owner="w1", reserve_usd=1.0, now=1000.0)
+    assert q.dispatch_intent(conn, c1, stage="t", call_id="c1",
+                             now=1000.0)
+    q.recover(conn, now=1000.0 + 61.0)
+    # Hold 2: stale completion with unknown actual -> superseded, hold
+    # kept (charge_unknown, never zero).
+    _verify(conn, 2, "b" * 40, now=1002.0)
+    q.accept(conn, app="gh", guid="g2", body=b"2", repo=REPO,
+             repo_id=1, pr=2, head="b" * 40, now=1002.0)
+    assert q.route(conn, app="gh", guid="g2", now=1002.0) == "routed"
+    c2 = q.claim(conn, owner="w2", reserve_usd=0.5, now=1002.0)
+    assert q.dispatch_intent(conn, c2, stage="t", call_id="c2",
+                             now=1002.0)
+    _verify(conn, 2, "c" * 40, now=1003.0)
+    assert q.complete(conn, c2, actual_usd=None, run_path="/r2",
+                      manifest_sha="m", digest="d2", now=1003.0) \
+        == "superseded"
+    holds = q.unknown_holds(conn)
+    assert [(h["job_state"], h["reserve_micro"]) for h in holds] == [
+        ("needs_attention", 1_000_000), ("superseded", 500_000)]
+    assert holds[0]["repo"] == REPO and holds[0]["pr"] == 1
+    assert holds[1]["target_lifecycle"] == "open"
+    # Lifecycle churn (recover, reroute, deferred claims) neither
+    # settles nor discards: full hold and audit history preserved.
+    q.recover(conn, now=2000.0)
+    q.reroute(conn, repo=REPO, pr=1, now=2000.0)
+    q.reroute(conn, repo=REPO, pr=2, now=2000.0)
+    assert q.claim(conn, owner="w3", reserve_usd=0.1, now=2000.0) is None
+    holds = q.unknown_holds(conn)
+    assert [h["reserve_micro"] for h in holds] == [1_000_000, 500_000]
+    # Adjudication resolves one hold; the other stays discoverable.
+    assert q.resolve_unknown(conn, attempt=holds[0]["attempt"],
+                             actual_usd=0.4, actor="op",
+                             note="provider statement", now=2001.0) \
+        == "settled"
+    remaining = q.unknown_holds(conn)
+    assert [h["attempt"] for h in remaining] == [holds[1]["attempt"]]
+    evs = q.events_after(conn, cursor=0, limit=1000)
+    assert any(e["kind"] == "adjudicate" and e["detail"].find("settled")
+               >= 0 for e in evs)
+    q.assert_invariants(conn)
+    conn.close()
+
+
+def test_migration_quarantine_upgrades_existing_target(tmp_path):
+    from codatiel_i2 import event_store as v1_mod
+    from codatiel_i2.platform import migrate as migrate_mod
+    conn = _open(tmp_path, "p.sqlite")
+    # A pre-cutover signal created the target first (quarantine 0).
+    q.signal(conn, repo=REPO, pr=6, head="x" * 40, lifecycle="open",
+             now=1000.0)
+    v1p = tmp_path / "v1.sqlite"
+    v1 = v1_mod.Store(v1p)
+    v1.meta_set("enabled_at", "2026-11-14T00:00:00Z")
+    v1.checkpoint_upsert({"repo": REPO, "pr": 6, "status": "in_progress",
+                          "in_progress_head": "x" * 40})
+    v1.close()
+    summary = migrate_mod.migrate(conn, v1_db_path=str(v1p),
+                                  operator_doc={},
+                                  budgets_usd={"cycle": 25.0}, now=2000.0)
+    assert summary["stranded"] == [f"{REPO}#6"]
+    tgt = conn.execute("SELECT * FROM pl_pr_targets").fetchone()
+    assert int(tgt["quarantined"]) == 1
+    assert "explicit" in tgt["quarantine_note"]
+    q.assert_invariants(conn)
+    conn.close()
+
+
+def test_unknown_hold_last_event_ignores_colliding_effect(tmp_path):
+    conn = _open(tmp_path)
+    _budgets(conn, cycle=10.0)
+    _verify(conn, 1, "a" * 40)
+    q.accept(conn, app="gh", guid="g1", body=b"1", repo=REPO,
+             repo_id=1, pr=1, head="a" * 40, now=1000.0)
+    assert q.route(conn, app="gh", guid="g1", now=1000.0) == "routed"
+    c1 = q.claim(conn, owner="w1", reserve_usd=1.0, now=1000.0)
+    assert q.dispatch_intent(conn, c1, stage="t", call_id="c1",
+                             now=1000.0)
+    q.recover(conn, now=1000.0 + 61.0)
+    job_seq = conn.execute(
+        "SELECT MAX(seq) FROM pl_events WHERE ref='1' AND kind IN "
+        "('claim','dispatch_intent','recover')").fetchone()[0]
+    # A later effect shares the numeric id 1: its events must never
+    # become the hold's last_event_seq.
+    _verify(conn, 2, "b" * 40, now=1002.0)
+    q.accept(conn, app="gh", guid="g2", body=b"2", repo=REPO,
+             repo_id=1, pr=2, head="b" * 40, now=1002.0)
+    assert q.route(conn, app="gh", guid="g2", now=1002.0) == "routed"
+    c2 = q.claim(conn, owner="w2", reserve_usd=0.5, now=1002.0)
+    assert q.dispatch_intent(conn, c2, stage="t", call_id="c2",
+                             now=1002.0)
+    assert q.complete(conn, c2, actual_usd=0.1, run_path="/r2",
+                      manifest_sha="m", digest="d2",
+                      effects=[{"channel": "comment"}], now=1002.0) \
+        == "succeeded"
+    eff = conn.execute("SELECT * FROM pl_effects").fetchone()
+    assert eff["id"] == 1 and eff["job"] == c2.job
+    leased = q.begin_effect(conn, eff["id"], now=1003.0)
+    assert leased is not None  # emits effect_claim with ref '1'
+    collider = conn.execute(
+        "SELECT MAX(seq) FROM pl_events WHERE ref='1' AND kind="
+        "'effect_claim'").fetchone()[0]
+    assert collider is not None and collider > job_seq
+    holds = q.unknown_holds(conn)
+    assert len(holds) == 1
+    assert holds[0]["last_event_seq"] == job_seq
+    q.assert_invariants(conn)
+    conn.close()
+
+
+def test_quarantine_fences_preexisting_lease(tmp_path):
+    conn = _open(tmp_path)
+    _budgets(conn, cycle=10.0)
+    _verify(conn, 1, "a" * 40)
+    q.accept(conn, app="gh", guid="g1", body=b"1", repo=REPO,
+             repo_id=1, pr=1, head="a" * 40, now=1000.0)
+    assert q.route(conn, app="gh", guid="g1", now=1000.0) == "routed"
+    claim = q.claim(conn, owner="w", reserve_usd=1.0, now=1000.0)
+    # Quarantine lands while the lease is held (import of crashed
+    # state racing a live worker): the lease authorizes nothing more.
+    assert q.release_quarantine(conn, repo=REPO, pr=1, actor="op",
+                                now=1000.0) is False
+    conn.execute("UPDATE pl_pr_targets SET quarantined=1,"
+                 "quarantine_note='race' WHERE repo=? AND pr=?",
+                 (REPO, 1))
+    assert q.top_up_reservation(conn, claim, additional_usd=0.5,
+                                now=1001.0) is False
+    assert q.dispatch_intent(conn, claim, stage="t", call_id="c1",
+                             now=1001.0) is False
+    assert conn.execute("SELECT state FROM pl_jobs").fetchone()[0] \
+        == "superseded"
+    assert q.exposure(conn, "cycle") == 0
+    q.assert_invariants(conn)
+    conn.close()
+
+
+def test_unknown_hold_last_event_includes_adjudication(tmp_path):
+    conn = _open(tmp_path)
+    _budgets(conn, cycle=10.0)
+    _verify(conn, 1, "a" * 40)
+    q.accept(conn, app="gh", guid="g1", body=b"1", repo=REPO,
+             repo_id=1, pr=1, head="a" * 40, now=1000.0)
+    assert q.route(conn, app="gh", guid="g1", now=1000.0) == "routed"
+    c1 = q.claim(conn, owner="w1", reserve_usd=1.0, now=1000.0)
+    assert q.dispatch_intent(conn, c1, stage="t", call_id="c1",
+                             now=1000.0)
+    q.recover(conn, now=1000.0 + 61.0)
+    before = q.unknown_holds(conn)[0]["last_event_seq"]
+    # The operator acknowledges the hold: the adjudicate event is
+    # attempt-scoped (ref = attempt id), and the hold query must see
+    # it — otherwise reconciliation history is silently missed.
+    assert q.resolve_unknown(conn, attempt=c1.attempt, actual_usd=None,
+                             actor="op", note="waiting on provider",
+                             now=1002.0) == "unknown"
+    after = q.unknown_holds(conn)
+    assert len(after) == 1
+    assert after[0]["last_event_seq"] is not None
+    assert after[0]["last_event_seq"] > before
+    ev = conn.execute("SELECT kind,ref FROM pl_events WHERE seq=?",
+                      (after[0]["last_event_seq"],)).fetchone()
+    assert (ev["kind"], ev["ref"]) == ("adjudicate", str(c1.attempt))
+    q.assert_invariants(conn)
+    conn.close()

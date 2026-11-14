@@ -160,6 +160,15 @@ def _target(db: sqlite3.Connection, repo: str,
                 (repo, pr))
 
 
+def _job_by_id(db: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:
+    return _row(db, "SELECT * FROM pl_jobs WHERE id=?", (job_id,))
+
+
+def _attempt_by_id(db: sqlite3.Connection, attempt_id: int) -> sqlite3.Row | None:
+    return _row(db, "SELECT * FROM pl_attempts WHERE id=?", (attempt_id,))
+
+
+
 # Lifecycle vocabulary is closed: ingress maps webhook actions to
 # exactly these values, and unknown actions never overwrite a known
 # lifecycle (Slice 2 enforces the mapping; the contract refuses
@@ -422,7 +431,8 @@ def route(db: sqlite3.Connection, *, app: str, guid: str,
     commit that changes live state (see reroute()).
 
     Returns 'routed', 'pending' (no verifiable live observation yet,
-    or head announced but not yet verified — never infer), 'stale'
+    head announced but not yet verified, or draft target awaiting
+    readiness — never infer, never burn), 'stale'
     (two witnesses agree the head is superseded: verified live AND
     the last announcement both differ), 'suppressed_lifecycle'
     (target not eligible; never schedules),
@@ -451,6 +461,10 @@ def route(db: sqlite3.Connection, *, app: str, guid: str,
         if tgt is None or not tgt["live_head"]:
             return "pending"
         if tgt["lifecycle"] not in ELIGIBLE_LIFECYCLES:
+            if tgt["lifecycle"] == "draft":
+                # Readiness may still come: wait, don't burn the
+                # receipt and never schedule.
+                return "pending"
             db.execute("UPDATE pl_inbox SET state='suppressed_lifecycle' "
                        "WHERE app=? AND guid=?", (app, guid))
             event(db, "route", guid, now=ts, state="suppressed_lifecycle")
@@ -520,6 +534,30 @@ def route(db: sqlite3.Connection, *, app: str, guid: str,
         event(db, "route", guid, now=ts, state=outcome,
               generation=int(tgt["target_generation"]))
     return outcome
+
+
+def release_quarantine(db: sqlite3.Connection, *, repo: str, pr: int,
+                       actor: str = "operator", note: str = "",
+                       now: float | None = None) -> bool:
+    """Explicit, audited release of an imported quarantine.
+
+    Crashed or interrupted work never auto-resumes: the operator
+    releases it after reconciliation (or re-drives explicitly), and
+    the release itself is journaled. Returns False when nothing was
+    quarantined. Never clears silently, never via signal/sweep.
+    """
+    ts = _now(now)
+    with tx(db):
+        tgt = _target(db, repo, pr)
+        if tgt is None or not int(tgt["quarantined"]):
+            return False
+        db.execute("UPDATE pl_pr_targets SET quarantined=0,"
+                   "quarantine_note=?,updated_ts=? "
+                   "WHERE repo=? AND pr=?",
+                   (f"released by {actor}: {note[:200]}", ts, repo, pr))
+        event(db, "quarantine_release", f"{repo}#{pr}", now=ts,
+              actor=actor, note=note[:200])
+    return True
 
 
 def reroute(db: sqlite3.Connection, *, repo: str, pr: int,
@@ -605,6 +643,8 @@ def claim(db: sqlite3.Connection, *, owner: str, reserve_usd: float,
         # with a parked (awaiting_verification) job admit nothing
         # new: one review authority per PR; the newer head waits for
         # the park to resolve (reverify or lease-bounded expiry).
+        # Quarantined targets never admit: crashed or interrupted
+        # work needs an explicit, audited release first.
         row = None
         for cand in db.execute(
                 "SELECT j.* FROM pl_jobs j "
@@ -617,6 +657,8 @@ def claim(db: sqlite3.Connection, *, owner: str, reserve_usd: float,
                     and cand["repo"] not in pol.allowed_repos):
                 continue
             tgt = _target(db, cand["repo"], cand["pr"])
+            if tgt is not None and int(tgt["quarantined"]):
+                continue
             if (tgt is None or tgt["live_head"] != cand["full_head"]
                     or int(tgt["target_generation"]) !=
                     cand["target_generation"]
@@ -679,11 +721,18 @@ def heartbeat(db: sqlite3.Connection, claim: Claim,
 
 
 def _current(db: sqlite3.Connection, job: sqlite3.Row) -> bool:
+    """Live-target verification shared by all paid-effect gates.
+
+    Quarantine fails closed here (single choke point): crashed or
+    interrupted work holds no lease that can authorize new spend or
+    seal results, even if the lease predates the quarantine.
+    """
     tgt = _target(db, job["repo"], job["pr"])
     return bool(tgt is not None
                 and tgt["live_head"] == job["full_head"]
                 and int(tgt["target_generation"]) == job["target_generation"]
-                and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES)
+                and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES
+                and not int(tgt["quarantined"]))
 
 
 def dispatch_intent(db: sqlite3.Connection, claim: Claim, *,
@@ -762,8 +811,12 @@ def top_up_reservation(db: sqlite3.Connection, claim: Claim, *,
         raise ValueError("top-up must be positive")
     with tx(db):
         job = owned(db, claim, ts)
-        attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                       (claim.attempt,))
+        tgt = _target(db, job["repo"], job["pr"])
+        if tgt is not None and int(tgt["quarantined"]):
+            event(db, "topup_refused", job["id"], now=ts,
+                  scope="quarantined")
+            return False
+        attempt = _attempt_by_id(db, claim.attempt)
         if attempt["state"] != "reserved":
             raise Conflict("only a reserved attempt can be topped up")
         scopes = [r[0] for r in db.execute(
@@ -791,7 +844,7 @@ def _settle(db: sqlite3.Connection, attempt: int,
     to settled money only through resolve_unknown (adjudicated=True);
     completion replays must never silently release it.
     """
-    row = _row(db, "SELECT * FROM pl_attempts WHERE id=?", (attempt,))
+    row = _attempt_by_id(db, attempt)
     if row is None:
         raise Conflict("unknown reservation")
     if actual_micro is not None and not 0 <= actual_micro <= int(
@@ -805,6 +858,8 @@ def _settle(db: sqlite3.Connection, attempt: int,
             and not adjudicated:
         raise Conflict("unknown hold resolves only via resolve_unknown")
     if actual_micro is None:
+        if row["state"] == "unknown":
+            return  # already held: read-only, no write
         db.execute("UPDATE pl_attempts SET state='unknown' WHERE id=?",
                    (attempt,))
     else:
@@ -832,7 +887,12 @@ def complete(db: sqlite3.Connection, claim: Claim, *,
     reconciles, then reverify() either resumes (duplicate signals
     only) or stands the run down. Effect intents are created by the
     sealing call, so a parked completion must repeat them on resume.
-    Returns the terminal state.
+
+    Ownership: every mutating path requires an exact, current,
+    unexpired owned claim first — including the replay/resume branch.
+    The sole exception is an already-terminal identical completion,
+    which answers read-only (no checkpoint, effect, or settlement
+    write) without demanding a live lease. Returns the terminal state.
     """
     ts = _now(now)
     actual = (None if actual_usd is None
@@ -840,34 +900,51 @@ def complete(db: sqlite3.Connection, claim: Claim, *,
     with tx(db):
         previous = _row(db, "SELECT * FROM pl_results WHERE attempt=?",
                         (claim.attempt,))
-        parked = _row(db, "SELECT * FROM pl_jobs WHERE id=? AND state=?",
-                      (claim.job, "awaiting_verification"))
-        if parked is not None:
-            job = owned(db, claim, ts)
-            return _finalize_parked(db, claim, job, previous, digest,
-                                    actual, effects, ts)
         if previous is not None:
             if previous["job"] != claim.job or previous["digest"] != digest:
                 raise Conflict("conflicting replay of completion")
-            attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                           (claim.attempt,))
-            capped = (actual if actual is None else min(
-                actual, int(attempt["reserve_micro"])))
-            _settle(db, claim.attempt, capped)
-            resumed = _row(db, "SELECT * FROM pl_jobs WHERE id=?",
-                           (claim.job,))
-            if resumed is not None and resumed["state"] == "running":
+            job_row = _job_by_id(db, claim.job)
+            if job_row is None:
+                raise Conflict("result without a job; refusing to seal")
+            if job_row["state"] not in ("leased", "running",
+                                        "awaiting_verification"):
+                # Already terminal and identical: read-only answer. Only
+                # proven no-op inputs pass; anything else raises instead
+                # of writing (unknown holds resolve via adjudication).
+                attempt = _attempt_by_id(db, claim.attempt)
+                capped = (actual if actual is None else min(
+                    actual, int(attempt["reserve_micro"])))
+                if attempt["state"] == "settled":
+                    if attempt["actual_micro"] != capped:
+                        raise Conflict("settlement differs from previous "
+                                       "settlement")
+                    return "already_complete"
+                if attempt["state"] == "unknown" and actual is None:
+                    return "already_complete"
+                raise Conflict("terminal replay with new money; resolve "
+                               "via resolve_unknown")
+            # Job still live: the resumer must hold the exact current
+            # claim — an expired, fenced, or foreign claim seals
+            # nothing.
+            job = owned(db, claim, ts)
+            if job["state"] == "awaiting_verification":
+                return _finalize_parked(db, claim, job, previous, digest,
+                                        actual, effects, ts)
+            if job["state"] == "running":
                 # Resume after reverify (or a crash between the result
                 # insert and the seal): the sealed evidence exists, the
                 # job is live — finalize through the normal gates
                 # instead of short-circuiting.
-                return _seal(db, resumed, effects, ts)
-            return "already_complete"
+                attempt = _attempt_by_id(db, claim.attempt)
+                capped = (actual if actual is None else min(
+                    actual, int(attempt["reserve_micro"])))
+                _settle(db, claim.attempt, capped)
+                return _seal(db, job, effects, ts)
+            raise Conflict("completion without dispatch intent")
         job = owned(db, claim, ts)
         if job["state"] != "running":
             raise Conflict("completion without dispatch intent")
-        attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                       (claim.attempt,))
+        attempt = _attempt_by_id(db, claim.attempt)
         overage = (0 if actual is None else max(
             0, actual - int(attempt["reserve_micro"])))
         _settle(db, claim.attempt,
@@ -954,8 +1031,7 @@ def _finalize_parked(db: sqlite3.Connection, claim: Claim,
     if previous is None or previous["job"] != job["id"] \
             or previous["digest"] != digest:
         raise Conflict("parked job resumes only with its parked evidence")
-    attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                   (claim.attempt,))
+    attempt = _attempt_by_id(db, claim.attempt)
     capped = (actual if actual is None else min(
         actual, int(attempt["reserve_micro"])))
     _settle(db, claim.attempt, capped)
@@ -977,7 +1053,7 @@ def resolve_unknown(db: sqlite3.Connection, *, attempt: int,
     actual = (None if actual_usd is None
               else money_mod.to_micro(actual_usd))
     with tx(db):
-        row = _row(db, "SELECT * FROM pl_attempts WHERE id=?", (attempt,))
+        row = _attempt_by_id(db, attempt)
         if row is None:
             raise Conflict("unknown reservation")
         if row["state"] != "unknown":
@@ -1033,8 +1109,7 @@ def reverify(db: sqlite3.Connection, claim: Claim,
             return True
         # Stood down with cost kept: parked completions already
         # settled (unknown holds stay held for the operator).
-        att = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                   (claim.attempt,))
+        att = _attempt_by_id(db, claim.attempt)
         if att["state"] == "reserved":
             _settle(db, claim.attempt, 0)
             db.execute("UPDATE pl_jobs SET state='superseded' WHERE id=?",
@@ -1065,8 +1140,7 @@ def recover(db: sqlite3.Connection, now: float | None = None) -> dict:
                               "('leased','running','awaiting_verification') "
                               "AND lease_expires<=?",
                               (ts,)).fetchall():
-            attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                           (job["attempt"],))
+            attempt = _attempt_by_id(db, job["attempt"])
             if attempt is not None and attempt["state"] == "settled":
                 # Sealed money is never un-settled by a crash: a parked
                 # completion already settled its known actual, so the
@@ -1135,14 +1209,15 @@ def begin_effect(db: sqlite3.Connection, effect_id: int,
         if eff["channel"] == "email" and (eff["state"] == "unknown"
                                           or not pol.email_allowed):
             return None
-        job = _row(db, "SELECT * FROM pl_jobs WHERE id=?", (eff["job"],))
+        job = _job_by_id(db, eff["job"])
         tgt = (_target(db, job["repo"], job["pr"]) if job else None)
         current = bool(
             job is not None and tgt is not None
             and tgt["live_head"] == job["full_head"]
             and int(tgt["target_generation"]) == job["target_generation"]
             and int(tgt["lifecycle_version"]) == eff["lifecycle_version"]
-            and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES)
+            and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES
+            and not int(tgt["quarantined"]))
         if not current and eff["state"] == "pending":
             db.execute("UPDATE pl_effects SET state='suppressed' "
                        "WHERE id=?", (effect_id,))
@@ -1192,15 +1267,25 @@ def authorize_send(db: sqlite3.Connection, effect: dict,
         if last is not None and last["phase"] == "post_intent":
             # Already authorized (same token, still valid): idempotent,
             # no duplicate intent row, no second send permission minted.
+            # Quarantine bypass here is not reachable in supported
+            # execution: pl_pr_targets.quarantined is only set during
+            # the quiesced cutover import (migrate.py) for stranded
+            # in_progress jobs, never during normal effect delivery
+            # (begin_effect/authorize_send/deliver). No concurrent
+            # migration path exists in this slice; expanding the check
+            # for a hypothetical concurrent quarantine would be
+            # speculative. Deferred, not a supported re-authorisation
+            # path.
             return True
-        job = _row(db, "SELECT * FROM pl_jobs WHERE id=?", (row["job"],))
+        job = _job_by_id(db, row["job"])
         tgt = (_target(db, job["repo"], job["pr"]) if job else None)
         current = bool(
             job is not None and tgt is not None
             and tgt["live_head"] == job["full_head"]
             and int(tgt["target_generation"]) == job["target_generation"]
             and int(tgt["lifecycle_version"]) == row["lifecycle_version"]
-            and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES)
+            and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES
+            and not int(tgt["quarantined"]))
         if not current:
             db.execute("UPDATE pl_effects SET state='suppressed' "
                        "WHERE id=?", (row["id"],))
@@ -1344,6 +1429,50 @@ def events_after(db: sqlite3.Connection, cursor: int = 0,
                  limit: int = 100) -> list[dict]:
     rows = db.execute("SELECT * FROM pl_events WHERE seq>? ORDER BY seq "
                       "LIMIT ?", (cursor, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+# Event kinds whose ref is a job id. Effect, attempt, reconcile,
+# route, signal and receipt events share the same unqualified numeric
+# namespace (effect 1, attempt 1 and job 1 coexist), so any
+# job-scoped lookup must filter by kind — never by ref alone.
+# Adjudications are attempt-scoped (resolve_unknown journals against
+# the attempt), so the hold query includes them by attempt id.
+JOB_EVENT_KINDS = frozenset({
+    "claim", "claim_stale", "complete", "complete_deferred",
+    "deferred_budget", "dispatch_intent", "dispatch_stale", "recover",
+    "reverify", "topup", "topup_refused",
+})
+
+
+def unknown_holds(db: sqlite3.Connection) -> list[dict]:
+    """Operator attention query: every unresolved unknown-charge hold.
+
+    Finds holds regardless of job lifecycle (leased, running, parked,
+    superseded, cancelled, needs_attention): an unknown attempt is
+    money the ledger cannot account for until adjudicated, and no
+    state transition may silently settle or discard it. Each row
+    carries the job, target, reservation, last event, and whether a
+    result artifact exists, so the operator can reconcile in full.
+    Read-only.
+    """
+    kinds = sorted(JOB_EVENT_KINDS)
+    rows = db.execute(
+        "SELECT a.id AS attempt,a.job,a.fence,a.reserve_micro,a.phase,"
+        "j.repo,j.pr,j.state AS job_state,j.owner,j.full_head,"
+        "j.created_ts AS job_created,"
+        "t.live_head,t.lifecycle AS target_lifecycle,"
+        "t.quarantined,"
+        "(SELECT COUNT(*) FROM pl_results r WHERE r.attempt=a.id) "
+        "AS has_result,"
+        "(SELECT MAX(seq) FROM pl_events e WHERE "
+        "(e.ref=CAST(a.job AS TEXT)"
+        f" AND e.kind IN ({','.join('?' * len(kinds))})) "
+        "OR (e.kind='adjudicate' AND e.ref=CAST(a.id AS TEXT))) "
+        "AS last_event_seq "
+        "FROM pl_attempts a JOIN pl_jobs j ON j.id=a.job "
+        "LEFT JOIN pl_pr_targets t ON t.repo=j.repo AND t.pr=j.pr "
+        "WHERE a.state='unknown' ORDER BY a.id", kinds).fetchall()
     return [dict(r) for r in rows]
 
 
