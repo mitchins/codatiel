@@ -364,3 +364,52 @@ def test_ensure_incompatible_preserves_legacy_v1_tables(tmp_path):
                              ).fetchone()[0] == "reviewed"
     finally:
         conn2.close()
+
+
+def test_ensure_rejects_five_column_unique(tmp_path):
+    """A five-column UNIQUE is not the exact conflict key and must be
+    rejected. The database must remain unchanged (no partial upgrade,
+    no legacy loss)."""
+    import sqlite3
+
+    from codatiel_i2.platform import db as db_mod
+    from codatiel_i2.platform import schema as schema_mod
+    db_path = tmp_path / "five.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute(
+        "CREATE TABLE pl_pr_targets(repo TEXT NOT NULL, pr INTEGER NOT NULL,"
+        " PRIMARY KEY(repo,pr))")
+    # Five-column UNIQUE: four required plus an extra column
+    conn.execute(
+        "CREATE TABLE pl_jobs(id INTEGER PRIMARY KEY, repo TEXT NOT NULL,"
+        " pr INTEGER NOT NULL, target_generation INTEGER NOT NULL,"
+        " rerun_generation INTEGER NOT NULL, extra TEXT NOT NULL DEFAULT '',"
+        " UNIQUE(repo,pr,target_generation,rerun_generation,extra))")
+    conn.commit()
+    conn.close()
+    from codatiel_i2.platform import db as db_mod2
+    conn = db_mod2.connect(db_path)
+    # Seed legacy v1 rows to verify preservation
+    conn.execute("CREATE TABLE IF NOT EXISTS deliveries(delivery_id TEXT PRIMARY KEY, decision TEXT)")
+    conn.execute("INSERT INTO deliveries VALUES('d-five','completed')")
+    conn.commit()
+    try:
+        with pytest.raises(RuntimeError, match="preserve the original") as exc:
+            schema_mod.ensure(conn)
+        msg = str(exc.value).lower()
+        assert "backup" in msg and ".backup main" in str(exc.value)
+        assert "delete" not in msg
+        # No partial upgrade: still five-column, no new platform columns added
+        sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='pl_jobs'").fetchone()[0]
+        assert "extra" in sql.lower()
+        # Legacy row intact
+        assert conn.execute("SELECT decision FROM deliveries").fetchone()[0] == "completed"
+        # Second ensure still fails identically (idempotent)
+        with pytest.raises(RuntimeError):
+            schema_mod.ensure(conn)
+        assert conn.execute("SELECT decision FROM deliveries").fetchone()[0] == "completed"
+    finally:
+        conn.close()

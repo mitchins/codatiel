@@ -296,7 +296,7 @@ def _has_four_column_unique(db: sqlite3.Connection) -> bool:
     need = {"repo", "pr", "target_generation", "rerun_generation"}
     uniques = [part for part in sql.replace("\n", " ").split("UNIQUE(")
                if ")" in part]
-    return any(need <= {c.strip().strip('"').strip("'").strip("[]").lower()
+    return any(need == {c.strip().strip('"').strip("'").strip("[]").lower()
                         for c in part.split(")", 1)[0].split(",")}
                for part in uniques)
 

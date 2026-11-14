@@ -1267,6 +1267,15 @@ def authorize_send(db: sqlite3.Connection, effect: dict,
         if last is not None and last["phase"] == "post_intent":
             # Already authorized (same token, still valid): idempotent,
             # no duplicate intent row, no second send permission minted.
+            # Quarantine bypass here is not reachable in supported
+            # execution: pl_pr_targets.quarantined is only set during
+            # the quiesced cutover import (migrate.py) for stranded
+            # in_progress jobs, never during normal effect delivery
+            # (begin_effect/authorize_send/deliver). No concurrent
+            # migration path exists in this slice; expanding the check
+            # for a hypothetical concurrent quarantine would be
+            # speculative. Deferred, not a supported re-authorisation
+            # path.
             return True
         job = _job_by_id(db, row["job"])
         tgt = (_target(db, job["repo"], job["pr"]) if job else None)
