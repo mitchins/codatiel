@@ -1,5 +1,10 @@
 """Cutover import: v1 event store -> platform tables (additive, once).
 
+An explicit, operator-run step of a future cutover — not an automatic
+migration. Only run against a quiesced worker with a verified backup
+of the original database in hand; the platform never modifies the v1
+tables and never overwrites the source file.
+
 Preserves spend (settled + outstanding reservations as conservative
 opening balances that keep blocking headroom, plus a bounded carry
 per unreconciled unknown hold into the rolling day scope), reviewed/

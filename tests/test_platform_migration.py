@@ -213,11 +213,56 @@ def test_ensure_fails_closed_on_unconstrainable_legacy_db(tmp_path):
     conn.close()
     from codatiel_i2.platform import db as db_mod
     conn = db_mod.connect(db_path)
+    conn.execute(
+        "INSERT INTO pl_pr_targets(repo,pr,lifecycle,target_generation,"
+        "dirty_rev,reviewed_head) VALUES('o/r',1,'open',1,1,'h')")
+    conn.execute(
+        "INSERT INTO pl_jobs(repo,pr,target_generation,mode,full_head,"
+        "state) VALUES('o/r',1,1,'incremental','h','pending')")
+    conn.commit()
     try:
         # Columns upgrade in place, but the missing four-column job
-        # uniqueness cannot be added: fail closed with an explicit
-        # operator action instead of misrouting reruns.
-        with pytest.raises(RuntimeError, match="Re-initialize"):
+        # uniqueness cannot be added: fail closed with a
+        # NON-destructive diagnostic — preserve, back up, separate
+        # destination; never delete history.
+        with pytest.raises(RuntimeError, match="preserve the original"):
             schema_mod.ensure(conn)
+        try:
+            schema_mod.ensure(conn)
+        except RuntimeError as exc:
+            message = str(exc)
+        assert "backup" in message.lower()
+        assert "separate" in message.lower()
+        assert "delete" not in message.lower()
+        # Legacy records survive the refused upgrade untouched.
+        assert conn.execute(
+            "SELECT reviewed_head FROM pl_pr_targets").fetchone()[0] == "h"
+        assert conn.execute(
+            "SELECT mode FROM pl_jobs").fetchone()[0] == "incremental"
+    finally:
+        conn.close()
+
+
+def test_ensure_version_mismatch_fails_closed_nondestructively(tmp_path):
+    import sqlite3
+
+    from codatiel_i2.platform import db as db_mod
+    from codatiel_i2.platform import schema as schema_mod
+    db_path = tmp_path / "p.sqlite"
+    conn = db_mod.connect(db_path)
+    schema_mod.ensure(conn)
+    conn.execute("INSERT INTO pl_pr_targets(repo,pr,lifecycle) "
+                 "VALUES('o/r',1,'open')")
+    conn.execute("UPDATE meta SET value='codatiel_i2.platform.vX' "
+                 "WHERE key='platform_schema_version'")
+    conn.commit()
+    conn.close()
+    conn = db_mod.connect(db_path)
+    try:
+        with pytest.raises(RuntimeError, match="preserve the original"):
+            schema_mod.ensure(conn)
+        # The versioned data is untouched by the refused open.
+        assert conn.execute("SELECT COUNT(*) FROM pl_pr_targets"
+                            ).fetchone()[0] == 1
     finally:
         conn.close()
