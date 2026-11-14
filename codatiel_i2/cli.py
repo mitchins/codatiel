@@ -1303,6 +1303,26 @@ def cmd_events(args) -> dict:
                     except store_mod.StoreError as exc:
                         return {"status": "failed", "stage": "review",
                                 "error": str(exc)}
+                    # No delivery row exists on the explicit path, so
+                    # record one: the daily cap must see this spend.
+                    # Run-unique ID (same head re-driven twice spends
+                    # twice); replay-safe by construction.
+                    _explicit_id = (
+                        f"explicit:{repo}:{number}:{head}:"
+                        f"{int(cfg.clock())}")
+                    try:
+                        store.delivery_record(
+                            delivery_id=_explicit_id,
+                            event_type="explicit_review", action="redrive",
+                            repo=repo, pr=number, head_sha=head,
+                            decision="skipped:stale_superseded",
+                            reason="explicit head went stale during "
+                                   "inference; spend kept, no seal",
+                            cost_usd=cost, detail={"explicit": True},
+                            now=cfg.clock())
+                    except store_mod.StoreError as exc:
+                        return {"status": "failed", "stage": "review",
+                                "error": str(exc)}
                     return {"status": "skipped",
                             "decision": "skipped:stale_superseded",
                             "reason": f"head {head[:12]} went stale during "

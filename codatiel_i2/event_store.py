@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
     decision TEXT NOT NULL DEFAULT '',
     reason TEXT NOT NULL DEFAULT '',
     cost_usd REAL,
-    detail TEXT NOT NULL DEFAULT '{}'
+    detail TEXT NOT NULL DEFAULT '{}',
+    finished_ts REAL
 );
 CREATE TABLE IF NOT EXISTS checkpoints (
     repo TEXT NOT NULL,
@@ -130,6 +131,12 @@ class Store:
             self.cx.execute("PRAGMA journal_mode=WAL;")
             self.cx.execute("PRAGMA foreign_keys=ON;")
             self.cx.executescript(SCHEMA_SQL)
+            try:
+                self.cx.execute("ALTER TABLE deliveries "
+                                "ADD COLUMN finished_ts REAL")
+            except Exception as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
         except Exception as exc:
             raise StoreError(f"cannot open event store {self.path}: "
                              f"{type(exc).__name__}: {exc}")
@@ -223,11 +230,12 @@ class Store:
             self.cx.execute(
                 "INSERT INTO deliveries(delivery_id, received_ts,"
                 " event_type, action, repo, pr, head_sha, decision,"
-                " reason, cost_usd, detail)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?)"
+                " reason, cost_usd, detail, finished_ts)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(delivery_id) DO NOTHING",
                 (delivery_id, ts, event_type, action, repo, pr, head_sha,
-                 decision, reason, cost_usd, blob))
+                 decision, reason, cost_usd, blob,
+                 ts if decision != "in_progress" else None))
             self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
@@ -242,18 +250,23 @@ class Store:
 
     def delivery_update_decision(self, delivery_id: str, decision: str,
                                  reason: str,
-                                 cost_usd: float | None) -> None:
+                                 cost_usd: float | None,
+                                 now: float | None = None) -> None:
         """Narrow the in-progress placeholder to its final decision.
 
         Only the original claimant's placeholder may be narrowed: rows
         already holding a terminal decision are never overwritten.
+        Stamps finished_ts so spend is attributed to the day it was
+        incurred, not the day the delivery arrived.
         """
+        ts = time.time() if now is None else now
         try:
             self.cx.execute(_BEGIN)
             self.cx.execute(
-                "UPDATE deliveries SET decision=?, reason=?, cost_usd=? "
+                "UPDATE deliveries SET decision=?, reason=?, cost_usd=?,"
+                " finished_ts=? "
                 "WHERE delivery_id=? AND decision='in_progress'",
-                (decision, reason, cost_usd, delivery_id))
+                (decision, reason, cost_usd, ts, delivery_id))
             self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
@@ -270,6 +283,9 @@ class Store:
         The row keeps the original outcome in its reason; the decision
         becomes skipped:replay so dashboards count blocked replays. A
         repeat replay returns the row unchanged (no reason chaining).
+        The original cost is preserved on the row (never zeroed): for
+        superseded runs the delivery row is the sole spend record, and
+        zeroing it would erase settled money from the daily ledger.
         """
         if original.get("decision") == "skipped:replay":
             row = self.delivery_get(delivery_id)
@@ -286,7 +302,7 @@ class Store:
             self.cx.execute(_BEGIN)
             self.cx.execute(
                 "UPDATE deliveries SET decision='skipped:replay',"
-                " reason=?, cost_usd=0.0, detail=? WHERE delivery_id=?",
+                " reason=?, detail=? WHERE delivery_id=?",
                 (f"duplicate delivery; original decision "
                  f"{original.get('decision')}: "
                  f"{original.get('reason') or ''}"[:500],

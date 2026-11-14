@@ -416,3 +416,93 @@ def test_explicit_redrive_backwards_reset_offline(
         assert out["decision"] == "completed", out
     finally:
         store.close()
+
+
+def test_spend_day_boundary_uses_completion_day(tmp_path):
+    import datetime as _dt
+    day1 = "2026-11-14"
+    day2 = "2026-11-15"
+    late14 = _dt.datetime(2026, 11, 14, 23, 59,
+                          tzinfo=_dt.timezone.utc).timestamp()
+    early15 = _dt.datetime(2026, 11, 15, 0, 5,
+                           tzinfo=_dt.timezone.utc).timestamp()
+    store = S.Store(tmp_path / "e.sqlite")
+    try:
+        store.delivery_record(
+            delivery_id="d-sup", event_type="pull_request",
+            action="synchronize", repo="o/r", pr=10,
+            head_sha="h" * 40, decision="in_progress", reason="claimed",
+            cost_usd=None, detail={}, now=late14)
+        store.delivery_update_decision("d-sup", "skipped:stale_superseded",
+                                       "superseded", 0.30, now=early15)
+        got14 = OP.spend_on_day(store, day1)
+        got15 = OP.spend_on_day(store, day2)
+        assert got14["codatiel_ledger_usd"] == 0.0, got14
+        assert got15["codatiel_ledger_usd"] == 0.30, got15
+        assert got15["superseded_inference_usd"] == 0.30
+    finally:
+        store.close()
+
+
+def test_replayed_superseded_keeps_cost_in_ledger(tmp_path):
+    store = S.Store(tmp_path / "e.sqlite")
+    try:
+        store.delivery_record(
+            delivery_id="d-sup", event_type="pull_request",
+            action="synchronize", repo="o/r", pr=10,
+            head_sha="h" * 40, decision="skipped:stale_superseded",
+            reason="superseded", cost_usd=0.25, detail={}, now=NOON)
+        prior = store.delivery_get("d-sup")
+        row = store.delivery_mark_replay("d-sup", prior)
+        assert row["decision"] == "skipped:replay"
+        assert row["cost_usd"] == 0.25
+        got = OP.spend_on_day(store, DAY)
+        assert got["codatiel_ledger_usd"] == 0.25, got
+    finally:
+        store.close()
+
+
+def test_explicit_stale_review_counts_in_daily_ledger(
+        tmp_path, monkeypatch, two_commit_repo):
+    from tests.test_prod01_lifecycle import _env
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    repo = two_commit_repo
+    _env(monkeypatch, tmp_path, repo["repo"])
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "baseline_head": repo["base_sha"],
+             "last_reviewed_head": repo["base_sha"],
+             "last_reviewed_base": repo["base_sha"]})
+        heads = [repo["head_sha"], "c" * 40]
+        calls = {"n": 0}
+
+        def _live(r, pr):
+            idx = min(calls["n"], len(heads) - 1)
+            calls["n"] += 1
+            return heads[idx]
+
+        monkeypatch.setattr(P, "get_live_head", _live)
+        monkeypatch.setattr(
+            P, "run_review_for_range",
+            lambda **kw: {"status": "complete", "mode": "t",
+                          "run_dir": "/tmp/rd", "terra_findings": 0,
+                          "added": 0, "cost_usd": 0.30,
+                          "cost_unknown": False})
+        args = cli_mod.build_parser().parse_args(
+            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
+             "--base", repo["base_sha"]])
+        out = cli_mod.cmd_events(args)
+        assert out["decision"] == "skipped:stale_superseded", out
+        import datetime as _dt
+        today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+        got = OP.spend_on_day(store, today)
+        assert got["codatiel_ledger_usd"] == 0.30, got
+        assert got["superseded_inference_usd"] == 0.30
+    finally:
+        store.close()

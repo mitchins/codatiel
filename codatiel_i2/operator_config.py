@@ -579,7 +579,9 @@ def spend_on_day(store: Any, day: str) -> dict[str, Any]:
 
     Sums actual review costs (SUM, never cost x COUNT). Superseded
     mid-flight inference has no reviews row — its delivery cost is
-    included exactly once here; completed/failed deliveries are
+    included exactly once here, including through a later replay mark
+    (replays preserve the original cost and carry the original
+    decision in their detail); completed/failed deliveries are
     excluded because their cost already lives in the reviews table.
     Reviews with unknown cost contribute $0 here — they are tracked
     separately as unknown-count (including superseded runs whose true
@@ -597,17 +599,28 @@ def spend_on_day(store: Any, day: str) -> dict[str, Any]:
             "WHERE date(finished_ts, 'unixepoch') = ? "
             "AND NOT cost_unknown AND cost_usd IS NOT NULL",
             (day,)).fetchone()[0]
+        # Superseded spend is attributed to the day it was incurred
+        # (finished_ts), matching the reviews table — not the day the
+        # delivery arrived. Pre-finished_ts rows fall back to
+        # received_ts.
+        day_of = "date(COALESCE(finished_ts, received_ts), 'unixepoch')"
         s = store.cx.execute(
             "SELECT COALESCE(SUM(cost_usd), 0), COUNT(*) FROM deliveries "
-            "WHERE decision = 'skipped:stale_superseded' "
+            "WHERE (decision = 'skipped:stale_superseded' OR "
+            "(decision = 'skipped:replay' AND "
+            "json_extract(detail, '$.original_decision') = "
+            "'skipped:stale_superseded')) "
             "AND cost_usd IS NOT NULL "
-            "AND date(received_ts, 'unixepoch') = ?",
+            f"AND {day_of} = ?",
             (day,)).fetchone()
         su = store.cx.execute(
             "SELECT COUNT(*) FROM deliveries "
-            "WHERE decision = 'skipped:stale_superseded' "
+            "WHERE (decision = 'skipped:stale_superseded' OR "
+            "(decision = 'skipped:replay' AND "
+            "json_extract(detail, '$.original_decision') = "
+            "'skipped:stale_superseded')) "
             "AND cost_usd IS NULL "
-            "AND date(received_ts, 'unixepoch') = ?",
+            f"AND {day_of} = ?",
             (day,)).fetchone()[0]
     except Exception as exc:
         raise OperatorConfigError(
