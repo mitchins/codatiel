@@ -164,6 +164,11 @@ def _job_by_id(db: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:
     return _row(db, "SELECT * FROM pl_jobs WHERE id=?", (job_id,))
 
 
+def _attempt_by_id(db: sqlite3.Connection, attempt_id: int) -> sqlite3.Row | None:
+    return _row(db, "SELECT * FROM pl_attempts WHERE id=?", (attempt_id,))
+
+
+
 # Lifecycle vocabulary is closed: ingress maps webhook actions to
 # exactly these values, and unknown actions never overwrite a known
 # lifecycle (Slice 2 enforces the mapping; the contract refuses
@@ -799,8 +804,7 @@ def top_up_reservation(db: sqlite3.Connection, claim: Claim, *,
         raise ValueError("top-up must be positive")
     with tx(db):
         job = owned(db, claim, ts)
-        attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                       (claim.attempt,))
+        attempt = _attempt_by_id(db, claim.attempt)
         if attempt["state"] != "reserved":
             raise Conflict("only a reserved attempt can be topped up")
         scopes = [r[0] for r in db.execute(
@@ -828,7 +832,7 @@ def _settle(db: sqlite3.Connection, attempt: int,
     to settled money only through resolve_unknown (adjudicated=True);
     completion replays must never silently release it.
     """
-    row = _row(db, "SELECT * FROM pl_attempts WHERE id=?", (attempt,))
+    row = _attempt_by_id(db, attempt)
     if row is None:
         raise Conflict("unknown reservation")
     if actual_micro is not None and not 0 <= actual_micro <= int(
@@ -895,8 +899,7 @@ def complete(db: sqlite3.Connection, claim: Claim, *,
                 # Already terminal and identical: read-only answer. Only
                 # proven no-op inputs pass; anything else raises instead
                 # of writing (unknown holds resolve via adjudication).
-                attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                               (claim.attempt,))
+                attempt = _attempt_by_id(db, claim.attempt)
                 capped = (actual if actual is None else min(
                     actual, int(attempt["reserve_micro"])))
                 if attempt["state"] == "settled":
@@ -920,8 +923,7 @@ def complete(db: sqlite3.Connection, claim: Claim, *,
                 # insert and the seal): the sealed evidence exists, the
                 # job is live — finalize through the normal gates
                 # instead of short-circuiting.
-                attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                               (claim.attempt,))
+                attempt = _attempt_by_id(db, claim.attempt)
                 capped = (actual if actual is None else min(
                     actual, int(attempt["reserve_micro"])))
                 _settle(db, claim.attempt, capped)
@@ -930,8 +932,7 @@ def complete(db: sqlite3.Connection, claim: Claim, *,
         job = owned(db, claim, ts)
         if job["state"] != "running":
             raise Conflict("completion without dispatch intent")
-        attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                       (claim.attempt,))
+        attempt = _attempt_by_id(db, claim.attempt)
         overage = (0 if actual is None else max(
             0, actual - int(attempt["reserve_micro"])))
         _settle(db, claim.attempt,
@@ -1018,8 +1019,7 @@ def _finalize_parked(db: sqlite3.Connection, claim: Claim,
     if previous is None or previous["job"] != job["id"] \
             or previous["digest"] != digest:
         raise Conflict("parked job resumes only with its parked evidence")
-    attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                   (claim.attempt,))
+    attempt = _attempt_by_id(db, claim.attempt)
     capped = (actual if actual is None else min(
         actual, int(attempt["reserve_micro"])))
     _settle(db, claim.attempt, capped)
@@ -1041,7 +1041,7 @@ def resolve_unknown(db: sqlite3.Connection, *, attempt: int,
     actual = (None if actual_usd is None
               else money_mod.to_micro(actual_usd))
     with tx(db):
-        row = _row(db, "SELECT * FROM pl_attempts WHERE id=?", (attempt,))
+        row = _attempt_by_id(db, attempt)
         if row is None:
             raise Conflict("unknown reservation")
         if row["state"] != "unknown":
@@ -1097,8 +1097,7 @@ def reverify(db: sqlite3.Connection, claim: Claim,
             return True
         # Stood down with cost kept: parked completions already
         # settled (unknown holds stay held for the operator).
-        att = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                   (claim.attempt,))
+        att = _attempt_by_id(db, claim.attempt)
         if att["state"] == "reserved":
             _settle(db, claim.attempt, 0)
             db.execute("UPDATE pl_jobs SET state='superseded' WHERE id=?",
@@ -1129,8 +1128,7 @@ def recover(db: sqlite3.Connection, now: float | None = None) -> dict:
                               "('leased','running','awaiting_verification') "
                               "AND lease_expires<=?",
                               (ts,)).fetchall():
-            attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                           (job["attempt"],))
+            attempt = _attempt_by_id(db, job["attempt"])
             if attempt is not None and attempt["state"] == "settled":
                 # Sealed money is never un-settled by a crash: a parked
                 # completion already settled its known actual, so the
