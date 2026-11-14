@@ -488,7 +488,8 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
                            run_dir: Path, ceiling_usd: float,
                            assess_fn: Callable | None = None,
                            edit_fn: Callable | None = None,
-                           on_pair: Callable | None = None) -> dict:
+                           on_pair: Callable | None = None,
+                           is_stale: Callable[[], bool] | None = None) -> dict:
     """Terra-propose / Luna-edit over directly-retrieved pairs.
 
     SEMDUP-08 integrated stage: pairs come from deterministic retrieval
@@ -579,8 +580,34 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
     assess = assess_fn or OD.assess_pair
     edit = edit_fn or ED.edit_pair
     judged_preflight = _preflight_usd(pairs, merged_db, terra_res,
-                                      luna_res)
-    for pair in pairs:
+                                       luna_res)
+    for idx, pair in enumerate(pairs):
+        # COST-01B: check live head before each additional paid assessment
+        if is_stale is not None:
+            try:
+                if is_stale():
+                    # Remaining pairs unexamined due to staleness
+                    for remaining in pairs[idx:]:
+                        skipped = {
+                            "unit": f"{remaining['target']['path']}::{remaining['target']['symbol']} -> "
+                                     f"{remaining['counterpart']['path']}::{remaining['counterpart']['symbol']}",
+                            "reason": "stale_superseded",
+                            "detail": "target head no longer current during duplication; no inference issued",
+                        }
+                        outcome["skipped"].append(skipped)
+                        # Record a suppressed row for provenance (no inference)
+                        outcome["pairs"].append({
+                            "target": remaining["target"],
+                            "counterpart": remaining["counterpart"],
+                            "head_rev": head_rev,
+                            "base_rev": base_rev,
+                            "reason": "stale_superseded",
+                            "detail": "stale head; skipped before inference",
+                            "path": "suppressed",
+                        })
+                    break
+            except Exception:
+                pass
         row = _review_pair(
             pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
             base_rev=base_rev, head_rev=head_rev, head_tree=head_tree,

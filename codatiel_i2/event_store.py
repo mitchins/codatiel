@@ -252,22 +252,46 @@ class Store:
     def delivery_update_decision(self, delivery_id: str, decision: str,
                                  reason: str,
                                  cost_usd: float | None,
-                                 now: float | None = None) -> None:
+                                 now: float | None = None,
+                                 detail: dict | None = None) -> None:
         """Narrow the in-progress placeholder to its final decision.
 
         Only the original claimant's placeholder may be narrowed: rows
         already holding a terminal decision are never overwritten.
         Stamps finished_ts so spend is attributed to the day it was
         incurred, not the day the delivery arrived.
+
+        When `detail` is given it is merged into the existing JSON
+        detail (stored detail wins on conflict for original_* keys).
         """
         ts = time.time() if now is None else now
         try:
             self.cx.execute(_BEGIN)
-            self.cx.execute(
-                "UPDATE deliveries SET decision=?, reason=?, cost_usd=?,"
-                " finished_ts=? "
-                "WHERE delivery_id=? AND decision='in_progress'",
-                (decision, reason, cost_usd, ts, delivery_id))
+            if detail is not None:
+                cur = self.cx.execute(
+                    "SELECT detail FROM deliveries WHERE delivery_id=?",
+                    (delivery_id,)).fetchone()
+                try:
+                    existing = json.loads((cur[0] if cur else None) or "{}")
+                except Exception:
+                    existing = {}
+                # Preserve original_* if already present
+                merged = dict(existing)
+                for k, v in (detail or {}).items():
+                    if k not in merged or not k.startswith("original_"):
+                        merged[k] = v
+                self.cx.execute(
+                    "UPDATE deliveries SET decision=?, reason=?, cost_usd=?,"
+                    " finished_ts=?, detail=? "
+                    "WHERE delivery_id=? AND decision='in_progress'",
+                    (decision, reason, cost_usd, ts,
+                     json.dumps(merged, sort_keys=True), delivery_id))
+            else:
+                self.cx.execute(
+                    "UPDATE deliveries SET decision=?, reason=?, cost_usd=?,"
+                    " finished_ts=? "
+                    "WHERE delivery_id=? AND decision='in_progress'",
+                    (decision, reason, cost_usd, ts, delivery_id))
             self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
@@ -275,6 +299,33 @@ class Store:
             except Exception:
                 pass
             raise StoreError(f"delivery update failed: {exc}")
+
+    def delivery_update_detail(self, delivery_id: str,
+                               detail_patch: dict) -> None:
+        """Merge detail_patch into delivery detail (best-effort)."""
+        if not detail_patch:
+            return
+        try:
+            self.cx.execute(_BEGIN)
+            cur = self.cx.execute(
+                "SELECT detail FROM deliveries WHERE delivery_id=?",
+                (delivery_id,)).fetchone()
+            try:
+                existing = json.loads((cur[0] if cur else None) or "{}")
+            except Exception:
+                existing = {}
+            merged = dict(existing)
+            merged.update(detail_patch)
+            self.cx.execute(
+                "UPDATE deliveries SET detail=? WHERE delivery_id=?",
+                (json.dumps(merged, sort_keys=True), delivery_id))
+            self.cx.execute(_COMMIT)
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"delivery detail update failed: {exc}")
 
     # -- checkpoints ------------------------------------------------------
     def delivery_mark_replay(self, delivery_id: str,

@@ -539,9 +539,10 @@ def _bind_review_identity(repo: str, pr: int, base: str, head: str,
 
 
 def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
-                        base: str, head: str, repo_path: Path,
-                        runs_root: Path, run_dir: str | None,
-                        result: dict) -> dict:
+                         base: str, head: str, repo_path: Path,
+                         runs_root: Path, run_dir: str | None,
+                         result: dict,
+                         is_stale: Callable[[], bool] | None = None) -> dict:
     """Integrated duplication stage (COMPLETENESS-01): direct retrieval
     into Terra/Luna after the standard review completes. DEV-only,
     bounded by the whole-PR remainder, never raises, never changes the
@@ -552,6 +553,9 @@ def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
     recorded actual). A zero/negative remainder, or an unknown normal
     cost, is an explicit unavailable — never silent, never
     over-budget.
+
+    COST-01B: when `is_stale` reports the target head is no longer
+    current, the stage is skipped before any paid inference.
     """
     result["semdup_status"] = "off"
     result["semdup_published"] = 0
@@ -559,6 +563,20 @@ def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
     result["semdup_budget_usd"] = 0.0
     if cfg.env != "dev" or not cfg.semdup_enabled or not run_dir:
         return result
+    # COST-01B: live-head check before starting semantic duplication
+    if is_stale is not None:
+        try:
+            if is_stale():
+                result["semdup_status"] = "stale_skipped"
+                result["semdup_reason"] = "target head no longer current before duplication; no inference issued"
+                result["semdup_spend_usd"] = 0.0
+                # Record provenance for stale skip
+                result["semdup_pairs_examined"] = 0
+                result["semdup_pairs_reused"] = 0
+                result["semdup_pairs_skipped"] = result.get("semdup_pairs_skipped", 0)
+                return result
+        except Exception:
+            pass
     normal_cost = result.get("cost_usd")
     if not isinstance(normal_cost, (int, float)) or result.get(
             "cost_unknown"):
@@ -585,7 +603,8 @@ def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
             state_dir=cfg.state_dir,
             max_pairs=(cfg.semdup_max_pairs or None),
             ceiling_usd=remaining,
-            allow_embeddings=cfg.semdup_allow_embeddings)
+            allow_embeddings=cfg.semdup_allow_embeddings,
+            is_stale=is_stale)
     except Exception as exc:  # noqa: BLE001 - belt and braces; run_stage never raises
         sem = {"status": "unavailable", "published": [],
                "spend_usd": 0.0, "spend_unknown": True,
@@ -616,7 +635,8 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
                          base: str, head: str, kind: str,
                          repo_path: Path,
                          runs_root: Path, work_root: Path,
-                         model_factory: Any = None) -> dict:
+                         model_factory: Any = None,
+                         is_stale: Callable[[], bool] | None = None) -> dict:
     """Execute one review for base..head via the configured pipeline.
 
     Terra's canonical review runs first and unchanged; additive mode seals
@@ -673,7 +693,7 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
         return _maybe_semdup_stage(
             cfg=cfg, repo=repo, pr=pr, base=base, head=head,
             repo_path=repo_path, runs_root=runs_root,
-            run_dir=out.get("run_dir"), result=result)
+            run_dir=out.get("run_dir"), result=result, is_stale=is_stale)
     from codatiel_i2 import additive as additive_mod
     # Whole-PR breaker: the Terra primary is capped at the whole-PR
     # ceiling in DEV (ordinary PRs never approach it); the Luna subagent
@@ -716,7 +736,7 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
     return _maybe_semdup_stage(
         cfg=cfg, repo=repo, pr=pr, base=base, head=head,
         repo_path=repo_path, runs_root=runs_root,
-        run_dir=out.get("run_dir"), result=result)
+        run_dir=out.get("run_dir"), result=result, is_stale=is_stale)
 
 
 def _count_terra(run_dir: str) -> int:
@@ -798,10 +818,73 @@ def _record(store: store_mod.Store, ev: dict, decision: str, reason: str,
 
 def _finalize_delivery(store: store_mod.Store, ev: dict, decision: str,
                        reason: str, cost: float | None,
-                       now: float | None = None) -> dict:
+                       now: float | None = None,
+                       detail: dict | None = None) -> dict:
     store.delivery_update_decision(ev["delivery_id"], decision, reason,
-                                   cost, now=now)
+                                   cost, now=now, detail=detail)
     return store.delivery_get(ev["delivery_id"]) or {}
+
+def _provenance_detail(*, repo: str, pr: int, base: str, head: str,
+                      result: dict | None, kind: str | None,
+                      info: dict | None, superseded: bool) -> dict:
+    """Minimal cost provenance for Gate D (no second ledger).
+
+    Retains repo/pr/base/head, run identity, timestamps, stage
+    costs, and pair counts. Costs that are unavailable are omitted
+    (marked unavailable by the caller, never fabricated).
+    """
+    detail: dict[str, Any] = {
+        "repo": repo, "pr": pr, "base_sha": base, "head_sha": head,
+        "kind": kind or "", "superseded": bool(superseded),
+        "provenance_version": "cost01b-v1",
+    }
+    if info is not None:
+        detail["diff_sha"] = info.get("diff_sha")
+        detail["files"] = info.get("files")
+    if result is not None:
+        run_dir = result.get("run_dir") or ""
+        if run_dir:
+            detail["run_dir"] = run_dir
+            try:
+                run_json = json.loads((Path(run_dir) / "run.json").read_text(encoding="utf-8"))
+                if run_json.get("run_id"):
+                    detail["run_id"] = str(run_json["run_id"])
+            except Exception:
+                pass
+        detail["total_cost_usd"] = result.get("cost_usd")
+        detail["cost_unknown"] = bool(result.get("cost_unknown"))
+        detail["terra_findings"] = result.get("terra_findings")
+        detail["luna_added"] = result.get("added")
+        detail["semdup_status"] = result.get("semdup_status")
+        detail["semdup_spend_usd"] = result.get("semdup_spend_usd")
+        detail["semdup_published"] = result.get("semdup_published")
+        # Pair counts: prefer semdup.json when available (authoritative)
+        try:
+            if run_dir:
+                sd = json.loads((Path(run_dir) / "semdup.json").read_text(encoding="utf-8"))
+                detail["pairs_examined"] = sd.get("pairs_examined")
+                detail["pairs_reused"] = sd.get("pairs_reused")
+                # cost01b new field
+                if "pairs_cache_hits" in sd:
+                    detail["pairs_cache_hits"] = sd.get("pairs_cache_hits")
+                detail["pairs_total"] = sd.get("pairs_total")
+                detail["semdup_wall_s"] = sd.get("wall_s")
+        except Exception:
+            # Fallback to result fields when semdup.json not yet written
+            if "semdup_pairs_examined" in (result or {}):
+                detail["pairs_examined"] = result.get("semdup_pairs_examined")
+        # Terra/Luna per-stage costs when run artifacts exist
+        try:
+            if run_dir:
+                m = json.loads((Path(run_dir) / "metrics.json").read_text(encoding="utf-8"))
+                spend = (m.get("spend") or {})
+                if spend.get("usd_estimate") is not None:
+                    detail["terra_spend_usd"] = spend.get("usd_estimate")
+        except Exception:
+            pass
+    detail["finished_at"] = time.time()
+    # Strip None values for compactness
+    return {k: v for k, v in detail.items() if v is not None}
 
 
 def process_event(*, cfg: EventConfig, store: store_mod.Store,
@@ -950,11 +1033,18 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     _claimed_auto_run = (_claimed_auto or {}).get("in_progress_run") or ""
     _claimed_auto_base = (_claimed_auto or {}).get("in_progress_base") or ""
     store.reserve(cfg.reserve_usd)
+    # COST-01B: is_stale checks before semdup and before each pair
+    def _is_stale() -> bool:
+        try:
+            live = get_live_head(ev["repo"], pr)
+            return live is not None and live != to_sha
+        except Exception:
+            return False
     result = run_review_for_range(
         cfg=cfg, repo=ev["repo"], pr=pr, base=from_sha, head=to_sha,
         kind=kind, repo_path=access.path,
         runs_root=cfg.state_dir / "runs", work_root=cfg.state_dir / "work",
-        model_factory=model_factory)
+        model_factory=model_factory, is_stale=_is_stale)
     cost = result.get("cost_usd")
     unknown = bool(result.get("cost_unknown")) or cost is None
     store.settle(cfg.reserve_usd, None if unknown else float(cost or 0.0))
@@ -983,6 +1073,9 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                 prior_status=(prior if isinstance(prior, str)
                               else None),
                 claim_run=_claimed_auto_run)
+        prov = _provenance_detail(
+            repo=ev["repo"], pr=pr, base=from_sha, head=to_sha,
+            result=result, kind=kind, info=info, superseded=True)
         final = _finalize_delivery(
             store, ev, "skipped:stale_superseded",
             f"head {to_sha[:12]} went stale during inference "
@@ -990,7 +1083,7 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             f"{'claim lost' if not owned else 'claim released'}); "
             "no checkpoint change, no email, no comment; "
             f"inference cost ${float(cost or 0.0):.4f} recorded",
-            cost if not unknown else None, now=cfg.clock())
+            cost if not unknown else None, now=cfg.clock(), detail=prov)
         # A newer head queued during this run must not strand: drain
         # it through the same verified path (stale queues drop $0).
         # The follow range starts at the queued BASE (not this run's
@@ -1015,11 +1108,14 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             pipeline=cfg.pipeline, status="failed",
             terra_findings=0, luna_added=0, cost_usd=cost,
             cost_unknown=unknown, run_dir=result.get("run_dir") or "")
+        prov = _provenance_detail(
+            repo=ev["repo"], pr=pr, base=from_sha, head=to_sha,
+            result=result, kind=kind, info=info, superseded=False)
         return _finalize_delivery(
             store, ev, "failed",
             f"primary review failed ({result.get('stage') or 'unknown'}: "
             f"{(result.get('error') or '')[:200]}); checkpoint not "
-            f"advanced, Luna never spent", cost, now=now)
+            f"advanced, Luna never spent", cost, now=now, detail=prov)
     done = store.complete_review(
         ev["repo"], pr, base=(ev.get("base_sha") or from_sha),
         head=to_sha, diff_sha=info["diff_sha"], files=info["files"],
@@ -1049,6 +1145,9 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     publish_bits = _maybe_publish_comment(
         cfg=cfg, store=store, run_dir=result.get("run_dir") or "",
         now=now)
+    prov = _provenance_detail(
+        repo=ev["repo"], pr=pr, base=from_sha, head=to_sha,
+        result=result, kind=kind, info=info, superseded=False)
     final = _finalize_delivery(
         store, ev, "completed",
         f"{kind} review {result['status']} "
@@ -1056,7 +1155,7 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         f"luna-exclusive {result.get('added', 0)}{semdup_bits}; "
         f"notified={notified}"
         + ("" if notified else f" ({notify_detail[:160]})")
-        + publish_bits + ")", cost, now=now)
+        + publish_bits + ")", cost, now=now, detail=prov)
     # Drain a queued newer delta as its own run (separate evidence).
     if done.get("queued"):
         return _drain_queued(cfg=cfg, store=store, ev=ev, pr=pr,

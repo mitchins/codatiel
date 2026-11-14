@@ -57,13 +57,18 @@ def run_stage(*, repo_path: Path, repo: str, pr: int,
               ceiling_usd: float = DEFAULT_CEILING_USD,
               allow_embeddings: bool = True,
               assess_fn: Callable | None = None,
-              edit_fn: Callable | None = None) -> dict:
+              edit_fn: Callable | None = None,
+              is_stale: Callable[[], bool] | None = None) -> dict:
     """Run the integrated duplication stage for one pinned base..head.
 
     `max_pairs` None (normal operation) examines every retrieved pair
     until the whole-PR spending guard binds; a positive int is an
     explicit controlled-experiment limit only. Writes `semdup.json`
     into run_dir. Never raises.
+
+    `is_stale` (optional) is a callable returning True when the
+    review's target head is no longer current. When stale, further
+    paid calls are not issued (COST-01B stale-head optimization).
     """
     t0 = time.monotonic()
     run_dir = Path(run_dir)
@@ -101,7 +106,7 @@ def run_stage(*, repo_path: Path, repo: str, pr: int,
                      max_pairs=max_pairs, ceiling_usd=ceiling_usd,
                      allow_embeddings=allow_embeddings,
                      assess_fn=assess_fn, edit_fn=edit_fn,
-                     outcome=outcome, t0=t0)
+                     outcome=outcome, t0=t0, is_stale=is_stale)
     except Exception as exc:  # noqa: BLE001 - degrade, never raise
         outcome["status"] = "unavailable"
         outcome["reason"] = f"{type(exc).__name__}: {str(exc)[:300]}"
@@ -113,7 +118,20 @@ def run_stage(*, repo_path: Path, repo: str, pr: int,
 def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
          state_dir, max_pairs_per_target, max_pairs,
          ceiling_usd, allow_embeddings, assess_fn, edit_fn,
-         outcome, t0) -> dict:
+         outcome, t0, is_stale=None) -> dict:
+    # COST-01B: stale-head check before any duplication work
+    if is_stale is not None:
+        try:
+            if is_stale():
+                outcome["status"] = "stale_skipped"
+                outcome["reason"] = "target head no longer current before duplication; no inference issued"
+                outcome["coverage"] = "partial"
+                outcome["wall_s"] = round(time.monotonic() - t0, 1)
+                outcome["stale_skipped"] = True
+                _persist(run_dir, outcome)
+                return outcome
+        except Exception:
+            pass
     try:
         from codatiel_i2.semdup_dev import delta as D
         from codatiel_i2.semdup_dev import editorial_shadow as ES
@@ -276,7 +294,65 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         # higher ceiling) never repeats completed paid work.
         known = _load_continuation(state_dir, repo, pr, base_rev, head_rev)
         new_pairs, reused_rows = _partition_new(pairs, known)
+        # COST-01B: cross-revision content-addressed reuse (per-PR cache).
+        # Continuation covers same base/head reruns; the cache covers
+        # genuinely unchanged evidence across different revisions.
+        cache_hits: list[dict] = []
+        try:
+            from codatiel_i2.semdup_dev import cache as CACHE
+            from codatiel_i2.semdup_dev import oai_dupe as OD_mod
+            from codatiel_i2.semdup_dev import editor as ED_mod
+            import codatiel_i2.providers as P_mod
+            # Resolve model identities without requiring credentials for the
+            # key shape; missing backends still produce a stable key via
+            # empty model strings (cache will then miss on model change).
+            try:
+                terra_resolve = P_mod.resolve_backend("terra")
+                luna_resolve = P_mod.resolve_backend("luna")
+                terra_model = str(terra_resolve.get("model") or "")
+                luna_model = str(luna_resolve.get("model") or "")
+            except Exception:
+                terra_model = ""
+                luna_model = ""
+            try:
+                terra_id = OD_mod.TERRA_INSTRUCTIONS_ID
+            except Exception:
+                terra_id = ""
+            try:
+                luna_id = ED_mod.editor_instructions_id()
+            except Exception:
+                luna_id = ""
+            cache_dict = CACHE.load_cache(state_dir, repo, pr)
+            still_new: list[dict] = []
+            for p in new_pairs:
+                ident = CACHE.build_identity(
+                    merged_db=Path(merged["db"]),
+                    target=p.get("target") or {},
+                    counterpart=p.get("counterpart") or {},
+                    classification=str(p.get("classification") or ""),
+                    terra_model=terra_model,
+                    luna_model=luna_model,
+                    terra_instructions_id=terra_id,
+                    luna_instructions_id=luna_id,
+                    stage_version=STAGE_VERSION,
+                )
+                cached = CACHE.lookup(state_dir, repo, pr, ident, cache=cache_dict)
+                if cached is not None:
+                    rebound = CACHE.rebind_row(cached, Path(merged["db"]), repo, pr, head_rev)
+                    if rebound is not None:
+                        # Validate suggestion still applicable at current head
+                        cache_hits.append(rebound)
+                        continue
+                still_new.append(p)
+            new_pairs = still_new
+            if cache_hits:
+                reused_rows = list(reused_rows) + list(cache_hits)
+        except Exception:
+            # Cache is best-effort; never break judging.
+            pass
         outcome["pairs_reused"] = len(reused_rows)
+        outcome["pairs_cache_hits"] = len(cache_hits)
+        outcome["pairs_total"] = len(pairs)
         # Incremental persist: every CONTINUATION_EVERY judged pairs
         # merge into the record, so even a killed run keeps completed
         # verdicts for the authorized rerun.
@@ -293,6 +369,42 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                 _merge_continuation(state_dir, repo, pr, base_rev,
                                     head_rev, cont_buf)
                 cont_buf.clear()
+            # COST-01B: persist to cross-revision cache as well.
+            try:
+                from codatiel_i2.semdup_dev import cache as CACHE2
+                from codatiel_i2.semdup_dev import oai_dupe as OD2
+                from codatiel_i2.semdup_dev import editor as ED2
+                import codatiel_i2.providers as P2
+                try:
+                    tr = P2.resolve_backend("terra")
+                    lr = P2.resolve_backend("luna")
+                    tm = str(tr.get("model") or "")
+                    lm = str(lr.get("model") or "")
+                except Exception:
+                    tm = ""
+                    lm = ""
+                try:
+                    tid = OD2.TERRA_INSTRUCTIONS_ID
+                except Exception:
+                    tid = ""
+                try:
+                    lid = ED2.editor_instructions_id()
+                except Exception:
+                    lid = ""
+                ident2 = CACHE2.build_identity(
+                    merged_db=Path(merged["db"]),
+                    target=row.get("target") or {},
+                    counterpart=row.get("counterpart") or {},
+                    classification=str(row.get("classification") or ""),
+                    terra_model=tm,
+                    luna_model=lm,
+                    terra_instructions_id=tid,
+                    luna_instructions_id=lid,
+                    stage_version=STAGE_VERSION,
+                )
+                CACHE2.store(state_dir, repo, pr, ident2, row)
+            except Exception:
+                pass
 
         judged = ES.review_candidate_pairs(
             new_pairs, repo=repo, repo_path=repo_path,
@@ -300,7 +412,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             head_rev=head_rev, head_tree=head_tree, base_tree=base_tree,
             run_dir=run_dir, ceiling_usd=ceiling_usd,
             assess_fn=assess_fn, edit_fn=edit_fn,
-            on_pair=_on_pair)
+            on_pair=_on_pair, is_stale=is_stale)
         if cont_buf:
             _merge_continuation(state_dir, repo, pr, base_rev, head_rev,
                                 cont_buf)
