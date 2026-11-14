@@ -7,11 +7,39 @@ import json
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from codatiel_i2.core import coverage as coverage_mod
 from codatiel_i2.core import diff as diff_mod
+
+
+def _record_explicit_superseded(store, cfg, repo, number, head, cost, unknown, reason):
+    """Deduplicated superseded explicit-review delivery (collision-safe ID, unknown preserved)."""
+    delivery_id = f"explicit:{repo}:{number}:{head}:{int(cfg.clock()*1000000)}:{uuid.uuid4().hex[:8]}"
+    return store.delivery_record(
+        delivery_id=delivery_id,
+        event_type="explicit_review", action="redrive",
+        repo=repo, pr=number, head_sha=head,
+        decision="skipped:stale_superseded",
+        reason=reason,
+        cost_usd=(None if unknown else cost),
+        detail={"explicit": True, "cost_unknown": bool(unknown)},
+        now=cfg.clock())
+
+
+def _queued_extra_for(store, repo, number):
+    """Surfaced queued head after explicit review (no auto-run, informational)."""
+    cp = store.checkpoint_get(repo, number)
+    qh = (cp or {}).get("queued_head") or ""
+    qb = (cp or {}).get("queued_base") or ""
+    if qh:
+        return {"queued_remaining": {"base": qb, "head": qh},
+                "note": "queued head observed during explicit review; informational only — does not guarantee durable pending work or eventual processing; not auto-run from CLI (see issue #16)"}
+    return {}
+
+
 from codatiel_i2.core import files as files_mod
 from codatiel_i2.core import runs as runs_mod
 from codatiel_i2.core import workspace as workspace_mod
@@ -1179,8 +1207,11 @@ def cmd_events(args) -> dict:
                         "error": f"PR status {cp.get('status')!r} is not "
                                  "explicitly re-drivable"}
             try:
-                head = args.head.strip()
-                base = (args.base or "").strip() or None
+                # Canonical lowercase: an uppercase --head/--base must
+                # match, seal, and checkpoint identically (see
+                # normalize_event for the webhook path).
+                head = args.head.strip().lower()
+                base = (args.base or "").strip().lower() or None
                 from codatiel_i2 import event_pipeline as _pm
                 live_head = _pm.get_live_head(repo, number)
                 head_norm = head.strip()
@@ -1250,10 +1281,12 @@ def cmd_events(args) -> dict:
                                 f"on {_today}); re-drive refused"),
                         }
                 claim = store.claim_for_review(repo, number, base=use_base,
-                                               head=head)
+                                               head=head, now=cfg.clock())
                 if claim != "claimed":
                     return {"status": "queued", "decision": "queued",
                             "reason": f"claim returned {claim}"}
+                _claimed_cp = store.checkpoint_get(repo, number)
+                _claimed_run = (_claimed_cp or {}).get("in_progress_run") or ""
                 store.reserve(cfg.reserve_usd)
                 transport = os.environ.get(
                     "CODATIEL_EVENTS_TRANSPORT", "fixture")
@@ -1268,14 +1301,100 @@ def cmd_events(args) -> dict:
                 unknown = bool(result.get("cost_unknown")) or cost is None
                 store.settle(cfg.reserve_usd,
                              None if unknown else float(cost or 0.0))
-                store.complete_review(
+                # Freshness recheck before sealing: the head may have
+                # moved (or another run taken the pin) during
+                # inference. Spend is real and stays settled; a stale
+                # run records evidence but never seals, publishes, or
+                # overwrites the checkpoint.
+                _live_after = (_pm.get_live_head(repo, number) or "").strip()
+                _head_norm = (head or "").strip()
+                _live_ok = (not _live_after
+                            or _live_after.lower() == _head_norm.lower()
+                            or _live_after.lower().startswith(
+                                _head_norm.lower())
+                            or _head_norm.lower().startswith(
+                                _live_after.lower()))
+                _cp_now = store.checkpoint_get(repo, number)
+                # Ownership means the exact pinned claim: same head and
+                # base are not enough — a recovery + reclaim may hold
+                # the same range under a new generation, and sealing
+                # over it would clear the newer worker's pin. The
+                # deployment is single-worker; the run token is a
+                # minimal generation discriminator that makes a
+                # hypothetical concurrent same-range worker fail closed
+                # without a concurrency framework.
+                _owned_now = bool(
+                    _cp_now and _cp_now.get("status") == "in_progress"
+                    and (_cp_now.get("in_progress_head") or "") == head
+                    and (_cp_now.get("in_progress_base") or "")
+                    == use_base
+                    and (_cp_now.get("in_progress_run") or "")
+                    == _claimed_run)
+                if not _owned_now or not _live_ok:
+                    try:
+                        if _owned_now:
+                            _prior = (cp.get("status")
+                                      if isinstance(cp, dict) else None)
+                            store.release_claim(
+                                repo, number,
+                                "explicit review superseded before seal; "
+                                "spend kept, checkpoint left",
+                                base=use_base, head=head,
+                                prior_status=(_prior if isinstance(
+                                    _prior, str) else None),
+                                claim_run=_claimed_run)
+                    except store_mod.StoreError as exc:
+                        return {"status": "failed", "stage": "review",
+                                "error": str(exc)}
+                    try:
+                        _record_explicit_superseded(
+                            store, cfg, repo, number, head, cost, unknown,
+                            "explicit head went stale during inference; spend kept, no seal")
+                    except store_mod.StoreError as exc:
+                        return {"status": "failed", "stage": "review",
+                                "error": str(exc)}
+                    extra = _queued_extra_for(store, repo, number)
+                    return {"status": "skipped",
+                            "decision": "skipped:stale_superseded",
+                            "reason": f"head {head[:12]} went stale during "
+                                      f"explicit review (live "
+                                      f"{(_live_after or '?')[:12]}, "
+                                      f"{'claim lost' if not _owned_now else 'released'}); "
+                                      f"spend kept, checkpoint unchanged",
+                            "cost_usd": cost, **extra}
+                _sealed = store.complete_review(
                     repo, number, base=use_base, head=head,
                     diff_sha=info["diff_sha"], files=info["files"],
                     terra_findings=int(result.get("terra_findings") or 0),
                     luna_added=int(result.get("added") or 0),
                     cost_usd=cost, cost_unknown=unknown,
                     run_dir=result.get("run_dir") or "",
-                    result=result["status"])
+                    result=result["status"],
+                    claim_base=use_base, claim_head=head,
+                    claim_run=_claimed_run)
+                if not _sealed.get("sealed", True):
+                    # Atomic seal refused: the generation was replaced
+                    # (same range or not) after the freshness recheck.
+                    # Spend is already settled — record it so the daily
+                    # ledger sees it, just like the staleness branch
+                    # above. Unknown status is preserved. A persistence
+                    # failure here must NOT return success; the settled
+                    # spend remains in the ledger for reconciliation.
+                    try:
+                        _record_explicit_superseded(
+                            store, cfg, repo, number, head, cost, unknown,
+                            "claim replaced during explicit review; atomic seal refused, spend kept, checkpoint unchanged")
+                    except store_mod.StoreError as exc:
+                        return {"status": "failed", "stage": "review",
+                                "error": f"delivery record failed after atomic seal refusal: {exc}; settled spend ${cost if not unknown else 'unknown'} retained for reconciliation",
+                                "cost_usd": cost, "cost_unknown": bool(unknown)}
+                    extra2 = _queued_extra_for(store, repo, number)
+                    return {"status": "skipped",
+                            "decision": "skipped:stale_superseded",
+                            "reason": "claim replaced during explicit "
+                                      "review; atomic seal refused, spend "
+                                      "kept, checkpoint unchanged",
+                            "cost_usd": cost, **extra2}
                 store.review_record(
                     repo=repo, pr=number,
                     kind=("incremental" if anchor else "full"),
@@ -1286,6 +1405,12 @@ def cmd_events(args) -> dict:
                     luna_added=int(result.get("added") or 0),
                     cost_usd=cost, cost_unknown=unknown,
                     run_dir=result.get("run_dir") or "")
+                _queued3 = _sealed.get("queued")
+                extra3: dict = {}
+                if _queued3:
+                    _qb3, _qh3 = _queued3
+                    extra3["queued_remaining"] = {"base": _qb3, "head": _qh3}
+                    extra3["note"] = "queued head was cleared on successful completion; informational only — does not guarantee durable pending work or eventual processing; not auto-run from CLI (see issue #16)"
                 return {"status": (result["status"]
                                    if result["status"] in
                                    ("complete", "incomplete",
@@ -1293,7 +1418,7 @@ def cmd_events(args) -> dict:
                         "decision": "completed", "mode": result.get("mode"),
                         "terra_findings": result.get("terra_findings"),
                         "luna_added": result.get("added"),
-                        "run_dir": result.get("run_dir")}
+                        "run_dir": result.get("run_dir"), **extra3}
             except store_mod.StoreError as exc:
                 return {"status": "failed", "stage": "review",
                         "error": str(exc)}

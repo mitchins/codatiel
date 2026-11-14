@@ -577,29 +577,61 @@ def apply_to_event_config(cfg: Any) -> Any:
 def spend_on_day(store: Any, day: str) -> dict[str, Any]:
     """Codatiel-ledger spend for one UTC day (YYYY-MM-DD).
 
-    Derived from the reviews table (finished_ts). Reviews with unknown
-    cost contribute $0 here — they are tracked separately as
-    unknown-count, and the spend ledger holds reserves for them.
-    Labelled Codatiel-ledger-only, never total OpenAI spend.
+    Sums actual review costs (SUM, never cost x COUNT). Superseded
+    mid-flight inference has no reviews row — its delivery cost is
+    included exactly once here, including through a later replay mark
+    (replays preserve the original cost and carry the original
+    decision in their detail); completed/failed deliveries are
+    excluded because their cost already lives in the reviews table.
+    Reviews with unknown cost contribute $0 here — they are tracked
+    separately as unknown-count (including superseded runs whose true
+    cost never resolved), and the spend ledger holds reserves for
+    them. Labelled Codatiel-ledger-only, never total OpenAI spend.
     """
     try:
-        rows = store.cx.execute(
-            "SELECT COALESCE(cost_usd, 0), cost_unknown, COUNT(*) "
-            "FROM reviews WHERE date(finished_ts, 'unixepoch') = ? "
-            "GROUP BY cost_unknown",
-            (day,)).fetchall()
+        r = store.cx.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0), COUNT(*), "
+            "COALESCE(SUM(CASE WHEN cost_unknown THEN 1 ELSE 0 END), 0) "
+            "FROM reviews WHERE date(finished_ts, 'unixepoch') = ?",
+            (day,)).fetchone()
+        known = store.cx.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0) FROM reviews "
+            "WHERE date(finished_ts, 'unixepoch') = ? "
+            "AND NOT cost_unknown AND cost_usd IS NOT NULL",
+            (day,)).fetchone()[0]
+        # Superseded spend is attributed to the day it was incurred
+        # (finished_ts), matching the reviews table — not the day the
+        # delivery arrived. Pre-finished_ts rows fall back to
+        # received_ts.
+        day_of = "date(COALESCE(finished_ts, received_ts), 'unixepoch')"
+        s = store.cx.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0), COUNT(*) FROM deliveries "
+            "WHERE (decision = 'skipped:stale_superseded' OR "
+            "(decision = 'skipped:replay' AND "
+            "json_extract(detail, '$.original_decision') = "
+            "'skipped:stale_superseded')) "
+            "AND cost_usd IS NOT NULL "
+            f"AND {day_of} = ?",
+            (day,)).fetchone()
+        su = store.cx.execute(
+            "SELECT COUNT(*) FROM deliveries "
+            "WHERE (decision = 'skipped:stale_superseded' OR "
+            "(decision = 'skipped:replay' AND "
+            "json_extract(detail, '$.original_decision') = "
+            "'skipped:stale_superseded')) "
+            "AND cost_usd IS NULL "
+            f"AND {day_of} = ?",
+            (day,)).fetchone()[0]
     except Exception as exc:
         raise OperatorConfigError(
             f"daily spend query failed: {exc}") from exc
-    total, unknown, count = 0.0, 0, 0
-    for cost, is_unknown, n in rows:
-        count += int(n or 0)
-        if int(is_unknown or 0):
-            unknown += int(n or 0)
-        else:
-            total += float(cost or 0.0) * int(n or 0)
+    review_count = int(r[1] or 0)
+    unknown = int(r[2] or 0) + int(su or 0)
+    superseded = float(s[0] or 0.0)
+    total = float(known or 0.0) + superseded
     return {"day": day, "codatiel_ledger_usd": round(total, 6),
-            "reviews": count, "unknown_cost_reviews": unknown}
+            "reviews": review_count, "unknown_cost_reviews": unknown,
+            "superseded_inference_usd": round(superseded, 6)}
 
 
 def ingest_gate(cfg: Any, store: Any, ev: dict[str, Any],
