@@ -206,4 +206,51 @@ def ensure(db: sqlite3.Connection) -> str:
             f"platform schema mismatch: have "
             f"{(row[0] if row else None)!r}, need {SCHEMA_VERSION!r}; "
             f"refusing to run")
+    _require_capabilities(db)
     return SCHEMA_VERSION
+
+
+def _columns(db: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in
+            db.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _require_capabilities(db: sqlite3.Connection) -> None:
+    """Fail closed on platform databases that cannot safely be used.
+
+    Additive columns upgrade in place (tolerant ALTERs above), but
+    SQLite cannot add the four-column job uniqueness constraint after
+    the fact — and without it, routing's ON CONFLICT target is invalid
+    and reruns cannot be distinguished. An experimental #13 database
+    without the Slice-1A constraint is refused with an explicit
+    operator action instead of being silently misinterpreted. There is
+    no online upgrade path by design: cutover imports once into a
+    freshly initialized database.
+    """
+    missing = {"quarantined", "quarantine_note", "live_base",
+               "last_signal_head", "last_signal_base"} - _columns(
+                   db, "pl_pr_targets")
+    missing |= {"rerun_generation", "dirty_seen",
+                "comparison_base"} - _columns(db, "pl_jobs")
+    if missing:
+        raise RuntimeError(
+            f"platform database lacks columns {sorted(missing)}; "
+            f"re-initialize the platform database from scratch "
+            f"(delete the file and let ensure() recreate it) — "
+            f"experimental #13 state cannot be upgraded in place")
+    sql = (db.execute("SELECT sql FROM sqlite_master WHERE type='table' "
+                      "AND name='pl_jobs'").fetchone() or ("",))[0] or ""
+    need = {"repo", "pr", "target_generation", "rerun_generation"}
+    uniques = [part for part in sql.replace("\n", " ").split("UNIQUE(")
+               if ")" in part]
+    ok = any(need <= {c.strip().strip('"').strip("'").strip("[]").lower()
+                      for c in part.split(")", 1)[0].split(",")}
+             for part in uniques)
+    if not ok:
+        raise RuntimeError(
+            "platform database lacks the "
+            "(repo,pr,target_generation,rerun_generation) uniqueness "
+            "constraint; routing cannot distinguish reruns. "
+            "Re-initialize the platform database from scratch "
+            "(delete the file and let ensure() recreate it) — "
+            "experimental #13 state cannot be upgraded in place")

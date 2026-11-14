@@ -167,3 +167,57 @@ def test_settings_import_once_update_and_resolve(tmp_path):
     assert pol["pause_reviews"] is True
     assert pol["pause_publication"] is False  # legacy comment key carried
     conn.close()
+
+
+def test_ensure_fails_closed_on_unconstrainable_legacy_db(tmp_path):
+    import sqlite3
+
+    from codatiel_i2.platform import schema as schema_mod
+    # Simulate a mid-slice-1 experimental database: complete tables
+    # but the three-column job uniqueness (no rerun_generation) and
+    # none of the later target columns.
+    db_path = tmp_path / "legacy.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute(
+        "CREATE TABLE pl_pr_targets(repo TEXT NOT NULL, pr INTEGER NOT NULL,"
+        " repo_id INTEGER, app TEXT NOT NULL DEFAULT '',"
+        " lifecycle TEXT NOT NULL DEFAULT 'open',"
+        " lifecycle_version INTEGER NOT NULL DEFAULT 0,"
+        " target_generation INTEGER NOT NULL DEFAULT 0,"
+        " dirty_rev INTEGER NOT NULL DEFAULT 0,"
+        " live_head TEXT NOT NULL DEFAULT '',"
+        " live_observed REAL NOT NULL DEFAULT 0,"
+        " reviewed_head TEXT NOT NULL DEFAULT '',"
+        " reviewed_base TEXT NOT NULL DEFAULT '',"
+        " recon_owner TEXT NOT NULL DEFAULT '',"
+        " recon_fence INTEGER NOT NULL DEFAULT 0,"
+        " recon_expires REAL NOT NULL DEFAULT 0,"
+        " updated_ts REAL NOT NULL DEFAULT 0,"
+        " PRIMARY KEY(repo,pr))")
+    conn.execute(
+        "CREATE TABLE pl_jobs(id INTEGER PRIMARY KEY, repo TEXT NOT NULL,"
+        " pr INTEGER NOT NULL, target_generation INTEGER NOT NULL,"
+        " mode TEXT NOT NULL DEFAULT 'incremental',"
+        " full_base TEXT NOT NULL DEFAULT '',"
+        " full_head TEXT NOT NULL DEFAULT '',"
+        " diff_hash TEXT NOT NULL DEFAULT '',"
+        " fingerprint TEXT NOT NULL DEFAULT '',"
+        " state TEXT NOT NULL DEFAULT 'pending',"
+        " owner TEXT NOT NULL DEFAULT '', fence INTEGER NOT NULL DEFAULT 0,"
+        " lease_expires REAL NOT NULL DEFAULT 0, attempt INTEGER,"
+        " created_ts REAL NOT NULL DEFAULT 0,"
+        " UNIQUE(repo,pr,target_generation))")
+    conn.commit()
+    conn.close()
+    from codatiel_i2.platform import db as db_mod
+    conn = db_mod.connect(db_path)
+    try:
+        # Columns upgrade in place, but the missing four-column job
+        # uniqueness cannot be added: fail closed with an explicit
+        # operator action instead of misrouting reruns.
+        with pytest.raises(RuntimeError, match="Re-initialize"):
+            schema_mod.ensure(conn)
+    finally:
+        conn.close()

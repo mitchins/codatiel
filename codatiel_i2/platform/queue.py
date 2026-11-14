@@ -721,11 +721,18 @@ def heartbeat(db: sqlite3.Connection, claim: Claim,
 
 
 def _current(db: sqlite3.Connection, job: sqlite3.Row) -> bool:
+    """Live-target verification shared by all paid-effect gates.
+
+    Quarantine fails closed here (single choke point): crashed or
+    interrupted work holds no lease that can authorize new spend or
+    seal results, even if the lease predates the quarantine.
+    """
     tgt = _target(db, job["repo"], job["pr"])
     return bool(tgt is not None
                 and tgt["live_head"] == job["full_head"]
                 and int(tgt["target_generation"]) == job["target_generation"]
-                and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES)
+                and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES
+                and not int(tgt["quarantined"]))
 
 
 def dispatch_intent(db: sqlite3.Connection, claim: Claim, *,
@@ -804,6 +811,11 @@ def top_up_reservation(db: sqlite3.Connection, claim: Claim, *,
         raise ValueError("top-up must be positive")
     with tx(db):
         job = owned(db, claim, ts)
+        tgt = _target(db, job["repo"], job["pr"])
+        if tgt is not None and int(tgt["quarantined"]):
+            event(db, "topup_refused", job["id"], now=ts,
+                  scope="quarantined")
+            return False
         attempt = _attempt_by_id(db, claim.attempt)
         if attempt["state"] != "reserved":
             raise Conflict("only a reserved attempt can be topped up")
@@ -1204,7 +1216,8 @@ def begin_effect(db: sqlite3.Connection, effect_id: int,
             and tgt["live_head"] == job["full_head"]
             and int(tgt["target_generation"]) == job["target_generation"]
             and int(tgt["lifecycle_version"]) == eff["lifecycle_version"]
-            and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES)
+            and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES
+            and not int(tgt["quarantined"]))
         if not current and eff["state"] == "pending":
             db.execute("UPDATE pl_effects SET state='suppressed' "
                        "WHERE id=?", (effect_id,))
@@ -1262,7 +1275,8 @@ def authorize_send(db: sqlite3.Connection, effect: dict,
             and tgt["live_head"] == job["full_head"]
             and int(tgt["target_generation"]) == job["target_generation"]
             and int(tgt["lifecycle_version"]) == row["lifecycle_version"]
-            and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES)
+            and tgt["lifecycle"] in ELIGIBLE_LIFECYCLES
+            and not int(tgt["quarantined"]))
         if not current:
             db.execute("UPDATE pl_effects SET state='suppressed' "
                        "WHERE id=?", (row["id"],))
@@ -1409,6 +1423,17 @@ def events_after(db: sqlite3.Connection, cursor: int = 0,
     return [dict(r) for r in rows]
 
 
+# Event kinds whose ref is a job id. Effect, attempt, reconcile,
+# route, signal and receipt events share the same unqualified numeric
+# ref namespace (effect 1, attempt 1 and job 1 coexist), so any
+# job-scoped lookup must filter by kind — never by ref alone.
+JOB_EVENT_KINDS = frozenset({
+    "claim", "claim_stale", "complete", "complete_deferred",
+    "deferred_budget", "dispatch_intent", "dispatch_stale", "recover",
+    "reverify", "topup", "topup_refused",
+})
+
+
 def unknown_holds(db: sqlite3.Connection) -> list[dict]:
     """Operator attention query: every unresolved unknown-charge hold.
 
@@ -1420,6 +1445,7 @@ def unknown_holds(db: sqlite3.Connection) -> list[dict]:
     result artifact exists, so the operator can reconcile in full.
     Read-only.
     """
+    kinds = sorted(JOB_EVENT_KINDS)
     rows = db.execute(
         "SELECT a.id AS attempt,a.job,a.fence,a.reserve_micro,a.phase,"
         "j.repo,j.pr,j.state AS job_state,j.owner,j.full_head,"
@@ -1429,10 +1455,11 @@ def unknown_holds(db: sqlite3.Connection) -> list[dict]:
         "(SELECT COUNT(*) FROM pl_results r WHERE r.attempt=a.id) "
         "AS has_result,"
         "(SELECT MAX(seq) FROM pl_events e WHERE e.ref=CAST(a.job AS TEXT)"
-        " OR e.ref=a.job || '') AS last_event_seq "
+        f" AND e.kind IN ({','.join('?' * len(kinds))})) "
+        "AS last_event_seq "
         "FROM pl_attempts a JOIN pl_jobs j ON j.id=a.job "
         "LEFT JOIN pl_pr_targets t ON t.repo=j.repo AND t.pr=j.pr "
-        "WHERE a.state='unknown' ORDER BY a.id").fetchall()
+        "WHERE a.state='unknown' ORDER BY a.id", kinds).fetchall()
     return [dict(r) for r in rows]
 
 

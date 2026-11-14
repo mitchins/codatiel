@@ -879,3 +879,71 @@ def test_migration_quarantine_upgrades_existing_target(tmp_path):
     assert "explicit" in tgt["quarantine_note"]
     q.assert_invariants(conn)
     conn.close()
+
+
+def test_unknown_hold_last_event_ignores_colliding_effect(tmp_path):
+    conn = _open(tmp_path)
+    _budgets(conn, cycle=10.0)
+    _verify(conn, 1, "a" * 40)
+    q.accept(conn, app="gh", guid="g1", body=b"1", repo=REPO,
+             repo_id=1, pr=1, head="a" * 40, now=1000.0)
+    assert q.route(conn, app="gh", guid="g1", now=1000.0) == "routed"
+    c1 = q.claim(conn, owner="w1", reserve_usd=1.0, now=1000.0)
+    assert q.dispatch_intent(conn, c1, stage="t", call_id="c1",
+                             now=1000.0)
+    q.recover(conn, now=1000.0 + 61.0)
+    job_seq = conn.execute(
+        "SELECT MAX(seq) FROM pl_events WHERE ref='1' AND kind IN "
+        "('claim','dispatch_intent','recover')").fetchone()[0]
+    # A later effect shares the numeric id 1: its events must never
+    # become the hold's last_event_seq.
+    _verify(conn, 2, "b" * 40, now=1002.0)
+    q.accept(conn, app="gh", guid="g2", body=b"2", repo=REPO,
+             repo_id=1, pr=2, head="b" * 40, now=1002.0)
+    assert q.route(conn, app="gh", guid="g2", now=1002.0) == "routed"
+    c2 = q.claim(conn, owner="w2", reserve_usd=0.5, now=1002.0)
+    assert q.dispatch_intent(conn, c2, stage="t", call_id="c2",
+                             now=1002.0)
+    assert q.complete(conn, c2, actual_usd=0.1, run_path="/r2",
+                      manifest_sha="m", digest="d2",
+                      effects=[{"channel": "comment"}], now=1002.0) \
+        == "succeeded"
+    eff = conn.execute("SELECT * FROM pl_effects").fetchone()
+    assert eff["id"] == 1 and eff["job"] == c2.job
+    leased = q.begin_effect(conn, eff["id"], now=1003.0)
+    assert leased is not None  # emits effect_claim with ref '1'
+    collider = conn.execute(
+        "SELECT MAX(seq) FROM pl_events WHERE ref='1' AND kind="
+        "'effect_claim'").fetchone()[0]
+    assert collider is not None and collider > job_seq
+    holds = q.unknown_holds(conn)
+    assert len(holds) == 1
+    assert holds[0]["last_event_seq"] == job_seq
+    q.assert_invariants(conn)
+    conn.close()
+
+
+def test_quarantine_fences_preexisting_lease(tmp_path):
+    conn = _open(tmp_path)
+    _budgets(conn, cycle=10.0)
+    _verify(conn, 1, "a" * 40)
+    q.accept(conn, app="gh", guid="g1", body=b"1", repo=REPO,
+             repo_id=1, pr=1, head="a" * 40, now=1000.0)
+    assert q.route(conn, app="gh", guid="g1", now=1000.0) == "routed"
+    claim = q.claim(conn, owner="w", reserve_usd=1.0, now=1000.0)
+    # Quarantine lands while the lease is held (import of crashed
+    # state racing a live worker): the lease authorizes nothing more.
+    assert q.release_quarantine(conn, repo=REPO, pr=1, actor="op",
+                                now=1000.0) is False
+    conn.execute("UPDATE pl_pr_targets SET quarantined=1,"
+                 "quarantine_note='race' WHERE repo=? AND pr=?",
+                 (REPO, 1))
+    assert q.top_up_reservation(conn, claim, additional_usd=0.5,
+                                now=1001.0) is False
+    assert q.dispatch_intent(conn, claim, stage="t", call_id="c1",
+                             now=1001.0) is False
+    assert conn.execute("SELECT state FROM pl_jobs").fetchone()[0] \
+        == "superseded"
+    assert q.exposure(conn, "cycle") == 0
+    q.assert_invariants(conn)
+    conn.close()
