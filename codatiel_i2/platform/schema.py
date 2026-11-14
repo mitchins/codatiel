@@ -158,12 +158,43 @@ def ensure(db: sqlite3.Connection) -> str:
     by an earlier Slice-1 revision upgrades in place; failures other
     than duplicate-column are fatal.
 
-    Incompatible schemas fail closed BEFORE any write, with a
-    non-destructive diagnostic: the operator preserves the original
-    file, backs it up, and — only then — initializes a fresh database
-    at a separate path. Nothing here deletes, overwrites, or
-    auto-migrates historical records.
+    Incompatible schemas fail closed BEFORE any write where that is
+    promised, with a non-destructive diagnostic: the operator
+    preserves the original file, backs it up, and — only then —
+    initializes a fresh database at a separate path. Nothing here
+    deletes, overwrites, or auto-migrates historical records. The
+    four-column uniqueness and the schema-version are preflighted
+    read-only before any DDL so an incompatible file is refused with
+    zero writes and all legacy rows intact.
     """
+    # Preflight read-only checks before any DDL, satisfying the
+    # "fail closed BEFORE any write" promise for the two
+    # incompatible-schema paths. No DDL has run yet.
+    try:
+        exists = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='pl_jobs'").fetchone()
+        if exists is not None and not _has_four_column_unique(db):
+            raise RuntimeError(_incompatible_diagnostic(
+                db, "pl_jobs lacks the "
+                "(repo,pr,target_generation,rerun_generation) uniqueness "
+                "constraint, which SQLite cannot add after table creation"))
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+    try:
+        row0 = db.execute(
+            "SELECT value FROM meta WHERE key='platform_schema_version'"
+            ).fetchone()
+        if row0 is not None and row0[0] != SCHEMA_VERSION:
+            raise RuntimeError(_incompatible_diagnostic(
+                db, f"schema version is {row0[0]!r}, need "
+                f"{SCHEMA_VERSION!r}"))
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
     db.executescript(SCHEMA_SQL)
     _require_unique_constraint(db)
     for table, column, ddl in (
@@ -243,8 +274,9 @@ def _incompatible_diagnostic(db: sqlite3.Connection, reason: str) -> str:
         f"it still holds all historical reviews, checkpoints, spend "
         f"and publication records; "
         f"(2) take a SQLite-consistent backup BEFORE anything else "
-        f"(e.g. sqlite3 <db> \".backup '<backup-path>' with the "
-        f"database quiesced, keeping any -wal/-shm files with it); "
+        f"(e.g. sqlite3 original.db \".backup main 'backup.db'\" "
+        f"with the database quiesced, keeping any -wal/-shm files "
+        f"with it); "
         f"(3) initialize any fresh platform database at a SEPARATE "
         f"destination and import preserved history only through the "
         f"explicit, operator-run cutover import — never by replacing "

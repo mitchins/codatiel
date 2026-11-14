@@ -266,3 +266,101 @@ def test_ensure_version_mismatch_fails_closed_nondestructively(tmp_path):
                             ).fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def test_ensure_incompatible_preserves_legacy_v1_tables(tmp_path):
+    """Both incompatible-schema paths must leave co-located v1
+    deliveries/checkpoints/reviews/publications/spend rows intact.
+    The database file holds platform tables alongside the historical
+    v1 tables; a rejected upgrade must not delete or overwrite them."""
+    import sqlite3
+
+    from codatiel_i2 import event_store as v1_mod
+    from codatiel_i2.platform import db as db_mod
+    from codatiel_i2.platform import schema as schema_mod
+
+    # --- path A: missing four-column uniqueness ---
+    db_path_a = tmp_path / "a.sqlite"
+    # Create a v1 store first (writes deliveries etc.)
+    v1 = v1_mod.Store(db_path_a)
+    v1.meta_set("enabled_at", "2026-11-14T00:00:00Z")
+    v1.delivery_record(
+        delivery_id="d1", event_type="pull_request", action="opened",
+        repo="o/r", pr=1, head_sha="a" * 40, decision="completed",
+        reason="ok", cost_usd=0.99, detail={}, now=1000.0)
+    v1.checkpoint_upsert({"repo": "o/r", "pr": 1, "status": "reviewed",
+                          "last_reviewed_head": "a" * 40})
+    v1.review_record(
+        repo="o/r", pr=1, kind="full", base_sha="b" * 40, head_sha="a" * 40,
+        diff_sha="d", files=1, pipeline="terra_luna_additive",
+        status="complete", terra_findings=1, luna_added=0,
+        cost_usd=0.11, cost_unknown=False, run_dir="/r", now=1000.0)
+    v1.publication_record(repo="o/r", pr=1, head_sha="a" * 40,
+                          run_id="run1", comment_id="c1",
+                          outcome="posted", reason="ok")
+    v1.spend_set("settled_usd", 1.23)
+    v1.close()
+    # Now corrupt platform side: legacy three-column unique
+    conn = sqlite3.connect(db_path_a)
+    conn.row_factory = sqlite3.Row
+    # Add legacy platform tables with wrong uniqueness (if not already)
+    # The v1 Store already created meta/deliveries/checkpoints etc.;
+    # we add the legacy platform tables on top.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS pl_pr_targets(repo TEXT NOT NULL, pr INTEGER NOT NULL,"
+        " lifecycle TEXT NOT NULL DEFAULT 'open', PRIMARY KEY(repo,pr))")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS pl_jobs(id INTEGER PRIMARY KEY, repo TEXT NOT NULL,"
+        " pr INTEGER NOT NULL, target_generation INTEGER NOT NULL,"
+        " UNIQUE(repo,pr,target_generation))")
+    conn.commit()
+    conn.close()
+    conn = db_mod.connect(db_path_a)
+    try:
+        with pytest.raises(RuntimeError, match="preserve the original") as exc:
+            schema_mod.ensure(conn)
+        msg = str(exc.value).lower()
+        assert "backup" in msg and ".backup main" in str(exc.value)
+        assert "separate" in msg and "delete" not in msg
+        # Legacy v1 rows survive untouched
+        assert conn.execute("SELECT decision FROM deliveries WHERE delivery_id='d1'"
+                            ).fetchone()[0] == "completed"
+        assert conn.execute("SELECT status FROM checkpoints WHERE pr=1"
+                            ).fetchone()[0] == "reviewed"
+        assert conn.execute("SELECT cost_usd FROM reviews WHERE pr=1"
+                            ).fetchone()[0] == 0.11
+        assert conn.execute("SELECT outcome FROM publications WHERE run_id='run1'"
+                            ).fetchone()[0] == "posted"
+        assert conn.execute("SELECT value FROM spend WHERE key='settled_usd'"
+                            ).fetchone()[0] == 1.23
+    finally:
+        conn.close()
+
+    # --- path B: version mismatch with co-located v1 history ---
+    db_path_b = tmp_path / "b.sqlite"
+    v1b = v1_mod.Store(db_path_b)
+    v1b.meta_set("enabled_at", "2026-11-14T00:00:00Z")
+    v1b.delivery_record(
+        delivery_id="d2", event_type="pull_request", action="opened",
+        repo="o/r", pr=2, head_sha="b" * 40, decision="completed",
+        reason="ok", cost_usd=0.77, detail={}, now=1000.0)
+    v1b.checkpoint_upsert({"repo": "o/r", "pr": 2, "status": "reviewed",
+                           "last_reviewed_head": "b" * 40})
+    v1b.close()
+    conn2 = db_mod.connect(db_path_b)
+    # First ensure creates correct platform tables, then corrupt version
+    schema_mod.ensure(conn2)
+    conn2.execute("UPDATE meta SET value='codatiel_i2.platform.vX' "
+                  "WHERE key='platform_schema_version'")
+    conn2.commit()
+    conn2.close()
+    conn2 = db_mod.connect(db_path_b)
+    try:
+        with pytest.raises(RuntimeError, match="preserve the original"):
+            schema_mod.ensure(conn2)
+        assert conn2.execute("SELECT decision FROM deliveries WHERE delivery_id='d2'"
+                             ).fetchone()[0] == "completed"
+        assert conn2.execute("SELECT status FROM checkpoints WHERE pr=2"
+                             ).fetchone()[0] == "reviewed"
+    finally:
+        conn2.close()
