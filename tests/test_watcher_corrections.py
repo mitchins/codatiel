@@ -618,21 +618,11 @@ def test_explicit_atomic_seal_refusal_records_spend(
     """Freshness passes but atomic seal loses the race (same-range
     replacement). Spend already settled must still appear in the
     daily ledger via an explicit delivery row."""
-    from tests.test_prod01_lifecycle import _env
     from codatiel_i2 import cli as cli_mod
     from codatiel_i2 import event_pipeline as P
     repo = two_commit_repo
-    _env(monkeypatch, tmp_path, repo["repo"])
-    cfg = P.config_from_env()
-    cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    store = S.Store(cfg.state_dir / "events.sqlite")
+    cfg, store = _explicit_base(tmp_path, monkeypatch, repo)
     try:
-        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
-        store.checkpoint_upsert(
-            {"repo": "o/r", "pr": 10, "status": "reviewed",
-             "baseline_head": repo["base_sha"],
-             "last_reviewed_head": repo["base_sha"],
-             "last_reviewed_base": repo["base_sha"]})
         monkeypatch.setattr(P, "get_live_head",
                             lambda r, pr: repo["head_sha"])
         monkeypatch.setattr(
