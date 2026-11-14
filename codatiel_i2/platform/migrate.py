@@ -96,15 +96,25 @@ def migrate(db: sqlite3.Connection, *, v1_db_path: str,
                              {"schema": op_mod.SCHEMA_VERSION}, ts)
         imported_targets = 0
         stranded = []
-        queued_deltas: list[tuple[str, int, str]] = []
+        queued_deltas: list[tuple[str, int, str, str]] = []
         for cp in checkpoints:
             status = str(cp.get("status") or "")
             note_bits = [f"v1 status {status!r}"]
             if cp.get("note"):
                 note_bits.append(str(cp["note"])[:200])
+            quarantined = 0
+            quarantine_note = ""
+            lifecycle = "draft" if status == "draft" else "open"
             if status in ("in_progress", "interrupted"):
-                note_bits.append("cutover with no owner: re-verify, "
-                                 "never auto-respend")
+                # Crashed or interrupted in-flight work is quarantined:
+                # no automatic paid re-review — the sweep may verify
+                # live and routing may park a pending job, but no claim
+                # admits until an explicit, audited release.
+                quarantined = 1
+                quarantine_note = ("cutover with no owner: crashed or "
+                                   "interrupted in-flight review; explicit "
+                                   "release required, never auto-respend")
+                note_bits.append(quarantine_note)
                 stranded.append(f"{cp['repo']}#{cp['pr']}")
             reviewed = cp.get("last_reviewed_head") or ""
             base = (cp.get("last_reviewed_base")
@@ -125,15 +135,16 @@ def migrate(db: sqlite3.Connection, *, v1_db_path: str,
             db.execute(
                 "INSERT INTO pl_pr_targets(repo,pr,lifecycle,"
                 "target_generation,dirty_rev,reviewed_head,reviewed_base,"
-                "last_signal_head,updated_ts) VALUES(?,?,?,?,?,?,?,?,?) "
+                "last_signal_head,quarantined,quarantine_note,updated_ts) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(repo,pr) DO NOTHING",
-                (cp["repo"], cp["pr"],
-                 "draft" if status == "draft" else "open",
-                1 if status in ("reviewed", "grandfathered") else 0,
-                1, reviewed, base,
-                cp.get("last_reviewed_head")
-                or cp.get("in_progress_head")
-                or cp.get("baseline_head") or "", ts))
+                (cp["repo"], cp["pr"], lifecycle,
+                 1 if status in ("reviewed", "grandfathered") else 0,
+                 1, reviewed, base,
+                 cp.get("last_reviewed_head")
+                 or cp.get("in_progress_head")
+                 or cp.get("baseline_head") or "",
+                 quarantined, quarantine_note, ts))
             queue_mod.event(db, "import_target",
                             f"{cp['repo']}#{cp['pr']}", now=ts,
                             note="; ".join(note_bits),
@@ -141,7 +152,8 @@ def migrate(db: sqlite3.Connection, *, v1_db_path: str,
             imported_targets += 1
             queued = cp.get("queued_head") or ""
             if queued and queued != (cp.get("last_reviewed_head") or ""):
-                queued_deltas.append((cp["repo"], cp["pr"], queued))
+                queued_deltas.append((cp["repo"], cp["pr"], queued,
+                                      lifecycle))
         imported_markers = 0
         for pub in reversed(publications):
             # Newest first: ON CONFLICT keeps the newest posted marker
@@ -179,14 +191,16 @@ def migrate(db: sqlite3.Connection, *, v1_db_path: str,
     # synthetic receipt, announced but unverified: the slow sweep
     # verifies live, the worker re-routes, and the delta reviews
     # through the normal gates — never a bulk backfill, never silent.
+    # The receipt carries the checkpoint's effective lifecycle: draft
+    # deltas wait for readiness, quarantined ones wait for release.
     # Post-commit and individually transactional: a crash here loses
     # nothing the sweep cannot re-derive (live != reviewed_head).
-    for repo, pr, queued in queued_deltas:
+    for repo, pr, queued, qlifecycle in queued_deltas:
         queue_mod.accept(db, app="migration",
                          guid=f"migrate:{repo}:{pr}:{queued}",
                          body=f"migrate:{repo}:{pr}:{queued}".encode(),
                          repo=repo, repo_id=None, pr=pr, head=queued,
-                         lifecycle="open", now=ts)
+                         lifecycle=qlifecycle, now=ts)
         queue_mod.signal(db, repo=repo, pr=pr, head=queued,
-                         lifecycle="open", now=ts)
+                         lifecycle=qlifecycle, now=ts)
     return summary

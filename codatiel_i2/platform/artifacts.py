@@ -96,14 +96,23 @@ def commit(staging: Path, runs_root: Path) -> Path:
 
 
 def validate(run_dir: Path) -> bool:
-    """True when every manifest entry exists with the recorded hash."""
+    """True when every manifest entry exists with the recorded hash.
+
+    A pure predicate: never raises. Malformed manifests (not JSON, not
+    an object, files not a string->string map) are invalid, never
+    trusted — and never abort validation of other directories.
+    """
     try:
         manifest = json.loads((Path(run_dir) / MANIFEST_NAME).read_text(
             encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            return False
         files = manifest.get("files")
         if not isinstance(files, dict) or not files:
             return False
         for name, want in files.items():
+            if not isinstance(name, str) or not isinstance(want, str):
+                return False
             _safe_name(name, "manifest entry")
             if name == MANIFEST_NAME:
                 return False
@@ -111,16 +120,25 @@ def validate(run_dir: Path) -> bool:
             if hashlib.sha256(data).hexdigest() != want:
                 return False
         return True
-    except (OSError, ValueError):
+    except (OSError, ValueError, AttributeError, TypeError):
         return False
 
 
 def manifest_sha(run_dir: Path) -> str:
-    """Content hash binding a run directory to its database reference."""
+    """Content hash binding a run directory to its database reference.
+
+    Refuses malformed manifests loudly: a hash over garbage would bind
+    the ledger to an unvalidatable bundle.
+    """
     try:
         blob = (Path(run_dir) / MANIFEST_NAME).read_bytes()
-    except OSError as exc:
-        raise RuntimeError(f"run has no manifest: {run_dir}: {exc}")
+        parsed = json.loads(blob.decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"run has no readable manifest: {run_dir}: "
+                           f"{exc}")
+    if not isinstance(parsed, dict) or not isinstance(
+            parsed.get("files"), dict):
+        raise RuntimeError(f"run manifest malformed: {run_dir}")
     return hashlib.sha256(blob).hexdigest()
 
 

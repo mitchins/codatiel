@@ -266,3 +266,54 @@ def test_artifact_stage_commit_validate_and_quarantine(tmp_path):
     st3 = art_mod.stage(staging, "run3", files)
     out = art_mod.recover_runs(staging, runs)
     assert st3.name in out["complete_staging"]
+
+
+def test_artifact_malformed_manifests_quarantined_selectively(tmp_path):
+    import hashlib
+    import json
+
+    staging = tmp_path / "staging"
+    runs = tmp_path / "runs"
+    staging.mkdir()
+    good_files = {"review.json": b'{"ok": true}'}
+    good = art_mod.stage(staging, "good", good_files)
+    good_dest = art_mod.commit(good, runs)
+    assert art_mod.validate(good_dest)
+
+    def write_run(name, manifest_text, extra=()):
+        d = runs / name
+        d.mkdir()
+        (d / art_mod.MANIFEST_NAME).write_text(manifest_text,
+                                               encoding="utf-8")
+        for fname, content in extra:
+            (d / fname).write_bytes(content)
+        return d
+
+    digest = hashlib.sha256(good_files["review.json"]).hexdigest()
+    bad_dirs = {
+        "null": write_run("r-null", "null"),
+        "list": write_run("r-list", '["files"]'),
+        "string": write_run("r-string", '"manifest"'),
+        "no_files": write_run("r-nofiles", '{"run_id": "x"}'),
+        "files_list": write_run("r-fileslist", '{"files": ["a"]}'),
+        "files_null": write_run("r-filesnull", '{"files": null}'),
+        "hash_number": write_run(
+            "r-hashnum", json.dumps({"files": {"review.json": 42}}),
+            [("review.json", good_files["review.json"])]),
+        "hash_null": write_run(
+            "r-hashnull", json.dumps({"files": {"review.json": None}}),
+            [("review.json", good_files["review.json"])]),
+        "not_json": write_run("r-nojson", "{oops"),
+    }
+    for name, path in bad_dirs.items():
+        assert not art_mod.validate(path), name
+    # manifest_sha on a malformed run refuses loudly (no silent hash).
+    with pytest.raises(RuntimeError):
+        art_mod.manifest_sha(runs / "r-nojson")
+    # Recovery classifies each directory independently: one bad apple
+    # never aborts the rest, and the good run is untouched.
+    out = art_mod.recover_runs(staging, runs)
+    assert out["complete_staging"] == []
+    assert str(good_dest) not in out["quarantine"]
+    assert sorted(out["quarantine"]) == sorted(
+        str(runs / n) for n in bad_dirs.values())

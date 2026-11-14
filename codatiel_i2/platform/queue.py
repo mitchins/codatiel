@@ -422,7 +422,8 @@ def route(db: sqlite3.Connection, *, app: str, guid: str,
     commit that changes live state (see reroute()).
 
     Returns 'routed', 'pending' (no verifiable live observation yet,
-    or head announced but not yet verified — never infer), 'stale'
+    head announced but not yet verified, or draft target awaiting
+    readiness — never infer, never burn), 'stale'
     (two witnesses agree the head is superseded: verified live AND
     the last announcement both differ), 'suppressed_lifecycle'
     (target not eligible; never schedules),
@@ -451,6 +452,10 @@ def route(db: sqlite3.Connection, *, app: str, guid: str,
         if tgt is None or not tgt["live_head"]:
             return "pending"
         if tgt["lifecycle"] not in ELIGIBLE_LIFECYCLES:
+            if tgt["lifecycle"] == "draft":
+                # Readiness may still come: wait, don't burn the
+                # receipt and never schedule.
+                return "pending"
             db.execute("UPDATE pl_inbox SET state='suppressed_lifecycle' "
                        "WHERE app=? AND guid=?", (app, guid))
             event(db, "route", guid, now=ts, state="suppressed_lifecycle")
@@ -520,6 +525,30 @@ def route(db: sqlite3.Connection, *, app: str, guid: str,
         event(db, "route", guid, now=ts, state=outcome,
               generation=int(tgt["target_generation"]))
     return outcome
+
+
+def release_quarantine(db: sqlite3.Connection, *, repo: str, pr: int,
+                       actor: str = "operator", note: str = "",
+                       now: float | None = None) -> bool:
+    """Explicit, audited release of an imported quarantine.
+
+    Crashed or interrupted work never auto-resumes: the operator
+    releases it after reconciliation (or re-drives explicitly), and
+    the release itself is journaled. Returns False when nothing was
+    quarantined. Never clears silently, never via signal/sweep.
+    """
+    ts = _now(now)
+    with tx(db):
+        tgt = _target(db, repo, pr)
+        if tgt is None or not int(tgt["quarantined"]):
+            return False
+        db.execute("UPDATE pl_pr_targets SET quarantined=0,"
+                   "quarantine_note=?,updated_ts=? "
+                   "WHERE repo=? AND pr=?",
+                   (f"released by {actor}: {note[:200]}", ts, repo, pr))
+        event(db, "quarantine_release", f"{repo}#{pr}", now=ts,
+              actor=actor, note=note[:200])
+    return True
 
 
 def reroute(db: sqlite3.Connection, *, repo: str, pr: int,
@@ -605,6 +634,8 @@ def claim(db: sqlite3.Connection, *, owner: str, reserve_usd: float,
         # with a parked (awaiting_verification) job admit nothing
         # new: one review authority per PR; the newer head waits for
         # the park to resolve (reverify or lease-bounded expiry).
+        # Quarantined targets never admit: crashed or interrupted
+        # work needs an explicit, audited release first.
         row = None
         for cand in db.execute(
                 "SELECT j.* FROM pl_jobs j "
@@ -617,6 +648,8 @@ def claim(db: sqlite3.Connection, *, owner: str, reserve_usd: float,
                     and cand["repo"] not in pol.allowed_repos):
                 continue
             tgt = _target(db, cand["repo"], cand["pr"])
+            if tgt is not None and int(tgt["quarantined"]):
+                continue
             if (tgt is None or tgt["live_head"] != cand["full_head"]
                     or int(tgt["target_generation"]) !=
                     cand["target_generation"]
@@ -805,6 +838,8 @@ def _settle(db: sqlite3.Connection, attempt: int,
             and not adjudicated:
         raise Conflict("unknown hold resolves only via resolve_unknown")
     if actual_micro is None:
+        if row["state"] == "unknown":
+            return  # already held: read-only, no write
         db.execute("UPDATE pl_attempts SET state='unknown' WHERE id=?",
                    (attempt,))
     else:
@@ -832,7 +867,12 @@ def complete(db: sqlite3.Connection, claim: Claim, *,
     reconciles, then reverify() either resumes (duplicate signals
     only) or stands the run down. Effect intents are created by the
     sealing call, so a parked completion must repeat them on resume.
-    Returns the terminal state.
+
+    Ownership: every mutating path requires an exact, current,
+    unexpired owned claim first — including the replay/resume branch.
+    The sole exception is an already-terminal identical completion,
+    which answers read-only (no checkpoint, effect, or settlement
+    write) without demanding a live lease. Returns the terminal state.
     """
     ts = _now(now)
     actual = (None if actual_usd is None
@@ -840,29 +880,50 @@ def complete(db: sqlite3.Connection, claim: Claim, *,
     with tx(db):
         previous = _row(db, "SELECT * FROM pl_results WHERE attempt=?",
                         (claim.attempt,))
-        parked = _row(db, "SELECT * FROM pl_jobs WHERE id=? AND state=?",
-                      (claim.job, "awaiting_verification"))
-        if parked is not None:
-            job = owned(db, claim, ts)
-            return _finalize_parked(db, claim, job, previous, digest,
-                                    actual, effects, ts)
         if previous is not None:
             if previous["job"] != claim.job or previous["digest"] != digest:
                 raise Conflict("conflicting replay of completion")
-            attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
-                           (claim.attempt,))
-            capped = (actual if actual is None else min(
-                actual, int(attempt["reserve_micro"])))
-            _settle(db, claim.attempt, capped)
-            resumed = _row(db, "SELECT * FROM pl_jobs WHERE id=?",
+            job_row = _row(db, "SELECT * FROM pl_jobs WHERE id=?",
                            (claim.job,))
-            if resumed is not None and resumed["state"] == "running":
+            if job_row is None:
+                raise Conflict("result without a job; refusing to seal")
+            if job_row["state"] not in ("leased", "running",
+                                        "awaiting_verification"):
+                # Already terminal and identical: read-only answer. Only
+                # proven no-op inputs pass; anything else raises instead
+                # of writing (unknown holds resolve via adjudication).
+                attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
+                               (claim.attempt,))
+                capped = (actual if actual is None else min(
+                    actual, int(attempt["reserve_micro"])))
+                if attempt["state"] == "settled":
+                    if attempt["actual_micro"] != capped:
+                        raise Conflict("settlement differs from previous "
+                                       "settlement")
+                    return "already_complete"
+                if attempt["state"] == "unknown" and actual is None:
+                    return "already_complete"
+                raise Conflict("terminal replay with new money; resolve "
+                               "via resolve_unknown")
+            # Job still live: the resumer must hold the exact current
+            # claim — an expired, fenced, or foreign claim seals
+            # nothing.
+            job = owned(db, claim, ts)
+            if job["state"] == "awaiting_verification":
+                return _finalize_parked(db, claim, job, previous, digest,
+                                        actual, effects, ts)
+            if job["state"] == "running":
                 # Resume after reverify (or a crash between the result
                 # insert and the seal): the sealed evidence exists, the
                 # job is live — finalize through the normal gates
                 # instead of short-circuiting.
-                return _seal(db, resumed, effects, ts)
-            return "already_complete"
+                attempt = _row(db, "SELECT * FROM pl_attempts WHERE id=?",
+                               (claim.attempt,))
+                capped = (actual if actual is None else min(
+                    actual, int(attempt["reserve_micro"])))
+                _settle(db, claim.attempt, capped)
+                return _seal(db, job, effects, ts)
+            raise Conflict("completion without dispatch intent")
         job = owned(db, claim, ts)
         if job["state"] != "running":
             raise Conflict("completion without dispatch intent")
@@ -1344,6 +1405,33 @@ def events_after(db: sqlite3.Connection, cursor: int = 0,
                  limit: int = 100) -> list[dict]:
     rows = db.execute("SELECT * FROM pl_events WHERE seq>? ORDER BY seq "
                       "LIMIT ?", (cursor, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def unknown_holds(db: sqlite3.Connection) -> list[dict]:
+    """Operator attention query: every unresolved unknown-charge hold.
+
+    Finds holds regardless of job lifecycle (leased, running, parked,
+    superseded, cancelled, needs_attention): an unknown attempt is
+    money the ledger cannot account for until adjudicated, and no
+    state transition may silently settle or discard it. Each row
+    carries the job, target, reservation, last event, and whether a
+    result artifact exists, so the operator can reconcile in full.
+    Read-only.
+    """
+    rows = db.execute(
+        "SELECT a.id AS attempt,a.job,a.fence,a.reserve_micro,a.phase,"
+        "j.repo,j.pr,j.state AS job_state,j.owner,j.full_head,"
+        "j.created_ts AS job_created,"
+        "t.live_head,t.lifecycle AS target_lifecycle,"
+        "t.quarantined,"
+        "(SELECT COUNT(*) FROM pl_results r WHERE r.attempt=a.id) "
+        "AS has_result,"
+        "(SELECT MAX(seq) FROM pl_events e WHERE e.ref=CAST(a.job AS TEXT)"
+        " OR e.ref=a.job || '') AS last_event_seq "
+        "FROM pl_attempts a JOIN pl_jobs j ON j.id=a.job "
+        "LEFT JOIN pl_pr_targets t ON t.repo=j.repo AND t.pr=j.pr "
+        "WHERE a.state='unknown' ORDER BY a.id").fetchall()
     return [dict(r) for r in rows]
 
 

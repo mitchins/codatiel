@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS pl_pr_targets(
   recon_owner TEXT NOT NULL DEFAULT '',
   recon_fence INTEGER NOT NULL DEFAULT 0,
   recon_expires REAL NOT NULL DEFAULT 0,
+  quarantined INTEGER NOT NULL DEFAULT 0,
+  quarantine_note TEXT NOT NULL DEFAULT '',
   updated_ts REAL NOT NULL DEFAULT 0,
   PRIMARY KEY(repo,pr));
 CREATE TABLE IF NOT EXISTS pl_jobs(
@@ -151,8 +153,42 @@ def ensure(db: sqlite3.Connection) -> str:
     The version insert tolerates a lost first-start race: two
     concurrent fresh starts both create tables (IF NOT EXISTS), then
     exactly one wins the version row and the loser re-reads it.
+
+    Additive columns land via tolerant ALTERs so a database created
+    by an earlier Slice-1 revision upgrades in place; failures other
+    than duplicate-column are fatal.
     """
     db.executescript(SCHEMA_SQL)
+    for table, column, ddl in (
+            ("pl_pr_targets", "live_base",
+             "ALTER TABLE pl_pr_targets ADD COLUMN live_base TEXT "
+             "NOT NULL DEFAULT ''"),
+            ("pl_pr_targets", "last_signal_head",
+             "ALTER TABLE pl_pr_targets ADD COLUMN last_signal_head TEXT "
+             "NOT NULL DEFAULT ''"),
+            ("pl_pr_targets", "last_signal_base",
+             "ALTER TABLE pl_pr_targets ADD COLUMN last_signal_base TEXT "
+             "NOT NULL DEFAULT ''"),
+            ("pl_pr_targets", "quarantined",
+             "ALTER TABLE pl_pr_targets ADD COLUMN quarantined INTEGER "
+             "NOT NULL DEFAULT 0"),
+            ("pl_pr_targets", "quarantine_note",
+             "ALTER TABLE pl_pr_targets ADD COLUMN quarantine_note TEXT "
+             "NOT NULL DEFAULT ''"),
+            ("pl_jobs", "comparison_base",
+             "ALTER TABLE pl_jobs ADD COLUMN comparison_base TEXT "
+             "NOT NULL DEFAULT ''"),
+            ("pl_jobs", "dirty_seen",
+             "ALTER TABLE pl_jobs ADD COLUMN dirty_seen INTEGER "
+             "NOT NULL DEFAULT 0"),
+            ("pl_jobs", "rerun_generation",
+             "ALTER TABLE pl_jobs ADD COLUMN rerun_generation INTEGER "
+             "NOT NULL DEFAULT 0")):
+        try:
+            db.execute(ddl)
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
     row = db.execute("SELECT value FROM meta WHERE key=?",
                      ("platform_schema_version",)).fetchone()
     if row is None:
