@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -404,7 +405,7 @@ class Store:
             raise StoreError(f"checkpoint write failed: {exc}")
 
     def claim_for_review(self, repo: str, pr: int, *, base: str,
-                         head: str, now: float | None = None) -> str:
+                          head: str, now: float | None = None) -> str:
         """Atomic per-PR claim: 'claimed' | 'queued' | 'already'.
 
         - no in_progress row -> set in_progress (caller owns the review).
@@ -412,8 +413,17 @@ class Store:
           must NOT run inference.
         - in_progress with the same head -> 'already' (retry of the same
           pinned review; caller must NOT run inference twice).
+
+        A generation token (in_progress_run) is minted on every
+        successful claim so a same-range replacement (recovery +
+        reclaim with identical base/head) is distinguishable: the
+        caller must present the exact token to seal or release. The
+        deployment is single-worker; the token is a minimal
+        discriminator that makes a hypothetical concurrent same-range
+        worker fail closed without a concurrency framework.
         """
         ts = time.time() if now is None else now
+        token = uuid.uuid4().hex[:16]
         try:
             self.cx.execute(_BEGIN)
             cur = self.cx.execute(
@@ -422,9 +432,10 @@ class Store:
             if cur is None:
                 self.cx.execute(
                     "INSERT INTO checkpoints(repo, pr, status,"
-                    " in_progress_base, in_progress_head, updated_ts)"
-                    " VALUES(?, ?, 'in_progress', ?, ?, ?)",
-                    (repo, pr, base, head, ts))
+                    " in_progress_base, in_progress_head, in_progress_run,"
+                    " updated_ts)"
+                    " VALUES(?, ?, 'in_progress', ?, ?, ?, ?)",
+                    (repo, pr, base, head, token, ts))
                 self.cx.execute(_COMMIT)
                 return "claimed"
             status, iph = cur[0], cur[1]
@@ -441,8 +452,8 @@ class Store:
             self.cx.execute(
                 "UPDATE checkpoints SET status='in_progress',"
                 " in_progress_base=?, in_progress_head=?,"
-                " in_progress_run='', updated_ts=? WHERE repo=? AND pr=?",
-                (base, head, ts, repo, pr))
+                " in_progress_run=?, updated_ts=? WHERE repo=? AND pr=?",
+                (base, head, token, ts, repo, pr))
             self.cx.execute(_COMMIT)
             return "claimed"
         except Exception as exc:
@@ -453,12 +464,13 @@ class Store:
             raise StoreError(f"claim failed: {exc}")
 
     def complete_review(self, repo: str, pr: int, *, base: str, head: str,
-                        diff_sha: str, files: int, terra_findings: int,
-                        luna_added: int, cost_usd: float | None,
-                        cost_unknown: bool, run_dir: str, result: str,
-                        now: float | None = None,
-                        claim_base: str | None = None,
-                        claim_head: str | None = None) -> dict:
+                         diff_sha: str, files: int, terra_findings: int,
+                         luna_added: int, cost_usd: float | None,
+                         cost_unknown: bool, run_dir: str, result: str,
+                         now: float | None = None,
+                         claim_base: str | None = None,
+                         claim_head: str | None = None,
+                         claim_run: str | None = None) -> dict:
         """Seal a finished review; drain any queued newer head.
 
         Returns {'queued': (base, head) | None, 'sealed': bool}: a
@@ -467,33 +479,57 @@ class Store:
 
         When claim_base/claim_head are given, the seal is atomic: the
         checkpoint advances only if the pinned in_progress claim is
-        still exactly the caller's (status, base, head). A replaced
-        claim (recovery + reclaim, even for the same head) seals
-        nothing — the caller must stand down instead of clearing a
-        newer worker's pin. Without them the historical unconditional
-        seal applies (automatic pipeline path, gated by its own
-        ownership checks).
+        still exactly the caller's (status, base, head, run token).
+        A replaced claim (recovery + reclaim, even for the same
+        head/base) seals nothing — the caller must stand down instead
+        of clearing a newer worker's pin. Without them the historical
+        unconditional seal applies (automatic pipeline path, gated by
+        its own ownership checks).
+
+        The deployment is single-worker; the run token is a minimal
+        generation discriminator that makes a hypothetical concurrent
+        same-range worker fail closed without a concurrency framework.
         """
         ts = time.time() if now is None else now
         try:
             self.cx.execute(_BEGIN)
-            if claim_base is not None or claim_head is not None:
-                changed = self.cx.execute(
-                    "UPDATE checkpoints SET status='reviewed',"
-                    " last_reviewed_base=?, last_reviewed_head=?,"
-                    " reviewed_diff_sha=?, reviewed_files=?,"
-                    " terra_findings=?, luna_added=?, last_cost_usd=?,"
-                    " cost_unknown=?, last_run_dir=?, last_result=?,"
-                    " in_progress_base='', in_progress_head='',"
-                    " in_progress_run='', updated_ts=? "
-                    "WHERE repo=? AND pr=? AND status='in_progress' "
-                    "AND in_progress_base=? AND in_progress_head=?",
-                    (base, head, diff_sha, files, terra_findings,
-                     luna_added, cost_usd, 1 if cost_unknown else 0,
-                     run_dir, result, ts, repo, pr,
-                     claim_base if claim_base is not None else base,
-                     claim_head if claim_head is not None else head)
-                    ).rowcount
+            if claim_base is not None or claim_head is not None or claim_run is not None:
+                if claim_run is not None:
+                    changed = self.cx.execute(
+                        "UPDATE checkpoints SET status='reviewed',"
+                        " last_reviewed_base=?, last_reviewed_head=?,"
+                        " reviewed_diff_sha=?, reviewed_files=?,"
+                        " terra_findings=?, luna_added=?, last_cost_usd=?,"
+                        " cost_unknown=?, last_run_dir=?, last_result=?,"
+                        " in_progress_base='', in_progress_head='',"
+                        " in_progress_run='', updated_ts=? "
+                        "WHERE repo=? AND pr=? AND status='in_progress' "
+                        "AND in_progress_base=? AND in_progress_head=? "
+                        "AND in_progress_run=?",
+                        (base, head, diff_sha, files, terra_findings,
+                         luna_added, cost_usd, 1 if cost_unknown else 0,
+                         run_dir, result, ts, repo, pr,
+                         claim_base if claim_base is not None else base,
+                         claim_head if claim_head is not None else head,
+                         claim_run)
+                        ).rowcount
+                else:
+                    changed = self.cx.execute(
+                        "UPDATE checkpoints SET status='reviewed',"
+                        " last_reviewed_base=?, last_reviewed_head=?,"
+                        " reviewed_diff_sha=?, reviewed_files=?,"
+                        " terra_findings=?, luna_added=?, last_cost_usd=?,"
+                        " cost_unknown=?, last_run_dir=?, last_result=?,"
+                        " in_progress_base='', in_progress_head='',"
+                        " in_progress_run='', updated_ts=? "
+                        "WHERE repo=? AND pr=? AND status='in_progress' "
+                        "AND in_progress_base=? AND in_progress_head=?",
+                        (base, head, diff_sha, files, terra_findings,
+                         luna_added, cost_usd, 1 if cost_unknown else 0,
+                         run_dir, result, ts, repo, pr,
+                         claim_base if claim_base is not None else base,
+                         claim_head if claim_head is not None else head)
+                        ).rowcount
                 if not changed:
                     self.cx.execute(_COMMIT)
                     return {"queued": None, "sealed": False}
@@ -562,22 +598,29 @@ class Store:
             raise StoreError(f"interrupt mark failed: {exc}")
 
     def release_claim(self, repo: str, pr: int, note: str, *,
-                      base: str, head: str,
-                      prior_status: str | None = None) -> bool:
-        """Release exactly the held claim matching (base, head).
+                       base: str, head: str,
+                       prior_status: str | None = None,
+                       claim_run: str | None = None) -> bool:
+        """Release exactly the held claim matching (base, head, run).
 
         Atomic ownership check: the UPDATE only clears a checkpoint
-        whose pinned in_progress range is exactly the caller's. An
-        expired or replaced worker — including one holding the same
-        head from an older base — cannot release a newer claim.
-        Returns True when this caller's claim was released, False when
-        nothing was held or the pinned claim belongs to someone else.
+        whose pinned in_progress range and generation token are
+        exactly the caller's. An expired or replaced worker —
+        including one holding the same head/base from a different
+        generation — cannot release a newer claim. Returns True when
+        this caller's claim was released, False when nothing was held
+        or the pinned claim belongs to someone else.
+
+        The run token is optional: when None, only base/head are
+        checked (backwards compatible). The caller should pass the
+        token minted at claim time when available so a same-range
+        replacement cannot be cleared.
         """
         try:
             self.cx.execute(_BEGIN)
             row = self.cx.execute(
                 "SELECT status, last_reviewed_head, in_progress_base,"
-                " in_progress_head FROM checkpoints"
+                " in_progress_head, in_progress_run FROM checkpoints"
                 " WHERE repo=? AND pr=?", (repo, pr)).fetchone()
             if row is None or row[0] != "in_progress":
                 self.cx.execute(_COMMIT)
@@ -586,19 +629,33 @@ class Store:
                 # A different (newer or older) run owns the pin.
                 self.cx.execute(_COMMIT)
                 return False
+            if claim_run is not None and (row[4] or "") != claim_run:
+                self.cx.execute(_COMMIT)
+                return False
             if prior_status in ("reviewed", "draft", "deferred",
                                 "grandfathered", "failed", "interrupted"):
                 status = prior_status
             else:
                 status = ("reviewed" if row[1] else "deferred")
-            changed = self.cx.execute(
-                "UPDATE checkpoints SET status=?, note=?,"
-                " in_progress_base='', in_progress_head='',"
-                " in_progress_run='', updated_ts=? "
-                "WHERE repo=? AND pr=? AND status='in_progress' "
-                "AND in_progress_base=? AND in_progress_head=?",
-                (status, note, time.time(), repo, pr, base,
-                 head)).rowcount
+            if claim_run is not None:
+                changed = self.cx.execute(
+                    "UPDATE checkpoints SET status=?, note=?,"
+                    " in_progress_base='', in_progress_head='',"
+                    " in_progress_run='', updated_ts=? "
+                    "WHERE repo=? AND pr=? AND status='in_progress' "
+                    "AND in_progress_base=? AND in_progress_head=? "
+                    "AND in_progress_run=?",
+                    (status, note, time.time(), repo, pr, base,
+                     head, claim_run)).rowcount
+            else:
+                changed = self.cx.execute(
+                    "UPDATE checkpoints SET status=?, note=?,"
+                    " in_progress_base='', in_progress_head='',"
+                    " in_progress_run='', updated_ts=? "
+                    "WHERE repo=? AND pr=? AND status='in_progress' "
+                    "AND in_progress_base=? AND in_progress_head=?",
+                    (status, note, time.time(), repo, pr, base,
+                     head)).rowcount
             self.cx.execute(_COMMIT)
             return bool(changed)
         except Exception as exc:

@@ -520,3 +520,276 @@ def test_explicit_review_pin_replaced_midflight(
                 cp["in_progress_head"]) == ("b2" * 20, repo["head_sha"])
     finally:
         store.close()
+
+
+# -- F: closeout regressions (PR 15 final) -------------------------------
+
+def test_explicit_stale_preserves_unknown_cost(
+        tmp_path, monkeypatch, two_commit_repo):
+    """Unknown-cost superseded explicit run must keep unknown status
+    (NULL cost) and be counted as unknown, not as superseded USD."""
+    from tests.test_prod01_lifecycle import _env
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    repo = two_commit_repo
+    _env(monkeypatch, tmp_path, repo["repo"])
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "baseline_head": repo["base_sha"],
+             "last_reviewed_head": repo["base_sha"],
+             "last_reviewed_base": repo["base_sha"]})
+        monkeypatch.setattr(P, "get_live_head",
+                            lambda r, pr: repo["head_sha"] if not hasattr(
+                                test_explicit_stale_preserves_unknown_cost,
+                                "_c") else "c" * 40)
+        # trick: first call fresh, second stale
+        calls = {"n": 0}
+        def _live(r, pr):
+            calls["n"] += 1
+            return repo["head_sha"] if calls["n"] == 1 else "c" * 40
+        monkeypatch.setattr(P, "get_live_head", _live)
+        monkeypatch.setattr(
+            P, "run_review_for_range",
+            lambda **kw: {"status": "complete", "mode": "t",
+                          "run_dir": "/tmp/rd", "terra_findings": 0,
+                          "added": 0, "cost_usd": 0.42,
+                          "cost_unknown": True})
+        args = cli_mod.build_parser().parse_args(
+            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
+             "--base", repo["base_sha"]])
+        out = cli_mod.cmd_events(args)
+        assert out["decision"] == "skipped:stale_superseded", out
+        # cost stays settled as unknown hold, not lost
+        totals = store.spend_totals()
+        assert totals["unknown_holds"] == 1.0
+        # delivery row preserves unknown (NULL) and ledger counts it
+        import datetime as _dt
+        today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+        got = OP.spend_on_day(store, today)
+        assert got["unknown_cost_reviews"] >= 1, got
+        assert got["superseded_inference_usd"] == 0.0, got
+        # exactly one explicit staled row, cost NULL, detail marks unknown
+        rows = store.cx.execute(
+            "SELECT cost_usd, detail FROM deliveries "
+            "WHERE decision='skipped:stale_superseded'").fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] is None
+        import json as _json
+        detail = _json.loads(rows[0][1])
+        assert detail.get("cost_unknown") is True
+    finally:
+        store.close()
+
+
+def test_automatic_superseded_uses_completion_day(
+        tmp_path, monkeypatch):
+    """Automatic mid-flight superseded cost is attributed to the day
+    inference completed (finished_ts), not the day it was received."""
+    from tests.test_prod01_lifecycle import (_env, _git, _ingest,
+                                             _terra_factory, pr_event)
+    from codatiel_i2 import event_pipeline as P
+    import datetime as _dt
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    (root / "app.py").write_text("a\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "A")
+    A = _git(root, "rev-parse", "HEAD")
+    (root / "app.py").write_text("b\n")
+    _git(root, "commit", "-qam", "B")
+    B = _git(root, "rev-parse", "HEAD")
+    _env(monkeypatch, tmp_path, root)
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        # clock straddles midnight: received day1, completed day2
+        day1_ts = _dt.datetime(2026, 11, 14, 23, 59, tzinfo=_dt.timezone.utc).timestamp()
+        day2_ts = _dt.datetime(2026, 11, 15, 0, 5, tzinfo=_dt.timezone.utc).timestamp()
+        calls = {"n": 0}
+        def _clock():
+            calls["n"] += 1
+            return day1_ts if calls["n"] == 1 else day2_ts
+        cfg.clock = _clock
+        # stale-after inference: live moves to C while B is in flight
+        (root / "app.py").write_text("c\n")
+        _git(root, "commit", "-qam", "C")
+        C = _git(root, "rev-parse", "HEAD")
+        # live head is B at entry, C after inference -> mid-flight superseded
+        live_calls = {"n": 0}
+        def _live_midflight(r, pr):
+            live_calls["n"] += 1
+            return B if live_calls["n"] == 1 else C
+        monkeypatch.setattr(P, "get_live_head", _live_midflight)
+        monkeypatch.setattr(
+            P, "run_review_for_range",
+            lambda **kw: {"status": "complete", "mode": "t",
+                          "run_dir": "/tmp/rd", "terra_findings": 0,
+                          "added": 0, "cost_usd": 0.33,
+                          "cost_unknown": False})
+        row = _ingest(cfg, store, pr_event("opened", 23, A, B), "e-sup")
+        assert row["decision"] == "skipped:stale_superseded", row
+        got14 = OP.spend_on_day(store, "2026-11-14")
+        got15 = OP.spend_on_day(store, "2026-11-15")
+        assert got14["codatiel_ledger_usd"] == 0.0, got14
+        assert got15["superseded_inference_usd"] == 0.33, got15
+        assert got15["codatiel_ledger_usd"] == 0.33
+    finally:
+        store.close()
+
+
+def test_explicit_atomic_seal_refusal_records_spend(
+        tmp_path, monkeypatch, two_commit_repo):
+    """Freshness passes but atomic seal loses the race (same-range
+    replacement). Spend already settled must still appear in the
+    daily ledger via an explicit delivery row."""
+    from tests.test_prod01_lifecycle import _env
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    repo = two_commit_repo
+    _env(monkeypatch, tmp_path, repo["repo"])
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 10, "status": "reviewed",
+             "baseline_head": repo["base_sha"],
+             "last_reviewed_head": repo["base_sha"],
+             "last_reviewed_base": repo["base_sha"]})
+        monkeypatch.setattr(P, "get_live_head",
+                            lambda r, pr: repo["head_sha"])
+        monkeypatch.setattr(
+            P, "run_review_for_range",
+            lambda **kw: {"status": "complete", "mode": "t",
+                          "run_dir": "/tmp/rd", "terra_findings": 0,
+                          "added": 0, "cost_usd": 0.33,
+                          "cost_unknown": False})
+        # Make the atomic seal fail: replace the generation after the
+        # freshness recheck but before the UPDATE.
+        orig_complete = S.Store.complete_review
+        def _patched(self, *a, **kw):
+            # simulate concurrent same-range reclaim
+            self.cx.execute(
+                "UPDATE checkpoints SET in_progress_run='other-gen' "
+                "WHERE repo='o/r' AND pr=10")
+            self.cx.commit()
+            return orig_complete(self, *a, **kw)
+        monkeypatch.setattr(S.Store, "complete_review", _patched)
+        args = cli_mod.build_parser().parse_args(
+            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
+             "--base", repo["base_sha"]])
+        out = cli_mod.cmd_events(args)
+        assert out["decision"] == "skipped:stale_superseded", out
+        assert out["cost_usd"] == 0.33
+        import datetime as _dt
+        today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+        got = OP.spend_on_day(store, today)
+        # settled spend is visible via the superseded delivery row
+        assert got["superseded_inference_usd"] == 0.33, got
+        assert got["codatiel_ledger_usd"] == 0.33
+    finally:
+        store.close()
+
+
+def test_explicit_stale_ids_collision_safe(
+        tmp_path, monkeypatch, two_commit_repo):
+    """Two explicit stale runs for the same head within one second
+    must not collide on delivery_id (microsecond + uuid suffix)."""
+    from tests.test_prod01_lifecycle import _env
+    from codatiel_i2 import cli as cli_mod
+    from codatiel_i2 import event_pipeline as P
+    repo = two_commit_repo
+    _env(monkeypatch, tmp_path, repo["repo"])
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    # freeze clock to same second so old int() would collide
+    fixed = 1700000000.123456
+    cfg.clock = lambda: fixed
+    import codatiel_i2.event_pipeline as P2
+    monkeypatch.setattr(P2, "config_from_env", lambda: cfg)
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    try:
+        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+        for _ in range(2):
+            store.checkpoint_upsert(
+                {"repo": "o/r", "pr": 10, "status": "reviewed",
+                 "baseline_head": repo["base_sha"],
+                 "last_reviewed_head": repo["base_sha"],
+                 "last_reviewed_base": repo["base_sha"]})
+            # first get_live_head (pre-check) -> head, second (post) -> stale
+            calls = {"n": 0}
+            def _live(r, pr):
+                calls["n"] += 1
+                return repo["head_sha"] if calls["n"] == 1 else "c" * 40
+            monkeypatch.setattr(P, "get_live_head", _live)
+            monkeypatch.setattr(P, "run_review_for_range",
+                                lambda **kw: {"status": "complete", "mode": "t",
+                                              "run_dir": "/tmp/rd",
+                                              "terra_findings": 0, "added": 0,
+                                              "cost_usd": 0.11,
+                                              "cost_unknown": False})
+            args = cli_mod.build_parser().parse_args(
+                ["events", "review", "--pr", "10", "--head", repo["head_sha"],
+                 "--base", repo["base_sha"]])
+            out = cli_mod.cmd_events(args)
+            assert out["decision"] == "skipped:stale_superseded", out
+        rows = store.cx.execute(
+            "SELECT delivery_id FROM deliveries "
+            "WHERE decision='skipped:stale_superseded'").fetchall()
+        assert len(rows) == 2, rows
+        assert rows[0][0] != rows[1][0]
+        # ids contain microsecond and uuid suffix
+        assert ":" in rows[0][0] and rows[0][0].count(":") >= 4
+    finally:
+        store.close()
+
+
+def test_same_range_generation_not_sealed(tmp_path):
+    """Same base/head but different generation must not seal."""
+    store = S.Store(tmp_path / "e.sqlite")
+    try:
+        store.checkpoint_upsert({"repo": "o/r", "pr": 23, "status": "draft",
+                                  "baseline_head": "b" * 40})
+        assert store.claim_for_review("o/r", 23, base="b" * 40,
+                                       head="c" * 40) == "claimed"
+        cp = store.checkpoint_get("o/r", 23)
+        gen1 = cp["in_progress_run"]
+        assert gen1
+        # recovery + reclaim same range -> new generation
+        store.checkpoint_upsert(
+            {"repo": "o/r", "pr": 23, "status": "in_progress",
+             "in_progress_base": "b" * 40,
+             "in_progress_head": "c" * 40,
+             "in_progress_run": "other-gen-1234"})
+        # old generation cannot seal
+        done = store.complete_review(
+            "o/r", 23, base="b" * 40, head="c" * 40, diff_sha="d",
+            files=1, terra_findings=0, luna_added=0, cost_usd=0.1,
+            cost_unknown=False, run_dir="/r", result="complete",
+            claim_base="b" * 40, claim_head="c" * 40,
+            claim_run=gen1)
+        assert done["sealed"] is False
+        cp2 = store.checkpoint_get("o/r", 23)
+        assert cp2["in_progress_head"] == "c" * 40
+        assert cp2["status"] == "in_progress"
+        # correct generation seals
+        done = store.complete_review(
+            "o/r", 23, base="b" * 40, head="c" * 40, diff_sha="d",
+            files=1, terra_findings=0, luna_added=0, cost_usd=0.1,
+            cost_unknown=False, run_dir="/r", result="complete",
+            claim_base="b" * 40, claim_head="c" * 40,
+            claim_run="other-gen-1234")
+        assert done["sealed"] is True
+    finally:
+        store.close()

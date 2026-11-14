@@ -7,6 +7,7 @@ import json
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -1253,10 +1254,12 @@ def cmd_events(args) -> dict:
                                 f"on {_today}); re-drive refused"),
                         }
                 claim = store.claim_for_review(repo, number, base=use_base,
-                                               head=head)
+                                               head=head, now=cfg.clock())
                 if claim != "claimed":
                     return {"status": "queued", "decision": "queued",
                             "reason": f"claim returned {claim}"}
+                _claimed_cp = store.checkpoint_get(repo, number)
+                _claimed_run = (_claimed_cp or {}).get("in_progress_run") or ""
                 store.reserve(cfg.reserve_usd)
                 transport = os.environ.get(
                     "CODATIEL_EVENTS_TRANSPORT", "fixture")
@@ -1285,15 +1288,21 @@ def cmd_events(args) -> dict:
                             or _head_norm.lower().startswith(
                                 _live_after.lower()))
                 _cp_now = store.checkpoint_get(repo, number)
-                # Ownership means the exact pinned claim: same head is
-                # not enough — a recovery + reclaim may hold the same
-                # head under a different base, and sealing over it
-                # would clear the newer worker's pin.
+                # Ownership means the exact pinned claim: same head and
+                # base are not enough — a recovery + reclaim may hold
+                # the same range under a new generation, and sealing
+                # over it would clear the newer worker's pin. The
+                # deployment is single-worker; the run token is a
+                # minimal generation discriminator that makes a
+                # hypothetical concurrent same-range worker fail closed
+                # without a concurrency framework.
                 _owned_now = bool(
                     _cp_now and _cp_now.get("status") == "in_progress"
                     and (_cp_now.get("in_progress_head") or "") == head
                     and (_cp_now.get("in_progress_base") or "")
-                    == use_base)
+                    == use_base
+                    and (_cp_now.get("in_progress_run") or "")
+                    == _claimed_run)
                 if not _owned_now or not _live_ok:
                     try:
                         if _owned_now:
@@ -1305,17 +1314,22 @@ def cmd_events(args) -> dict:
                                 "spend kept, checkpoint left",
                                 base=use_base, head=head,
                                 prior_status=(_prior if isinstance(
-                                    _prior, str) else None))
+                                    _prior, str) else None),
+                                claim_run=_claimed_run)
                     except store_mod.StoreError as exc:
                         return {"status": "failed", "stage": "review",
                                 "error": str(exc)}
                     # No delivery row exists on the explicit path, so
                     # record one: the daily cap must see this spend.
-                    # Run-unique ID (same head re-driven twice spends
-                    # twice); replay-safe by construction.
+                    # Run-unique, collision-safe ID (same head re-driven
+                    # twice spends twice, even within one second);
+                    # replay-safe by construction. Preserve unknown-cost
+                    # status: unknown -> NULL cost, counted as
+                    # unknown_cost_reviews in the ledger.
                     _explicit_id = (
                         f"explicit:{repo}:{number}:{head}:"
-                        f"{int(cfg.clock())}")
+                        f"{int(cfg.clock()*1000000)}:"
+                        f"{uuid.uuid4().hex[:8]}")
                     try:
                         store.delivery_record(
                             delivery_id=_explicit_id,
@@ -1324,7 +1338,9 @@ def cmd_events(args) -> dict:
                             decision="skipped:stale_superseded",
                             reason="explicit head went stale during "
                                    "inference; spend kept, no seal",
-                            cost_usd=cost, detail={"explicit": True},
+                            cost_usd=(None if unknown else cost),
+                            detail={"explicit": True,
+                                    "cost_unknown": bool(unknown)},
                             now=cfg.clock())
                     except store_mod.StoreError as exc:
                         return {"status": "failed", "stage": "review",
@@ -1345,8 +1361,33 @@ def cmd_events(args) -> dict:
                     cost_usd=cost, cost_unknown=unknown,
                     run_dir=result.get("run_dir") or "",
                     result=result["status"],
-                    claim_base=use_base, claim_head=head)
+                    claim_base=use_base, claim_head=head,
+                    claim_run=_claimed_run)
                 if not _sealed.get("sealed", True):
+                    # Atomic seal refused: the generation was replaced
+                    # (same range or not) after the freshness recheck.
+                    # Spend is already settled — record it so the daily
+                    # ledger sees it, just like the staleness branch
+                    # above. Unknown status is preserved.
+                    _explicit_id2 = (
+                        f"explicit:{repo}:{number}:{head}:"
+                        f"{int(cfg.clock()*1000000)}:"
+                        f"{uuid.uuid4().hex[:8]}")
+                    try:
+                        store.delivery_record(
+                            delivery_id=_explicit_id2,
+                            event_type="explicit_review", action="redrive",
+                            repo=repo, pr=number, head_sha=head,
+                            decision="skipped:stale_superseded",
+                            reason="claim replaced during explicit "
+                                   "review; atomic seal refused, spend "
+                                   "kept, checkpoint unchanged",
+                            cost_usd=(None if unknown else cost),
+                            detail={"explicit": True,
+                                    "cost_unknown": bool(unknown)},
+                            now=cfg.clock())
+                    except store_mod.StoreError:
+                        pass
                     return {"status": "skipped",
                             "decision": "skipped:stale_superseded",
                             "reason": "claim replaced during explicit "

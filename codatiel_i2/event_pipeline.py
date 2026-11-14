@@ -940,6 +940,15 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             store, ev, "skipped:unchanged",
             "identical pinned review already in flight; no second spend",
             0.0, now=now)
+    # Generation token minted at claim time distinguishes a same-range
+    # replacement (recovery + reclaim with identical base/head) without
+    # a concurrency framework. Single-worker deployment makes this a
+    # hypothetical discriminator; owned check fails closed if the token
+    # no longer matches.
+    _claimed_auto = (store.checkpoint_get(ev["repo"], pr)
+                     if ev.get("pr_number") else None)
+    _claimed_auto_run = (_claimed_auto or {}).get("in_progress_run") or ""
+    _claimed_auto_base = (_claimed_auto or {}).get("in_progress_base") or ""
     store.reserve(cfg.reserve_usd)
     result = run_review_for_range(
         cfg=cfg, repo=ev["repo"], pr=pr, base=from_sha, head=to_sha,
@@ -951,8 +960,11 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     store.settle(cfg.reserve_usd, None if unknown else float(cost or 0.0))
     cp_now = (store.checkpoint_get(ev["repo"], pr)
               if ev.get("pr_number") else None)
-    owned = bool(cp_now and cp_now.get("status") == "in_progress"
-                 and cp_now.get("in_progress_head") == to_sha)
+    owned = bool(
+        cp_now and cp_now.get("status") == "in_progress"
+        and cp_now.get("in_progress_head") == to_sha
+        and cp_now.get("in_progress_base") == _claimed_auto_base
+        and (cp_now.get("in_progress_run") or "") == _claimed_auto_run)
     live_after = (get_live_head(ev["repo"], pr)
                   if ev.get("pr_number") else None)
     if not owned or (live_after is not None and live_after != to_sha):
@@ -969,7 +981,8 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                 "left to the newer review",
                 base=from_sha, head=to_sha,
                 prior_status=(prior if isinstance(prior, str)
-                              else None))
+                              else None),
+                claim_run=_claimed_auto_run)
         final = _finalize_delivery(
             store, ev, "skipped:stale_superseded",
             f"head {to_sha[:12]} went stale during inference "
@@ -977,7 +990,7 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             f"{'claim lost' if not owned else 'claim released'}); "
             "no checkpoint change, no email, no comment; "
             f"inference cost ${float(cost or 0.0):.4f} recorded",
-            cost if not unknown else None, now=now)
+            cost if not unknown else None, now=cfg.clock())
         # A newer head queued during this run must not strand: drain
         # it through the same verified path (stale queues drop $0).
         # The follow range starts at the queued BASE (not this run's
