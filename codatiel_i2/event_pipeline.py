@@ -233,8 +233,17 @@ def normalize_event(raw: dict, delivery_id: str,
         except (TypeError, ValueError):
             return None, "pull_request number invalid"
         ev["branch"] = str((pr.get("head") or {}).get("ref") or "") or None
-        ev["base_sha"] = str((pr.get("base") or {}).get("sha") or "") or None
-        ev["head_sha"] = str((pr.get("head") or {}).get("sha") or "") or None
+        # Git SHAs are case-insensitive; canonicalize to lowercase so
+        # an uppercase sender never forks identity (re-review loops,
+        # missed replay detection, checkpoint mismatch).
+        ev["base_sha"] = (str((pr.get("base") or {}).get("sha") or "")
+                          or None)
+        if ev["base_sha"] is not None:
+            ev["base_sha"] = ev["base_sha"].lower()
+        ev["head_sha"] = (str((pr.get("head") or {}).get("sha") or "")
+                          or None)
+        if ev["head_sha"] is not None:
+            ev["head_sha"] = ev["head_sha"].lower()
         ev["draft"] = pr.get("draft")
         ev["merged"] = bool(pr.get("merged"))
         ev["closed"] = bool(ev["action"] == "closed" or pr.get("state")
@@ -244,10 +253,14 @@ def normalize_event(raw: dict, delivery_id: str,
         ev["event"] = "push"
         ref = str(raw.get("ref") or "")
         ev["branch"] = ref.split("refs/heads/", 1)[1] if "refs/heads/" in ref else None
-        ev["before_sha"] = str(raw.get("before") or "") or None
+        ev["before_sha"] = (str(raw.get("before") or "") or None)
+        if ev["before_sha"] is not None:
+            ev["before_sha"] = ev["before_sha"].lower()
         after = str(raw.get("after") or "") or None
         head_commit = raw.get("head_commit") or {}
         ev["head_sha"] = after or (str(head_commit.get("id") or "") or None)
+        if ev["head_sha"] is not None:
+            ev["head_sha"] = ev["head_sha"].lower()
         ev["forced"] = bool(raw.get("forced"))
         if isinstance(raw.get("pr_number"), int):
             ev["pr_number"] = raw["pr_number"]
@@ -784,9 +797,10 @@ def _record(store: store_mod.Store, ev: dict, decision: str, reason: str,
 
 
 def _finalize_delivery(store: store_mod.Store, ev: dict, decision: str,
-                       reason: str, cost: float | None) -> dict:
+                       reason: str, cost: float | None,
+                       now: float | None = None) -> dict:
     store.delivery_update_decision(ev["delivery_id"], decision, reason,
-                                   cost)
+                                   cost, now=now)
     return store.delivery_get(ev["delivery_id"]) or {}
 
 
@@ -824,14 +838,14 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         return _finalize_delivery(
             store, ev, "needs_attention:unmapped_push",
             "push event maps to no known PR branch; refusing to guess "
-            "identity (no inference, no spend)", None)
+            "identity (no inference, no spend)", None, now=now)
     decision, reason, ctx = classify_event(
         ev, cp, store.require_enabled())
     if decision.startswith("skipped:") or decision.startswith(
             "needs_attention:"):
         if decision == "skipped:draft" and ev.get("pr_number"):
             _remember_draft(store, ev, cp)
-        return _finalize_delivery(store, ev, decision, reason, 0.0)
+        return _finalize_delivery(store, ev, decision, reason, 0.0, now=now)
     # review path: resolve repo access, compute a safe range, check
     # ceiling, claim atomically, run, seal.
     assert ev.get("pr_number"), "review requires a PR number"
@@ -840,14 +854,14 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     if access is None:
         return _finalize_delivery(
             store, ev, "needs_attention:repo_access",
-            f"cannot access repo checkout: {err}", None)
+            f"cannot access repo checkout: {err}", None, now=now)
     kind = "full" if decision == "review_full" else "incremental"
     from_sha = ctx.get("from") or ev.get("base_sha") or ev.get("before_sha")
     to_sha = ev.get("head_sha")
     if not from_sha or not to_sha:
         return _finalize_delivery(
             store, ev, "needs_attention:identity",
-            "review range lacks base/head SHAs; refusing to guess", None)
+            "review range lacks base/head SHAs; refusing to guess", None, now=now)
     info, cerr = access.compare(from_sha, to_sha,
                                 file_limit=cfg.compare_file_limit)
     if info is None:
@@ -855,18 +869,18 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         if tag not in ("truncated", "compare_failed", "unknown_endpoint"):
             tag = "compare_failed"
         return _finalize_delivery(
-            store, ev, f"needs_attention:{tag}", cerr, None)
+            store, ev, f"needs_attention:{tag}", cerr, None, now=now)
     if info["empty"]:
         return _finalize_delivery(
             store, ev, "skipped:unchanged",
-            "safe comparison shows an empty diff; no inference", 0.0)
+            "safe comparison shows an empty diff; no inference", 0.0, now=now)
     if kind == "incremental" and ctx.get("rebase"):
         anc = access.ancestor(from_sha, to_sha)
         if anc is None:
             return _finalize_delivery(
                 store, ev, "needs_attention:compare_failed",
                 "ancestry indeterminable after base change; refusing to "
-                "review an unverifiable range", None)
+                "review an unverifiable range", None, now=now)
         # Non-ancestor (force-push/rebase) or ancestor (fast-forward):
         # either way the from..to interdiff IS the actual patch change.
         # The failure mode that matters (from_sha gone) is already
@@ -880,7 +894,7 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             store, ev, "skipped:ceiling",
             f"spend cap ${cfg.spend_cap_usd:.2f} reached "
             f"(settled ${totals['settled_usd']:.4f}); inference stopped, "
-            f"event recorded; no backlog processing on reset", 0.0)
+            f"event recorded; no backlog processing on reset", 0.0, now=now)
     live = get_live_head(ev["repo"], pr)
     if live is not None and live != to_sha:
         # PROD-02: the event's head is no longer the PR's head (older
@@ -893,7 +907,7 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             store, ev, "skipped:stale_head",
             f"event head {to_sha[:12]} is not the live PR head "
             f"{live[:12]}; superseded event dropped with no "
-            "inference, no email, no checkpoint change", 0.0)
+            "inference, no email, no checkpoint change", 0.0, now=now)
     if live is None and cp is not None:
         # gh unreachable: fall back to local ancestry (PROD-02 review).
         # A head older than the reviewed head is stale even when the
@@ -913,19 +927,28 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                     f"reviewed head {reviewed[:12]} and the live head "
                     "is unverifiable; superseded event dropped with "
                     "no inference, no email, no checkpoint change",
-                    0.0)
+                    0.0, now=now)
     claim = store.claim_for_review(ev["repo"], pr, base=from_sha,
                                    head=to_sha, now=now)
     if claim == "queued":
         return _finalize_delivery(
             store, ev, "queued",
             "a review is pinned and running; newer delta queued as a "
-            "separate run (evidence never mixed)", 0.0)
+            "separate run (evidence never mixed)", 0.0, now=now)
     if claim == "already":
         return _finalize_delivery(
             store, ev, "skipped:unchanged",
             "identical pinned review already in flight; no second spend",
-            0.0)
+            0.0, now=now)
+    # Generation token minted at claim time distinguishes a same-range
+    # replacement (recovery + reclaim with identical base/head) without
+    # a concurrency framework. Single-worker deployment makes this a
+    # hypothetical discriminator; owned check fails closed if the token
+    # no longer matches.
+    _claimed_auto = (store.checkpoint_get(ev["repo"], pr)
+                     if ev.get("pr_number") else None)
+    _claimed_auto_run = (_claimed_auto or {}).get("in_progress_run") or ""
+    _claimed_auto_base = (_claimed_auto or {}).get("in_progress_base") or ""
     store.reserve(cfg.reserve_usd)
     result = run_review_for_range(
         cfg=cfg, repo=ev["repo"], pr=pr, base=from_sha, head=to_sha,
@@ -937,8 +960,11 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     store.settle(cfg.reserve_usd, None if unknown else float(cost or 0.0))
     cp_now = (store.checkpoint_get(ev["repo"], pr)
               if ev.get("pr_number") else None)
-    owned = bool(cp_now and cp_now.get("status") == "in_progress"
-                 and cp_now.get("in_progress_head") == to_sha)
+    owned = bool(
+        cp_now and cp_now.get("status") == "in_progress"
+        and cp_now.get("in_progress_head") == to_sha
+        and cp_now.get("in_progress_base") == _claimed_auto_base
+        and (cp_now.get("in_progress_run") or "") == _claimed_auto_run)
     live_after = (get_live_head(ev["repo"], pr)
                   if ev.get("pr_number") else None)
     if not owned or (live_after is not None and live_after != to_sha):
@@ -953,8 +979,10 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                 ev["repo"], pr,
                 "run superseded mid-flight; claim released, checkpoint "
                 "left to the newer review",
+                base=from_sha, head=to_sha,
                 prior_status=(prior if isinstance(prior, str)
-                              else None))
+                              else None),
+                claim_run=_claimed_auto_run)
         final = _finalize_delivery(
             store, ev, "skipped:stale_superseded",
             f"head {to_sha[:12]} went stale during inference "
@@ -962,7 +990,7 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             f"{'claim lost' if not owned else 'claim released'}); "
             "no checkpoint change, no email, no comment; "
             f"inference cost ${float(cost or 0.0):.4f} recorded",
-            cost if not unknown else None)
+            cost if not unknown else None, now=cfg.clock())
         # A newer head queued during this run must not strand: drain
         # it through the same verified path (stale queues drop $0).
         # The follow range starts at the queued BASE (not this run's
@@ -991,7 +1019,7 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             store, ev, "failed",
             f"primary review failed ({result.get('stage') or 'unknown'}: "
             f"{(result.get('error') or '')[:200]}); checkpoint not "
-            f"advanced, Luna never spent", cost)
+            f"advanced, Luna never spent", cost, now=now)
     done = store.complete_review(
         ev["repo"], pr, base=(ev.get("base_sha") or from_sha),
         head=to_sha, diff_sha=info["diff_sha"], files=info["files"],
@@ -1028,7 +1056,7 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         f"luna-exclusive {result.get('added', 0)}{semdup_bits}; "
         f"notified={notified}"
         + ("" if notified else f" ({notify_detail[:160]})")
-        + publish_bits + ")", cost)
+        + publish_bits + ")", cost, now=now)
     # Drain a queued newer delta as its own run (separate evidence).
     if done.get("queued"):
         return _drain_queued(cfg=cfg, store=store, ev=ev, pr=pr,
@@ -1064,8 +1092,9 @@ def _drain_queued(*, cfg, store, ev, pr, to_sha, queued, final,
         # (older event, or a residue that never matched a push).
         # Drop it with $0: no inference, no email, no comment.
         # The stale queue entry is cleared so it can never drain
-        # backwards later.
-        store.clear_queued(ev["repo"], pr)
+        # backwards later. Identity-compared: a newer queued head
+        # arriving during verification survives.
+        store.clear_queued(ev["repo"], pr, base=qb, head=qh)
         follow = dict(ev, delivery_id=ev["delivery_id"] + ":drain",
                       base_sha=to_sha, head_sha=qh, before_sha=to_sha,
                       action="synchronize")
