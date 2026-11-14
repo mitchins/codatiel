@@ -947,3 +947,32 @@ def test_quarantine_fences_preexisting_lease(tmp_path):
     assert q.exposure(conn, "cycle") == 0
     q.assert_invariants(conn)
     conn.close()
+
+
+def test_unknown_hold_last_event_includes_adjudication(tmp_path):
+    conn = _open(tmp_path)
+    _budgets(conn, cycle=10.0)
+    _verify(conn, 1, "a" * 40)
+    q.accept(conn, app="gh", guid="g1", body=b"1", repo=REPO,
+             repo_id=1, pr=1, head="a" * 40, now=1000.0)
+    assert q.route(conn, app="gh", guid="g1", now=1000.0) == "routed"
+    c1 = q.claim(conn, owner="w1", reserve_usd=1.0, now=1000.0)
+    assert q.dispatch_intent(conn, c1, stage="t", call_id="c1",
+                             now=1000.0)
+    q.recover(conn, now=1000.0 + 61.0)
+    before = q.unknown_holds(conn)[0]["last_event_seq"]
+    # The operator acknowledges the hold: the adjudicate event is
+    # attempt-scoped (ref = attempt id), and the hold query must see
+    # it — otherwise reconciliation history is silently missed.
+    assert q.resolve_unknown(conn, attempt=c1.attempt, actual_usd=None,
+                             actor="op", note="waiting on provider",
+                             now=1002.0) == "unknown"
+    after = q.unknown_holds(conn)
+    assert len(after) == 1
+    assert after[0]["last_event_seq"] is not None
+    assert after[0]["last_event_seq"] > before
+    ev = conn.execute("SELECT kind,ref FROM pl_events WHERE seq=?",
+                      (after[0]["last_event_seq"],)).fetchone()
+    assert (ev["kind"], ev["ref"]) == ("adjudicate", str(c1.attempt))
+    q.assert_invariants(conn)
+    conn.close()

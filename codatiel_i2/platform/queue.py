@@ -1425,8 +1425,10 @@ def events_after(db: sqlite3.Connection, cursor: int = 0,
 
 # Event kinds whose ref is a job id. Effect, attempt, reconcile,
 # route, signal and receipt events share the same unqualified numeric
-# ref namespace (effect 1, attempt 1 and job 1 coexist), so any
+# namespace (effect 1, attempt 1 and job 1 coexist), so any
 # job-scoped lookup must filter by kind — never by ref alone.
+# Adjudications are attempt-scoped (resolve_unknown journals against
+# the attempt), so the hold query includes them by attempt id.
 JOB_EVENT_KINDS = frozenset({
     "claim", "claim_stale", "complete", "complete_deferred",
     "deferred_budget", "dispatch_intent", "dispatch_stale", "recover",
@@ -1454,8 +1456,10 @@ def unknown_holds(db: sqlite3.Connection) -> list[dict]:
         "t.quarantined,"
         "(SELECT COUNT(*) FROM pl_results r WHERE r.attempt=a.id) "
         "AS has_result,"
-        "(SELECT MAX(seq) FROM pl_events e WHERE e.ref=CAST(a.job AS TEXT)"
+        "(SELECT MAX(seq) FROM pl_events e WHERE "
+        "(e.ref=CAST(a.job AS TEXT)"
         f" AND e.kind IN ({','.join('?' * len(kinds))})) "
+        "OR (e.kind='adjudicate' AND e.ref=CAST(a.id AS TEXT))) "
         "AS last_event_seq "
         "FROM pl_attempts a JOIN pl_jobs j ON j.id=a.job "
         "LEFT JOIN pl_pr_targets t ON t.repo=j.repo AND t.pr=j.pr "
