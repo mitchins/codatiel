@@ -176,7 +176,8 @@ def test_drain_stale_keeps_newer_queue(tmp_path, monkeypatch):
 # -- D: explicit review freshness ------------------------------------------
 
 def _explicit_run(tmp_path, monkeypatch, repo, *, head, base,
-                   live_heads, cost=0.30, reviewed=None):
+                   live_heads, cost=0.30, reviewed=None,
+                   cost_unknown=False):
     """Drive `events review` with scripted live heads + fake inference.
 
     Reviewed checkpoint defaults to (base, base). Returns (out,
@@ -209,7 +210,7 @@ def _explicit_run(tmp_path, monkeypatch, repo, *, head, base,
         lambda **kw: {"status": "complete", "mode": "t",
                       "run_dir": "/tmp/rd", "terra_findings": 0,
                       "added": 0, "cost_usd": cost,
-                      "cost_unknown": False})
+                      "cost_unknown": cost_unknown})
     extra = ["--base", base] if base is not None else []
     args = cli_mod.build_parser().parse_args(
         ["events", "review", "--pr", "10", "--head", head] + extra)
@@ -528,60 +529,25 @@ def test_explicit_stale_preserves_unknown_cost(
         tmp_path, monkeypatch, two_commit_repo):
     """Unknown-cost superseded explicit run must keep unknown status
     (NULL cost) and be counted as unknown, not as superseded USD."""
-    from tests.test_prod01_lifecycle import _env
-    from codatiel_i2 import cli as cli_mod
-    from codatiel_i2 import event_pipeline as P
     repo = two_commit_repo
-    _env(monkeypatch, tmp_path, repo["repo"])
-    cfg = P.config_from_env()
-    cfg.state_dir.mkdir(parents=True, exist_ok=True)
-    store = S.Store(cfg.state_dir / "events.sqlite")
+    out, store = _explicit_run(
+        tmp_path, monkeypatch, repo, head=repo["head_sha"],
+        base=repo["base_sha"],
+        live_heads=[repo["head_sha"], "c" * 40],
+        cost=0.42, cost_unknown=True)
     try:
-        P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
-        store.checkpoint_upsert(
-            {"repo": "o/r", "pr": 10, "status": "reviewed",
-             "baseline_head": repo["base_sha"],
-             "last_reviewed_head": repo["base_sha"],
-             "last_reviewed_base": repo["base_sha"]})
-        monkeypatch.setattr(P, "get_live_head",
-                            lambda r, pr: repo["head_sha"] if not hasattr(
-                                test_explicit_stale_preserves_unknown_cost,
-                                "_c") else "c" * 40)
-        # trick: first call fresh, second stale
-        calls = {"n": 0}
-        def _live(r, pr):
-            calls["n"] += 1
-            return repo["head_sha"] if calls["n"] == 1 else "c" * 40
-        monkeypatch.setattr(P, "get_live_head", _live)
-        monkeypatch.setattr(
-            P, "run_review_for_range",
-            lambda **kw: {"status": "complete", "mode": "t",
-                          "run_dir": "/tmp/rd", "terra_findings": 0,
-                          "added": 0, "cost_usd": 0.42,
-                          "cost_unknown": True})
-        args = cli_mod.build_parser().parse_args(
-            ["events", "review", "--pr", "10", "--head", repo["head_sha"],
-             "--base", repo["base_sha"]])
-        out = cli_mod.cmd_events(args)
         assert out["decision"] == "skipped:stale_superseded", out
-        # cost stays settled as unknown hold, not lost
-        totals = store.spend_totals()
-        assert totals["unknown_holds"] == 1.0
-        # delivery row preserves unknown (NULL) and ledger counts it
-        import datetime as _dt
+        assert store.spend_totals()["unknown_holds"] == 1.0
+        import datetime as _dt, json as _json
         today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
         got = OP.spend_on_day(store, today)
         assert got["unknown_cost_reviews"] >= 1, got
         assert got["superseded_inference_usd"] == 0.0, got
-        # exactly one explicit staled row, cost NULL, detail marks unknown
         rows = store.cx.execute(
             "SELECT cost_usd, detail FROM deliveries "
             "WHERE decision='skipped:stale_superseded'").fetchall()
-        assert len(rows) == 1
-        assert rows[0][0] is None
-        import json as _json
-        detail = _json.loads(rows[0][1])
-        assert detail.get("cost_unknown") is True
+        assert len(rows) == 1 and rows[0][0] is None
+        assert _json.loads(rows[0][1]).get("cost_unknown") is True
     finally:
         store.close()
 
