@@ -292,8 +292,8 @@ def test_complete_review_clears_satisfied_queue(tmp_path):
             REPO, 23, base="b" * 40, head="c" * 40,
             diff_sha="d" * 40, files=1, terra_findings=1,
             luna_added=0, cost_usd=0.01, cost_unknown=False,
-            run_dir="/tmp/x", result="complete")
-        assert out == {"queued": None}
+                run_dir="/tmp/x", result="complete")
+        assert out == {"queued": None, "sealed": True}
         cp = st.checkpoint_get(REPO, 23)
         assert cp["last_reviewed_head"] == "c" * 40
         assert cp["queued_head"] == ""
