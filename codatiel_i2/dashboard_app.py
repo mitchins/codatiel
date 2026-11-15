@@ -443,12 +443,11 @@ def serve(state_dir: Path | str, host: str = DEFAULT_HOST,
     except Exception:
         pass
     print(json.dumps({"status": "ok",
-                      # NOSONAR (python:S5332): loopback-only URL by
-                      # construction (ensure_loopback rejects any
-                      # non-loopback bind); remote access rides SSH or
-                      # a TLS-terminating reverse proxy — see
-                      # docs/dash-01/deployment.md.
-                      "url": f"http://{host}:{actual}/",
+                      # Loopback-only URL by construction
+                      # (ensure_loopback rejects any non-loopback bind);
+                      # remote access rides SSH or a TLS-terminating
+                      # reverse proxy — see docs/dash-01/deployment.md.
+                      "url": f"http://{host}:{actual}/",  # NOSONAR
                       "state_dir": str(state_dir)},
                      ensure_ascii=False, sort_keys=True), flush=True)
     try:
