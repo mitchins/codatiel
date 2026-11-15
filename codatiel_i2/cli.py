@@ -1090,7 +1090,7 @@ def cmd_dashboard(args: Any) -> int:
         print(json.dumps({"status": "failed", "stage": "config",
                           "error": "no state dir: pass --state-dir or set "
                                    "CODATIEL_DEV_STATE/CODATIEL_TEST_STATE"},
-                         ensure_ascii=False, sort=True))
+                         ensure_ascii=False, sort_keys=True))
         return 1
     try:
         host = dash_mod.ensure_loopback(
@@ -1098,13 +1098,11 @@ def cmd_dashboard(args: Any) -> int:
     except opcfg_mod.OperatorConfigError as exc:
         print(json.dumps({"status": "failed", "stage": "config",
                           "error": str(exc)},
-                         ensure_ascii=False, sort=True))
+                         ensure_ascii=False, sort_keys=True))
         return 1
     port = int(getattr(args, "port", 8487))
-    print(json.dumps({"status": "ok",
-                      "url": f"http://{host}:{port}/",
-                      "state_dir": str(state_dir)},
-                     ensure_ascii=False, sort=True), flush=True)
+    # serve() binds first, then reports the allocated port (so
+    # --port 0 prints the real ephemeral port, not 0).
     dash_mod.serve(state_dir, host, port)
     return 0
 

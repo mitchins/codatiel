@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block body %}
+{% if not d.get("available") %}
+<p class="err">Operations store unavailable: {{ d.get("reason", "no readable events.sqlite") }} — database-backed sections are hidden, not empty.</p>
+{% endif %}
 <h2>Poller</h2>
 {% set p = d.get("poller", {}) %}
 {% if p.get("state") == "running" %}<p class="ok"><strong>running</strong> — {{ p.get("note") }}</p>
@@ -13,6 +16,7 @@
 <select name="state"><option value="">all</option>
 {% for s in states %}<option value="{{ s }}"{% if s == state_filter %} selected{% endif %}>{{ s }}</option>{% endfor %}
 </select></label> <input type="submit" value="Filter"></form>
+{% if d.get("available") %}
 <h2>Recent ingestions ({{ d.get("deliveries", []) | length }})</h2>
 {% if d.get("deliveries") %}
 <table><tr><th>PR</th><th>Decision</th><th>Reason</th><th>Cost</th></tr>
@@ -45,6 +49,9 @@
 {% for x in d["publication_failures"] %}<tr><td>{{ x["repo"] }}#{{ x["pr"] }}</td>
 <td><span class="chip failed">{{ x["outcome"] }}</span></td><td>{{ (x["reason"] or "")[:160] }}</td></tr>{% endfor %}</table>
 {% else %}<p class="note">None ({{ d.get("publications_posted", 0) }} posted).</p>{% endif %}
+{% else %}
+<p class="note">Delivery, failure and publication history hidden while the operations store is unavailable.</p>
+{% endif %}
 <h2>Configuration changes (audit)</h2>
 {% if d.get("audit") %}
 <table><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr>

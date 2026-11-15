@@ -13,6 +13,7 @@ receiver is implemented or exposed here (separate mission).
 from __future__ import annotations
 
 import hmac
+import json
 import secrets
 import urllib.parse
 from pathlib import Path
@@ -21,6 +22,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from codatiel_i2 import dashboard_data as DD
 from codatiel_i2 import operator_config as opcfg
@@ -152,6 +154,33 @@ def _check_csrf(app: FastAPI, token: str) -> bool:
     return False
 
 
+_CHECKBOXES = ("pause_reviews", "pause_github_comments",
+               "email_enabled", "email_on_complete")
+_CHECKBOX_DEFAULTS = {"pause_reviews": False,
+                      "pause_github_comments": True,
+                      "email_enabled": True, "email_on_complete": True}
+
+
+def _saved_checked(settings: dict[str, Any]) -> dict[str, bool]:
+    return {name: bool(settings.get(name, _CHECKBOX_DEFAULTS[name]))
+            for name in _CHECKBOXES}
+
+
+def _submitted_vals(form: dict[str, list[str]]) -> dict[str, str]:
+    """Error context: echo what the operator submitted, not saved data."""
+    first = {k: (v[0] if v else "") for k, v in form.items()}
+    vals = {k: first.get(k, "") for k in (
+        "monthly_budget_usd", "daily_budget_usd", "per_pr_breaker_usd",
+        "warn_frac", "critical_frac", "notify_to", "notify_sender",
+        "model_profile", "openai_project_limit_usd", "openai_billing_url",
+        "repos", "actor")}
+    return vals
+
+
+def _submitted_checked(form: dict[str, list[str]]) -> dict[str, bool]:
+    return {name: (name in form) for name in _CHECKBOXES}
+
+
 def _settings_form_values(settings: dict[str, Any],
                           env: dict[str, Any]) -> dict[str, str]:
     def num(key: str) -> str:
@@ -160,10 +189,10 @@ def _settings_form_values(settings: dict[str, Any],
 
     repos = settings.get("repos") or {}
     if not repos:
-        env_repos = (env.get("CODATIEL_DEV_REPOS", {}).get("value") or ""
-                     + "," + (env.get("CODATIEL_TEST_REPOS", {})
-                              .get("value") or ""))
-        lines = [r.strip() for r in env_repos.split(",") if r.strip()]
+        dev_repos = env.get("CODATIEL_DEV_REPOS", {}).get("value") or ""
+        test_repos = env.get("CODATIEL_TEST_REPOS", {}).get("value") or ""
+        lines = [r.strip() for r in (dev_repos + "," + test_repos).split(",")
+                 if r.strip()]
     else:
         lines = [f"{slug}=off" if not enabled else slug
                  for slug, enabled in sorted(repos.items())]
@@ -192,6 +221,13 @@ def create_app(state_dir: Path | str) -> FastAPI:
     state = Path(state_dir)
     app = FastAPI(title="Codatiel operator dashboard",
                   docs_url=None, redoc_url=None, openapi_url=None)
+    # Host-header protection: the loopback bind alone does not stop a
+    # rebinding hostname. Requests with any other Host are rejected
+    # before any route runs. Extend allowed_hosts only for other
+    # loopback names or addresses the deployment binds.
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["127.0.0.1", "localhost"])
     app.state.state_dir = state
     app.state.csrf_tokens: set[str] = set()
 
@@ -286,10 +322,13 @@ def create_app(state_dir: Path | str) -> FastAPI:
         token = _mint_csrf(app)
         return render("settings.html", title="Settings", d=data,
                       vals=_settings_form_values(
-                          data.get("settings", {}), data.get("env", {})),
+                          data.get("settings", {}),
+                          data.get("env", {})),
+                      checked=_saved_checked(data.get("settings", {})),
                       profiles=list(opcfg.MODEL_PROFILES),
                       csrf_token=token, errors=[],
-                      saved=q.get("saved") == "1")
+                      saved=q.get("saved") == "1",
+                      form_disabled=bool(data.get("config_error")))
 
     @app.post("/settings")
     async def settings_save(request: Request) -> HTMLResponse:
@@ -297,28 +336,37 @@ def create_app(state_dir: Path | str) -> FastAPI:
         form = urllib.parse.parse_qs(body, keep_blank_values=True)
         token = (form.get("csrf_token") or [""])[0]
         data = DD.collect_overview(state)
-        ctx_vals = _settings_form_values(
-            data.get("settings", {}), data.get("env", {}))
+        disabled = bool(data.get("config_error"))
 
         def with_errors(errors: list[str], status: int) -> HTMLResponse:
             resp = render("settings.html", title="Settings", d=data,
-                          vals=ctx_vals,
+                          vals=_submitted_vals(form),
+                          checked=_submitted_checked(form),
                           profiles=list(opcfg.MODEL_PROFILES),
                           csrf_token=_mint_csrf(app), errors=errors,
-                          saved=False)
+                          saved=False, form_disabled=disabled)
             resp.status_code = status
             return resp
 
         if not _check_csrf(app, token):
             return with_errors(["invalid or expired form token; "
                                 "reload /settings and retry"], 403)
+        # Invalid operator configuration: diagnostics stay visible
+        # but no save is attempted until the file is fixed.
+        if disabled:
+            return with_errors(
+                ["operator configuration is invalid "
+                 f"({data.get('config_error')}); fix operator.json "
+                 "before saving"], 400)
         patch, form_errors, actor = parse_settings_form(form)
         if form_errors:
             return with_errors(form_errors, 400)
         try:
             try:
                 from codatiel_i2 import event_pipeline as pipe_mod
-                known = pipe_mod.config_from_env().repos
+                cfg = pipe_mod.config_from_env()
+                cfg.state_dir = state
+                known = cfg.repos
             except Exception:
                 known = None
             opcfg.save(state, patch, actor=actor, known_repos=known)
@@ -369,13 +417,40 @@ def create_app(state_dir: Path | str) -> FastAPI:
 
 def serve(state_dir: Path | str, host: str = DEFAULT_HOST,
           port: int = DEFAULT_PORT) -> None:
-    """Serve the dashboard (loopback only) until interrupted."""
+    """Serve the dashboard (loopback only) until interrupted.
+
+    Binds first, then prints the machine-readable status record with
+    the allocated port — so --port 0 reports the real ephemeral port
+    instead of 0.
+    """
+    import threading
+    import time
+
     import uvicorn
     ensure_loopback(host)
     app = create_app(state_dir)
-    print(f"Codatiel operator dashboard on http://{host}:{port}/ "
-          f"(state: {state_dir}; loopback only)", flush=True)
+    server = uvicorn.Server(uvicorn.Config(
+        app, host=host, port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(200):
+        if getattr(server, "started", False):
+            break
+        time.sleep(0.05)
+    actual = port
     try:
-        uvicorn.run(app, host=host, port=port, log_level="warning")
+        actual = server.servers[0].sockets[0].getsockname()[1]
+    except Exception:
+        pass
+    print(json.dumps({"status": "ok",
+                      "url": f"http://{host}:{actual}/",
+                      "state_dir": str(state_dir)},
+                     ensure_ascii=False, sort_keys=True), flush=True)
+    try:
+        while thread.is_alive():
+            thread.join(timeout=0.5)
     except KeyboardInterrupt:
         pass
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)

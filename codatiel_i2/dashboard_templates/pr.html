@@ -24,6 +24,7 @@
 <tr><th>Publications posted</th><td>{{ g.get("publications_posted") }}</td></tr>
 <tr><th>Suppressed as previously delivered</th><td>{{ g.get("suppressed_as_previously_delivered") }}</td></tr>
 </table>
+{% if g.get("partial") %}<p class="warn">Partial totals: {{ g.get("runs_unavailable") }} run(s) unreadable ({{ g.get("partial_note") }}).</p>{% endif %}
 <p class="note">Generated counts internal approvals; posted counts successful channel
 deliveries; previously-delivered suppressions are never counted as delivered.</p>
 <h2>Review history</h2>

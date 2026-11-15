@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 {% block body %}
+{% if d.get("config_error") %}<p class="err">Operator configuration invalid: {{ d["config_error"] }} — settings updates are disabled until operator.json is fixed. Diagnostics elsewhere are unaffected.</p>{% endif %}
 {% if saved %}<p class="ok">Settings saved and audit-logged.</p>{% endif %}
 {% for err in errors %}<p class="err">{{ err }}</p>{% endfor %}
 <p>Source: <strong>{{ d.get("operator_source") }}</strong>
 (absent = worker uses env configuration only).</p>
-<form method="post" action="/settings">
+<form method="post" action="/settings"{% if form_disabled %} aria-disabled="true"{% endif %}>
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+{% if form_disabled %}<fieldset disabled>{% endif %}
 <label>monthly_budget_usd (USD; empty = env default)
 <input type="text" name="monthly_budget_usd" value="{{ vals["monthly_budget_usd"] }}"></label>
 <label>daily_budget_usd (USD; empty = no daily budget)
@@ -16,10 +18,10 @@
 <input type="text" name="warn_frac" value="{{ vals["warn_frac"] }}"></label>
 <label>alert critical_frac (0, 1], above warn
 <input type="text" name="critical_frac" value="{{ vals["critical_frac"] }}"></label>
-<label><input type="checkbox" name="pause_reviews"{% if (d.get("settings") or {}).get("pause_reviews") %} checked{% endif %}> pause_reviews</label>
-<label><input type="checkbox" name="pause_github_comments"{% if (d.get("settings") or {}).get("pause_github_comments", True) %} checked{% endif %}> pause_github_comments</label>
-<label><input type="checkbox" name="email_enabled"{% if (d.get("settings") or {}).get("email_enabled", True) %} checked{% endif %}> email_enabled</label>
-<label><input type="checkbox" name="email_on_complete"{% if (d.get("settings") or {}).get("email_on_complete", True) %} checked{% endif %}> email_on_complete</label>
+<label><input type="checkbox" name="pause_reviews"{% if checked.get("pause_reviews") %} checked{% endif %}> pause_reviews</label>
+<label><input type="checkbox" name="pause_github_comments"{% if checked.get("pause_github_comments") %} checked{% endif %}> pause_github_comments</label>
+<label><input type="checkbox" name="email_enabled"{% if checked.get("email_enabled") %} checked{% endif %}> email_enabled</label>
+<label><input type="checkbox" name="email_on_complete"{% if checked.get("email_on_complete") %} checked{% endif %}> email_on_complete</label>
 <label>notify_to (comma-separated; empty = env recipients)
 <input type="text" name="notify_to" value="{{ vals["notify_to"] }}"></label>
 <label>notify_sender (empty = env sender)
@@ -34,8 +36,9 @@ to disable a repo without removing it (empty = no file constraint, env allowlist
 <label>openai_billing_url
 <input type="text" name="openai_billing_url" value="{{ vals["openai_billing_url"] }}"></label>
 <label>actor (audit identity)
-<input type="text" name="actor" value="dashboard"></label>
-<input type="submit" value="Save settings">
+<input type="text" name="actor" value="{{ vals.get("actor", "dashboard") }}"></label>
+<input type="submit" value="Save settings"{% if form_disabled %} disabled{% endif %}>
+{% if form_disabled %}</fieldset>{% endif %}
 </form>
 <h2>Effective resolution (env vs file → effective)</h2>
 {% set eff = d.get("effective", {}) %}

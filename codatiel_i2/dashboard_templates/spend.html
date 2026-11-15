@@ -9,10 +9,11 @@ effective Codatiel limits, not monthly billing unless stated.</p>
 <h2>Totals (authoritative ledger)</h2>
 {% set l = d.get("ledger") or {} %}
 <table>
-<tr><th>Settled USD</th><td>{{ l.get("settled_usd") }}</td></tr>
-<tr><th>Reserved USD</th><td>{{ l.get("reserved_usd") }}</td></tr>
-<tr><th>Unknown-cost holds</th><td>{{ l.get("unknown_holds") }}</td></tr>
+<tr><th>Settled USD</th><td>{{ l.get("settled_usd") if l.get("settled_usd") is not none else "Unavailable" }}</td></tr>
+<tr><th>Reserved USD</th><td>{{ l.get("reserved_usd") if l.get("reserved_usd") is not none else "Unavailable" }}</td></tr>
+<tr><th>Unknown-cost holds</th><td>{{ l.get("unknown_holds") if l.get("unknown_holds") is not none else "Unavailable" }}</td></tr>
 </table>
+{% if l.get("reason") %}<p class="warn">{{ l.get("reason") }}</p>{% endif %}
 <h2>Daily ledger (last {{ days }} days)</h2>
 {% if d.get("daily") %}
 <table><tr><th>Day (UTC)</th><th>Ledger USD</th><th>Reviews</th><th>Unknown-cost</th><th>Superseded USD</th></tr>
@@ -48,9 +49,10 @@ effective Codatiel limits, not monthly billing unless stated.</p>
 {% else %}<p class="note">{{ m.get("reason", "unavailable") }}.</p>{% endif %}
 <h2>Superseded inference</h2>
 {% set s = d.get("superseded") or {} %}
-<table><tr><th>Superseded runs</th><td>{{ s.get("count") }}</td></tr>
-<tr><th>Known USD</th><td>{{ s.get("known_usd") }}</td></tr>
-<tr><th>Unknown</th><td>{{ s.get("unknown") }}</td></tr></table>
+<table><tr><th>Superseded runs</th><td>{{ s.get("count") if s.get("count") is not none else "Unavailable" }}</td></tr>
+<tr><th>Known USD</th><td>{{ s.get("known_usd") if s.get("known_usd") is not none else "Unavailable" }}</td></tr>
+<tr><th>Unknown</th><td>{{ s.get("unknown") if s.get("unknown") is not none else "Unavailable" }}</td></tr></table>
+{% if s.get("reason") %}<p class="warn">{{ s.get("reason") }}</p>{% endif %}
 <p class="note">{{ s.get("note") }}</p>
 <h2>Unknown cost</h2>
 {% set u = d.get("unknown") or {} %}

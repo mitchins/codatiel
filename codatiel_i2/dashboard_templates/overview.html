@@ -5,6 +5,7 @@
 {% block body %}
 {% if d.get("reason") %}<p class="warn">{{ d["reason"] }}</p>{% endif %}
 <h2>Poller status</h2>
+{% if d.get("config_error") %}<p class="err">Operator configuration invalid: {{ d["config_error"] }} — settings updates are disabled until the file is fixed. Diagnostics below are unaffected.</p>{% endif %}
 {% set p = d.get("poller", {}) %}
 {% if p.get("state") == "running" %}<p class="ok"><strong>running</strong> — {{ p.get("note") }}</p>
 {% elif p.get("state") == "idle" %}<p><strong>idle</strong> — {{ p.get("note") }}. An idle poller is not broken: zero open PRs is a healthy idle tick.</p>
@@ -24,19 +25,23 @@
 {% set ledger = d.get("ledger") or {} %}
 {% set rem = d.get("budget_remaining") or {} %}
 {% if eff.get("available") %}
-{{ kv([("Spend cap, monthly (effective)", eff.get("monthly_effective_usd")),
+{{ kv([("Monthly cap (effective)", eff.get("monthly_effective_usd")),
 ("Daily budget (effective)", eff.get("daily_effective_usd")),
 ("Per-PR breaker (effective)", eff.get("per_pr_effective_usd")),
-("Ledger settled USD", ledger.get("settled_usd")),
-("Ledger reserved USD", ledger.get("reserved_usd")),
-("Unknown-cost holds", ledger.get("unknown_holds")),
-("Monthly remaining USD", rem.get("monthly_remaining_usd")),
-("Daily remaining USD (" + (rem.get("daily_day") or "?") + ")", rem.get("daily_remaining_usd"))]) }}
+("Ledger settled USD", ledger.get("settled_usd") if ledger.get("settled_usd") is not none else "Unavailable"),
+("Ledger reserved USD", ledger.get("reserved_usd") if ledger.get("reserved_usd") is not none else "Unavailable"),
+("Unknown-cost holds", ledger.get("unknown_holds") if ledger.get("unknown_holds") is not none else "Unavailable"),
+("Monthly remaining USD", rem.get("monthly_remaining_usd") if rem.get("monthly_remaining_usd") is not none else "Unavailable"),
+("Daily remaining USD (" + (rem.get("daily_day") or "?") + ")", rem.get("daily_remaining_usd") if rem.get("daily_remaining_usd") is not none else "Unavailable")]) }}
+{% if ledger.get("reason") %}<p class="warn">{{ ledger.get("reason") }}</p>{% endif %}
+{% if rem.get("monthly_note") %}<p class="note">{{ rem.get("monthly_note") }}</p>{% endif %}
+{% if rem.get("daily_note") %}<p class="note">{{ rem.get("daily_note") }}</p>{% endif %}
 {% else %}
-{{ kv([("Ledger settled USD", ledger.get("settled_usd")),
-("Ledger reserved USD", ledger.get("reserved_usd")),
-("Unknown-cost holds", ledger.get("unknown_holds")),
+{{ kv([("Ledger settled USD", ledger.get("settled_usd") if ledger.get("settled_usd") is not none else "Unavailable"),
+("Ledger reserved USD", ledger.get("reserved_usd") if ledger.get("reserved_usd") is not none else "Unavailable"),
+("Unknown-cost holds", ledger.get("unknown_holds") if ledger.get("unknown_holds") is not none else "Unavailable"),
 ("Effective caps", eff.get("note", "unavailable"))]) }}
+{% if ledger.get("reason") %}<p class="warn">{{ ledger.get("reason") }}</p>{% endif %}
 {% endif %}
 <p>Upstream OpenAI project limit (operator-entered, DISPLAY ONLY — never fetched, never enforced):
 <strong>{{ (d.get("settings") or {}).get("openai_project_limit_usd") }}</strong> USD —

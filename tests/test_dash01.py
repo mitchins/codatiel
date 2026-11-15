@@ -154,7 +154,237 @@ def _get(port: int, path: str) -> tuple[int, str]:
         return resp.status, resp.read().decode()
 
 
-# -- taxonomy --------------------------------------------------------------------
+# -- CodeRabbit DASH-01 corrections: failing-first regressions --------------
+
+
+def test_cli_dashboard_startup_reports_allocated_port(tmp_path):
+    """Real CLI path: `dashboard --port 0` must print the allocated port.
+
+    Fails on the pre-fix head (json sort TypeError / missing server
+    factory): the CLI crashed before serving anything.
+    """
+    import subprocess as _sp
+    import sys as _sys
+    state = tmp_path / "estate"
+    state.mkdir()
+    proc = _sp.Popen(
+        [_sys.executable, "-c",
+         "from codatiel_i2.cli import main; raise SystemExit(main())",
+         "dashboard", "--port", "0", "--state-dir", str(state)],
+        cwd=Path(__file__).resolve().parent.parent,
+        stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True)
+    try:
+        import json as _json
+        line = proc.stdout.readline().strip()
+        assert line.startswith("{"), line
+        rec = _json.loads(line)
+        assert rec["status"] == "ok", rec
+        port = int(rec["url"].rsplit(":", 1)[1].rstrip("/"))
+        assert port != 0, rec
+        status, _ = _get(port, "/healthz")
+        assert status == 200
+    finally:
+        proc.terminate()
+        proc.wait(timeout=15)
+
+
+def test_budget_remaining_uses_effective_caps(rich_state, monkeypatch):
+    """Copied from _env-style TEST config: remaining must be numeric."""
+    monkeypatch.setenv("CODATIEL_ENV", "test")
+    monkeypatch.setenv("CODATIEL_TEST_STATE", str(rich_state))
+    monkeypatch.setenv("CODATIEL_TEST_REPOS", f"{REPO_A},{REPO_B}")
+    monkeypatch.setenv("CODATIEL_TEST_SPEND_CAP_USD", "20")
+    monkeypatch.setenv("CODATIEL_TEST_TO", "t@e.c")
+    monkeypatch.setenv("CODATIEL_TEST_SENDER", "s@e.c")
+    data = DD.collect_overview(rich_state)
+    rem = data["budget_remaining"]
+    assert rem.get("available") is True, rem
+    assert rem.get("monthly_remaining_usd") == pytest.approx(20.0)
+
+
+def test_invalid_operator_config_is_explicit(rich_state, monkeypatch):
+    """Malformed operator.json: explicit config-error, diagnostics kept."""
+    (rich_state / "operator.json").write_text('{"monthly_budget_usd": -2}')
+    data = DD.collect_overview(rich_state)
+    assert "config_error" in data, data.keys()
+    assert data["available"] is True  # diagnostics preserved
+    assert data["ledger"] is not None
+    repos = DD.collect_repos(rich_state)
+    assert "config_error" in repos
+    server, thread, port = _serve(rich_state)
+    try:
+        status, body = _get(port, "/")
+        assert status == 200 and "invalid" in body.lower()
+        status, body = _get(port, "/settings")
+        assert status == 200 and "invalid" in body.lower()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
+def test_effective_config_uses_selected_state_dir(tmp_path, monkeypatch):
+    """--state-dir B with a file cap must resolve B's file, not env's."""
+    from codatiel_i2 import event_store as _S
+    env_state = tmp_path / "envstate"
+    env_state.mkdir()
+    sel_state = tmp_path / "selstate"
+    sel_state.mkdir()
+    store = _S.Store(sel_state / "events.sqlite")
+    store.close()
+    monkeypatch.setenv("CODATIEL_ENV", "test")
+    monkeypatch.setenv("CODATIEL_TEST_STATE", str(env_state))
+    monkeypatch.setenv("CODATIEL_TEST_REPOS", REPO_A)
+    monkeypatch.setenv("CODATIEL_TEST_SPEND_CAP_USD", "20")
+    monkeypatch.setenv("CODATIEL_TEST_TO", "t@e.c")
+    monkeypatch.setenv("CODATIEL_TEST_SENDER", "s@e.c")
+    OC.save(sel_state, {"monthly_budget_usd": 3.0}, actor="t")
+    eff = DD._effective_limits(sel_state)
+    assert eff.get("available") is True, eff
+    assert eff.get("monthly_effective_usd") == pytest.approx(3.0)
+
+
+def test_unreadable_spend_is_unavailable_not_zero(tmp_path):
+    """A missing spend table must read as Unavailable, never $0.0."""
+    import sqlite3 as _sql
+    from codatiel_i2 import event_store as _S
+    state = tmp_path / "estate"
+    state.mkdir()
+    store = _S.Store(state / "events.sqlite")
+    store.delivery_record(
+        delivery_id="u1", event_type="pull_request", action="opened",
+        repo=REPO_A, pr=1, head_sha="b" * 40, decision="completed",
+        reason="ok", cost_usd=1.0, detail={})
+    store.close()
+    cx = _sql.connect(state / "events.sqlite")
+    cx.execute("DROP TABLE spend")
+    cx.commit()
+    cx.close()
+    data = DD.collect_overview(state)
+    assert data["available"] is True
+    assert data["ledger"]["settled_usd"] is None
+    assert "unavailable" in (data["ledger"].get("reason") or "").lower()
+    server, thread, port = _serve(state)
+    try:
+        _, body = _get(port, "/")
+        assert "Ledger settled USD" in body
+        assert body.count("Unavailable") >= 3, body
+        # The billing-limit line is an operator-entered display field,
+        # not ledger accounting; ledger rows must not render None.
+        assert "Ledger settled USD</th><td>Unavailable" in body
+        _, spend = _get(port, "/spend")
+        assert "Settled USD</th><td>Unavailable" in spend
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
+def test_settings_error_keeps_submitted_values(tmp_path):
+    """A 400 re-render must echo what the operator submitted."""
+    from codatiel_i2 import event_store as _S
+    state = tmp_path / "estate"
+    state.mkdir()
+    _S.Store(state / "events.sqlite").close()
+    server, thread, port = _serve(state)
+    try:
+        _, form = _get(port, "/settings")
+        token = re.search(
+            r'name="csrf_token" value="([^"]+)"', form).group(1)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("POST", "/settings",
+                     body=urllib.parse.urlencode(
+                         {"csrf_token": token,
+                          "monthly_budget_usd": "-3",
+                          "repos": "o/r\no/s=off",
+                          "actor": "t"}).encode(),
+                     headers={"Content-Type":
+                              "application/x-www-form-urlencoded"})
+        resp = conn.getresponse()
+        assert resp.status == 400, resp.status
+        body = resp.read().decode()
+        assert 'value="-3"' in body, body
+        assert "o/s=off" in body
+        # Unchecked boxes stay unchecked from the submission.
+        assert body.count("checked") == 0, body
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
+def test_settings_form_includes_both_env_repo_lists(monkeypatch):
+    """DEV + TEST env repos must both appear when no file overrides."""
+    env = {"CODATIEL_DEV_REPOS": {"value": "o/dev", "display": "o/dev"},
+           "CODATIEL_TEST_REPOS": {"value": "o/test",
+                                   "display": "o/test"}}
+    vals = DA._settings_form_values({}, env)
+    assert "o/dev" in vals["repos"]
+    assert "o/test" in vals["repos"], vals
+
+
+def test_generated_totals_flag_unreadable_runs(rich_state):
+    """Runs with missing semdup.json mark totals partial, not zero."""
+    detail = {"provenance_version": "cost01b-v1",
+              "run_dir": "/nonexistent/run-xyz"}
+    from codatiel_i2 import event_store as _S
+    store = _S.Store(rich_state / "events.sqlite")
+    store.delivery_record(
+        delivery_id="pu1", event_type="pull_request", action="opened",
+        repo=REPO_B, pr=9, head_sha="z" * 40, decision="completed",
+        reason="ok", cost_usd=0.5, detail=detail)
+    store.close()
+    data = DD.collect_pr(rich_state, REPO_B, 9)
+    gvd = data["generated_vs_delivered"]
+    assert gvd.get("runs_unavailable") == 1, gvd
+    assert gvd.get("partial") is True
+
+
+def test_spend_by_repo_keeps_unknown_only_repos(rich_state):
+    """Repos with only unknown-cost reviews must still be listed."""
+    data = DD.collect_spend(rich_state, days=3650)
+    by_repo = {r["repo"]: r for r in data["by_repo"]}
+    assert REPO_A in by_repo
+    assert REPO_B in by_repo, by_repo
+    assert by_repo[REPO_B]["unknown_cost_reviews"] >= 1
+
+
+def test_model_and_email_aggregates_cover_all_reviews():
+    """No silent 5000-row cap: every applicable review is counted."""
+    light = [{"run_dir": "", "cost_usd": 0.01, "cost_unknown": 0}
+             for _ in range(5001)]
+    by_model = DD._spend_by_model(Path("/nonexistent"), light)
+    assert sum(m["reviews"] for m in by_model) == 5001
+    email = DD._email_outcomes(Path("/nonexistent"), light)
+    assert sum(email["by_outcome"].values()) == 5001
+
+
+def test_untrusted_host_rejected(rich_state):
+    """Requests with a foreign Host header are refused before routing."""
+    server, thread, port = _serve(rich_state)
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/",
+            headers={"Host": "evil.example.com"})
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(req, timeout=10)
+        assert exc.value.code == 400, exc.value.code
+        status, _ = _get(port, "/healthz")
+        assert status == 200
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
+def test_ops_unavailable_store_shows_reason_not_empty(tmp_path):
+    """Absent store: reason shown, no healthy-empty history claims."""
+    server, thread, port = _serve(tmp_path / "empty")
+    try:
+        status, body = _get(port, "/ops")
+        assert status == 200
+        assert "reason" in body.lower() or "navailable" in body.lower()
+        assert "No deliveries recorded" not in body
+        assert "None (0 posted)" not in body
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
 
 
 def test_review_state_never_calls_budget_blocked_completed():

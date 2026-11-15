@@ -224,14 +224,22 @@ def collect_overview(state_dir: Path | str,
                      now: float | None = None) -> dict[str, Any]:
     """Top-level operator picture. Read-only; tolerates absence."""
     state_dir = Path(state_dir)
-    settings, source = opcfg.load(state_dir)
     data: dict[str, Any] = {
         "state_dir": str(state_dir),
-        "operator_source": source,
-        "settings": settings.to_dict(),
         "spend_label": LEDGER_LABEL,
         "store_present": (state_dir / "events.sqlite").exists(),
     }
+    try:
+        settings, source = opcfg.load(state_dir)
+    except opcfg.OperatorConfigError as exc:
+        # Invalid operator.json: explicit config-error state. No
+        # defaults are substituted; diagnostics stay available and
+        # settings updates are disabled until the file is fixed.
+        settings, source = None, "invalid"
+        data["config_error"] = str(exc)
+    data["operator_source"] = source
+    data["settings"] = (
+        settings.to_dict() if settings is not None else {})
     poll = read_poll(state_dir)
     data["poll"] = poll
     data["poller"] = poll_status(poll, now=now)
@@ -245,7 +253,7 @@ def collect_overview(state_dir: Path | str,
             "budget_blocked": [], "stale": [], "failed": [],
             "efficiency": None,
         })
-        data["audit"] = opcfg.audit_trail(state_dir)
+        data["audit"] = _audit_trail(state_dir)
         data["env"] = _env_snapshot()
         return data
     try:
@@ -274,15 +282,23 @@ def collect_overview(state_dir: Path | str,
         data["by_model"] = _spend_by_model(state_dir, light)
         data["email"] = _email_outcomes(state_dir, light)
         data["publications"] = _publications(state_dir, cx)
+        data["effective"] = _effective_limits(state_dir)
         data["budget_remaining"] = _budget_remaining(
             data.get("ledger") or {}, data.get("effective") or {}, cx,
             now=now)
     finally:
         close_ro(cx)
-    data["effective"] = _effective_limits(state_dir)
-    data["audit"] = opcfg.audit_trail(state_dir)
+    data["audit"] = _audit_trail(state_dir)
     data["env"] = _env_snapshot()
     return data
+
+
+def _audit_trail(state_dir: Path) -> list[dict]:
+    """Audit entries; tolerates a missing trail (never raises)."""
+    try:
+        return opcfg.audit_trail(state_dir)
+    except Exception:
+        return []
 
 
 def _meta(cx: sqlite3.Connection, key: str) -> str | None:
@@ -294,15 +310,27 @@ def _meta(cx: sqlite3.Connection, key: str) -> str | None:
     return row[0] if row else None
 
 
-def _spend_totals(cx: sqlite3.Connection) -> dict[str, float]:
-    out: dict[str, float] = {}
+def _spend_totals(cx: sqlite3.Connection) -> dict[str, Any]:
+    """Authoritative spend table; unreadable reads as Unavailable.
+
+    A failed query yields None amounts with a reason — never $0.0 —
+    so operators cannot mistake unavailable accounting for confirmed
+    zero spending.
+    """
+    out: dict[str, Any] = {}
+    failed = False
     for key in ("settled_usd", "reserved_usd", "unknown_holds"):
         try:
             row = cx.execute(
                 "SELECT value FROM spend WHERE key=?", (key,)).fetchone()
             out[key] = float(row[0]) if row and row[0] is not None else 0.0
         except Exception:
-            out[key] = 0.0
+            out[key] = None
+            failed = True
+    if failed:
+        out["unavailable"] = True
+        out["reason"] = ("spend table unreadable; amounts Unavailable, "
+                         "not zero")
     return out
 
 
@@ -442,9 +470,17 @@ def _efficiency_summary(cx: sqlite3.Connection) -> dict[str, Any]:
 
 
 def _effective_limits(state_dir: Path) -> dict[str, Any]:
+    """Effective caps resolved for the SELECTED state directory.
+
+    Env-derived values (caps, repos, pipeline) still come from the
+    process environment, but the operator file is loaded from the
+    state dir the dashboard was asked to show — never from whatever
+    directory the environment happens to select.
+    """
     try:
         from codatiel_i2 import event_pipeline as pipe_mod
         cfg = pipe_mod.config_from_env()
+        cfg.state_dir = Path(state_dir)
         cfg = opcfg.apply_to_event_config(cfg)
         return {"available": True,
                 "monthly_effective_usd": cfg.spend_cap_usd,
@@ -467,11 +503,15 @@ def _budget_remaining(ledger: dict[str, Any],
     if not effective.get("available"):
         return {"available": False,
                 "note": "effective caps unavailable"}
-    settled = float(ledger.get("settled_usd") or 0.0)
+    settled = ledger.get("settled_usd")
     out: dict[str, Any] = {"available": True}
     monthly = effective.get("monthly_effective_usd")
-    out["monthly_remaining_usd"] = (round(float(monthly) - settled, 6)
-                                    if monthly is not None else None)
+    out["monthly_remaining_usd"] = (
+        round(float(monthly) - float(settled), 6)
+        if monthly is not None and settled is not None else None)
+    if out["monthly_remaining_usd"] is None:
+        out["monthly_note"] = ("settled spend unreadable; remaining "
+                               "is unknown, not zero")
     # Daily remaining reuses the authoritative day ledger (SELECTs
     # only) via a shim exposing the read-only connection.
     daily = effective.get("daily_effective_usd")
@@ -527,16 +567,24 @@ def _env_snapshot() -> dict[str, Any]:
 def collect_repos(state_dir: Path | str) -> dict[str, Any]:
     """Per-repo queue: enabled flag, tracked PRs, latest activity."""
     state_dir = Path(state_dir)
-    settings, _ = opcfg.load(state_dir)
     data: dict[str, Any] = {"available": False, "repos": []}
+    try:
+        settings, _ = opcfg.load(state_dir)
+    except opcfg.OperatorConfigError as exc:
+        settings = None
+        data["config_error"] = str(exc)
     cx = open_ro(state_dir)
     if cx is None:
         data["reason"] = "no readable events.sqlite"
         return data
     try:
         try:
+            if settings is None:
+                raise opcfg.OperatorConfigError("invalid operator config")
             from codatiel_i2 import event_pipeline as pipe_mod
-            cfg = opcfg.apply_to_event_config(pipe_mod.config_from_env())
+            cfg = pipe_mod.config_from_env()
+            cfg.state_dir = state_dir
+            cfg = opcfg.apply_to_event_config(cfg)
             effective = list(opcfg.effective_repos(
                 settings, list(cfg.repos or [])))
         except Exception:
@@ -748,7 +796,7 @@ def _generated_vs_delivered(reviews: list[dict], pubs: list[dict],
       an already-delivered marker (never counted as delivered).
     """
     terra_total = sum(int(r.get("terra_findings") or 0) for r in reviews)
-    sem_pub = sem_sup = already = 0
+    sem_pub = sem_sup = already = runs_unavailable = 0
     seen_runs: set[str] = set()
     for row in deliveries:
         run_dir = _parse_detail(row.get("detail")).get("run_dir") or ""
@@ -757,6 +805,9 @@ def _generated_vs_delivered(reviews: list[dict], pubs: list[dict],
         seen_runs.add(run_dir)
         got = _run_findings(state_dir, run_dir)
         if not got.get("available"):
+            # Unreadable run evidence: the totals below are partial,
+            # never silently zero for the missing runs.
+            runs_unavailable += 1
             continue
         sem_pub += int(got.get("published") or 0)
         sem_sup += int(got.get("suppressed") or 0)
@@ -773,7 +824,12 @@ def _generated_vs_delivered(reviews: list[dict], pubs: list[dict],
             "generated_total": terra_total + sem_pub + sem_sup,
             "finding_deliveries_posted": posted_findings,
             "publications_posted": posted_pubs,
-            "suppressed_as_previously_delivered": already}
+            "suppressed_as_previously_delivered": already,
+            "runs_unavailable": runs_unavailable,
+            "partial": runs_unavailable > 0,
+            "partial_note": ("some run evidence unreadable; semdup "
+                             "counts cover available runs only")
+            if runs_unavailable else ""}
 
 
 # -- spending analytics ----------------------------------------------------------
@@ -832,11 +888,17 @@ def _spend_by_repo(cx: sqlite3.Connection) -> list[dict]:
                          "GROUP BY repo")
     except Exception:
         return []
+    known_by = {r["repo"]: r for r in known}
     unk_by = {r["repo"]: r["n"] for r in unk}
-    return [{"repo": r["repo"], "reviews": int(r["n"]),
-             "known_usd": round(float(r["known_usd"]), 6),
-             "unknown_cost_reviews": int(unk_by.get(r["repo"], 0))}
-            for r in known]
+    # Union: repositories with only unknown-cost reviews appear with
+    # zero known spend and their unknown count (never dropped).
+    return [{"repo": repo,
+             "reviews": int(known_by.get(repo, {}).get("n", 0))
+             + int(unk_by.get(repo, 0)),
+             "known_usd": round(
+                 float(known_by.get(repo, {}).get("known_usd", 0.0)), 6),
+             "unknown_cost_reviews": int(unk_by.get(repo, 0))}
+            for repo in sorted(set(known_by) | set(unk_by))]
 
 
 def _spend_by_pr(cx: sqlite3.Connection) -> list[dict]:
@@ -873,7 +935,9 @@ def _model_of_run(state_dir: Path, run_dir: str) -> str:
 def _spend_by_model(state_dir: Path,
                     light: list[dict]) -> list[dict]:
     agg: dict[str, dict[str, Any]] = {}
-    for row in light[:5000]:
+    # No row cap: every applicable review is aggregated so the counts
+    # are complete, never silently partial.
+    for row in light:
         model = _model_of_run(state_dir, str(row.get("run_dir") or ""))
         slot = agg.setdefault(model, {"model": model, "reviews": 0,
                                       "codatiel_ledger_usd": 0.0,
@@ -906,7 +970,9 @@ def _classify_receipt(receipt: Any) -> str:
 def _email_outcomes(state_dir: Path, light: list[dict]) -> dict[str, Any]:
     counts = {"delivered": 0, "failed": 0, "attempted-no-receipt": 0,
               "no-delivery-record": 0}
-    for row in light[:5000]:
+    # No row cap: every applicable review is aggregated so the counts
+    # are complete, never silently partial.
+    for row in light:
         run_dir = str(row.get("run_dir") or "")
         if not run_dir:
             counts["no-delivery-record"] += 1
@@ -1010,8 +1076,10 @@ def _superseded(cx: sqlite3.Connection) -> dict[str, Any]:
                 "WHERE decision='skipped:stale_superseded' OR "
                 "(decision='skipped:replay' AND json_extract(detail, "
                 "'$.original_decision')='skipped:stale_superseded')")
-    except Exception:
-        return {"count": 0, "known_usd": 0.0, "unknown": 0}
+    except Exception as exc:
+        return {"count": None, "known_usd": None, "unknown": None,
+                "unavailable": True,
+                "reason": f"superseded query failed: {exc}"}
     known = sum(float(r["cost_usd"] or 0.0) for r in rows
                 if r.get("cost_usd") is not None)
     unknown = sum(1 for r in rows if r.get("cost_usd") is None)
