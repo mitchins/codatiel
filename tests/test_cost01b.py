@@ -530,32 +530,68 @@ def test_delivery_separate_approval_and_publication(tmp_path: Path, dupe_repo, m
     to_email, _ = _filter_already_delivered(store4, "o/r", 1, [row], "email")
     assert len(to_github) == 0 and len(to_email) == 1, "github success must not suppress email"
 
-def test_publisher_failure_mentions_posted_no_receipt(tmp_path: Path):
-    """Publisher failure mentioning 'posted' never creates delivery receipt; finding remains eligible."""
+def test_publisher_failure_mentions_posted_no_receipt(tmp_path: Path, monkeypatch):
+    """Failure text mentioning 'posted' never creates a delivery receipt.
+
+    Exercises the actual publication path: _maybe_publish_comment with
+    a failing publisher whose error mentions "posted", plus the
+    structured _github_delivery_posted gate (publications.outcome ==
+    "posted") that guards _record_finding_deliveries. Under the old
+    substring check (`"posted" in publish_bits`) this test failed;
+    with the structured check it passes.
+    """
     from codatiel_i2.event_store import Store
-    from codatiel_i2.event_pipeline import _finding_hash_from_row, _filter_already_delivered
+    from codatiel_i2 import event_pipeline as EP
+    from codatiel_i2.github import comments as comments_mod
+
     state = tmp_path / "state_pub"
+    state.mkdir()
     store = Store(state / "events.sqlite")
     store.meta_set("enabled_at", "2026-01-01T00:00:00Z")
     row = {"anchors": {"target": {"path": "a.py", "sha256": "h1"}, "counterpart": {"path": "b.py", "sha256": "h2"}}}
-    fh = _finding_hash_from_row(row)
-    # Simulate publisher failure that mentions "posted" in error text but outcome is refused
-    # No finding_deliveries record should be created for this failure
+    fh = EP._finding_hash_from_row(row)
+    head = "b" * 40
+    run_id = "run1"
+
+    # 1. Actual publisher error path: enabled switch + failing poster
+    # whose message mentions "posted". Bits contain "posted" (the old
+    # substring trigger) but no structured posted outcome exists.
+    monkeypatch.setenv("CODATIEL_GITHUB_COMMENTS", "on")
+    def _boom(*a, **k):
+        raise RuntimeError("comment post failed (not posted: quota posted?)")
+    monkeypatch.setattr(comments_mod, "post_review_comment", _boom)
+    run_dir = tmp_path / "runs" / "r1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(json.dumps({"run_id": run_id}))
+    bits = EP._maybe_publish_comment(
+        cfg=type("C", (), {"state_dir": state})(), store=store,
+        run_dir=str(run_dir), now=0.0)
+    assert "posted" in bits  # old code would have treated this as posted
+    assert EP._github_delivery_posted(store, "o/r", 1, head, run_id) is False
     assert not store.is_finding_delivered("o/r", 1, fh, "github")
-    # Ensure the finding is still eligible (not filtered)
-    to_deliver, already = _filter_already_delivered(store, "o/r", 1, [row], "github")
+    to_deliver, already = EP._filter_already_delivered(store, "o/r", 1, [row], "github")
     assert len(to_deliver) == 1 and len(already) == 0
-    # Now simulate successful publication creates exactly one per-channel receipt
-    store.finding_delivery_record(repo="o/r", pr=1, finding_hash=fh, channel="github", head_sha="b"*40, run_id="run1", outcome="posted")
+
+    # 2. Refused publication row whose reason mentions "posted" still
+    # does not count as posted (structured outcome, not substring).
+    store.publication_record(repo="o/r", pr=1, head_sha=head, run_id=run_id,
+                             comment_id="", outcome="refused",
+                             reason="comment post failed (not posted: ... posted ...)")
+    assert EP._github_delivery_posted(store, "o/r", 1, head, run_id) is False
+    to_deliver, already = EP._filter_already_delivered(store, "o/r", 1, [row], "github")
+    assert len(to_deliver) == 1 and len(already) == 0
+
+    # 3. Structured posted outcome gates delivery: only then record.
+    store.publication_update(repo="o/r", pr=1, head_sha=head, run_id=run_id,
+                             comment_id="c1", outcome="posted",
+                             reason="posted consolidated comment")
+    assert EP._github_delivery_posted(store, "o/r", 1, head, run_id) is True
+    EP._record_finding_deliveries(store, "o/r", 1, [row], "github", head, run_id, "posted")
     assert store.is_finding_delivered("o/r", 1, fh, "github")
     assert not store.is_finding_delivered("o/r", 1, fh, "email")
-    # Second successful publication to same channel should not create duplicate
-    store.finding_delivery_record(repo="o/r", pr=1, finding_hash=fh, channel="github", head_sha="b"*40, run_id="run1", outcome="posted")
-    # Still exactly one, and still eligible check shows already delivered
-    to_deliver2, already2 = _filter_already_delivered(store, "o/r", 1, [row], "github")
+    to_deliver2, already2 = EP._filter_already_delivered(store, "o/r", 1, [row], "github")
     assert len(to_deliver2) == 0 and len(already2) == 1
-    # Finding remains eligible for other channel
-    to_email, already_email = _filter_already_delivered(store, "o/r", 1, [row], "email")
+    to_email, _ = EP._filter_already_delivered(store, "o/r", 1, [row], "email")
     assert len(to_email) == 1
 
 def test_safe_run_dir_sibling_rejected_nested_accepted(tmp_path: Path):

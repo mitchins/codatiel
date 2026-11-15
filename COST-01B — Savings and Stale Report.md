@@ -33,8 +33,8 @@ Reproduced against a SQLite-consistent `.backup` copy (WAL-safe, never the live 
 - Semdup orphan total **$1.668416** (corrected from $1.651134) — 80.9% of $2.062834; Terra/Luna remainder $0.394418
 
 **Disjoint categories (no double-count):**
-- Semdup total **$8.823641** = settled portion **$7.155225** (32 pairs in 36 reviews) + orphan portion **$1.668416** (4 runs, not in `settled`, only in `superseded` $2.062834). Reviews $11.012281 **includes** only settled semdup $7.155225 (Terra $3.1 + Luna $0.75 + settled semdup $7.15 = total); superseded $2.062834 (of which $1.668416 semdup) is **separate**. Total ledger $13.075115 = $11.012281 settled + $2.062834 superseded, semdup $8.823641 counted once (7.155 + 1.668).
-- Cache waste $2.223886 (replay-demonstrated, 433 eligible) and stale waste $1.668416 overlap on **11 pairs** ($0.056496) within orphans that were both repeated and superseded — deducted once in combined counterfactual.
+- Total ledger **$13.075115** = settled **$11.012281** (36 reviews) + superseded **$2.062834** (4 deliveries). Semdup **$8.823641** is a cross-cutting component already contained in those two buckets — **not** a third addend: settled semdup **$7.155225** (1,354 pairs in 36 reviews) + orphan semdup **$1.668416** (364 pairs in 4 runs, only in `superseded`). Superseded non-semdup remainder (Terra/Luna) **$0.394418** = $2.062834 − $1.668416 persists even if the stale latch works.
+- Cache waste $2.223886 (replay-demonstrated, 433 eligible) and stale waste $1.668416 overlap on **11 pairs** ($0.056496) within orphans that were both repeated and superseded — overlap added back once in the combined counterfactual (deducted from savings, not double-subtracted).
 
 ## Gate B — Stop spending on stale reviews (persistent latch)
 
@@ -119,14 +119,14 @@ superseded, provenance_version="cost01b-v1", finished_at
 | Stale superseded semdup avoided | $1.668416 (80.9% of $2.062834) | **$1.668416** (all 4 orphans, if latch before dup) |
 | Overlap (repeated within orphans) | — | **11 pairs, $0.056496** — deducted once |
 | Combined non-overlapping savings | — | **$3.835806** ($2.223886 + $1.668416 − $0.056496) — vs $4.35 naive sum |
-| Counterfactual billed (non-overlapping) | $11.012281 settled (incl. $7.155225 settled semdup) + $2.062834 superseded (incl. $1.668416 orphan semdup) = $13.075115 | **$8.307681** settled ($11.012281 − $2.7046 upper) + $0.394418 remainder = **$8.702099** — with demonstrated $2.223886: **$8.788395** settled ($11.012281 − $2.223886) + $0.394418 = **$9.182813**; less overlap $0.056496 → **$9.126317** |
-| 14 Nov counterfactual | $4.689998 | **$2.68** ($4.689998 − $0.403 cache on 14 Nov repeated 39/44 etc. − $1.668416 stale + $0.056496 overlap) |
+| Counterfactual billed (non-overlapping) | Total ledger $13.075115 = $11.012281 settled + $2.062834 superseded (semdup $8.823641 is a component: $7.155225 settled + $1.668416 orphan, not a third addend) | **$9.239309** total ($13.075115 − $2.223886 demonstrated cache − $1.668416 conditional stale + $0.056496 overlap added back once). Memo: settled-only $8.788395 ($11.012281 − $2.223886) or $8.307681 ($11.012281 − $2.7046 upper); superseded non-semdup remainder $0.394418 persists ($8.788395 + $0.394418 + $0.056496 = $9.239309) |
+| 14 Nov counterfactual | $4.689998 | **$2.68** ($4.689998 − $0.403 cache on 14 Nov − $1.668416 stale + $0.056496 overlap = $2.675078 ≈ $2.68) |
 | Additional processing | — | file `SELECT text` + `cache.json` I/O, <1 ms/pair, no inference |
 | Remaining duplicate suggestions | 47 republished | **0** republished (delivery-layer `finding_deliveries` suppresses `already_delivered` per channel; `already_reported` not conflated) |
 | Correctness regressions | — | none (tool/provider/context correctly miss) |
 
 **Distinction (non-overlapping):**
-- **Actual billed (historical, snapshot):** semdup $8.823641 (of which $7.155225 settled + $1.668416 orphan) + reviews $11.012281 (incl. settled semdup) + superseded $2.062834 = $13.075115 total ledger; 14 Nov $4.689998 day
+- **Actual billed (historical, snapshot):** total ledger **$13.075115** = settled **$11.012281** + superseded **$2.062834**; of which semdup **$8.823641** ($7.155225 settled + $1.668416 orphan, already contained in the two ledger buckets, not a third addend); 14 Nov **$4.689998** day
 - **Upper bound (naive):** $2.7046 cache + $1.668416 stale = $4.3730 (includes overlap)
 - **Replay-demonstrated (chronological, new eligibility, mocked, no inference):** **$2.223886 cache** (433/1,718 eligible, $0.005136 avg)
 - **Conditional (if latch before duplication, head-change timing not modeled):** **$1.668416 stale** (4 orphans), combined **$3.835806** ($2.223886 + $1.668416 − $0.056496 overlap) — stale portion is conditional upper bound, not replay-demonstrated
@@ -142,7 +142,7 @@ codatiel_i2/semdup_dev/stage.py          (+~160, latch, cache with delivery-awar
 codatiel_i2/semdup_dev/editorial_shadow.py (+33, per-pair is_stale)
 codatiel_i2/event_pipeline.py            (+~240, persistent latch, per-finding delivery dedup, Luna provenance)
 codatiel_i2/event_store.py               (+63 + 45, finding_deliveries table, detail merge)
-tests/test_cost01b.py                    (new, 18 regressions, all mocked, meaningful partial + delivery tests)
+tests/test_cost01b.py                    (new, 20 regressions, all mocked, meaningful partial + delivery tests)
 ```
 
 No new platform/dashboard/webhook, no `SCHEMA_VERSION` bump, `semdup/continued` retained, `semdup/cache` additive, `finding_deliveries` additive, WAL-safe.
@@ -150,8 +150,8 @@ No new platform/dashboard/webhook, no `SCHEMA_VERSION` bump, `semdup/continued` 
 ## Test and review results
 
 ```
-18 passed (cost01b) + 43 (semdup_stage) + 22 (event_pipeline) + 16 (prod02) + 26 (watcher_corrections) = 125+ locally
-Full suite: 18 + 43 + 22 + 16 + 26 + others = 122+ previously, now 125+
+20 passed (cost01b) + 43 (semdup_stage) + 22 (event_pipeline) + 16 (prod02) + 26 (watcher_corrections) = 127+ locally
+Full suite: 20 + 43 + 22 + 16 + 26 + others = 127+ previously, now 127+
 
 Hosted: shareable-tests pass, SonarCloud Quality Gate passed (13→14 new issues, 0.0% coverage/duplication — expected), secret-scan pass, GitGuardian pass.
 CodeRabbit: 3 prior Major/Minor #4575789905/17/21 fixed (latch, tool-read, provider failure); new head 0dd3ad6 → f1afa91 review pending — 0 unresolved material after fixes; new board will be triaged.

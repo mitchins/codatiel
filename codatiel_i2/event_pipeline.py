@@ -971,6 +971,23 @@ def _record_finding_deliveries(store, repo: str, pr: int, published: list, chann
             continue
 
 
+def _github_delivery_posted(store, repo: str, pr: int, head_sha: str, run_id: str) -> bool:
+    """Structured publication outcome (not message substring).
+
+    Returns True only when the publications row for (repo, PR, head,
+    run) has outcome == "posted". A refused/failed row whose reason
+    text mentions "posted" (e.g. "comment post failed (not posted)")
+    returns False, so no finding_deliveries receipt is created.
+    """
+    try:
+        if not run_id:
+            return False
+        row = store.publication_get(repo, pr, head_sha, run_id)
+        return bool(row and row.get("outcome") == "posted")
+    except Exception:
+        return False
+
+
 def process_event(*, cfg: EventConfig, store: store_mod.Store,
                   ev: dict, model_factory: Any = None,
                   transport: Any = None) -> dict:
@@ -1304,17 +1321,18 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     publish_bits = _maybe_publish_comment(
         cfg=cfg, store=store, run_dir=run_dir or "",
         now=now)
-    # Record GitHub deliveries only on structured posted outcome (not substring)
-    _github_posted = False
+    # Record GitHub deliveries only on structured posted outcome (not substring).
+    # _github_delivery_posted checks publications.outcome == "posted"; a
+    # failure message mentioning "posted" never counts.
     try:
         _run_id2 = ""
         try:
             _run_id2 = json.loads((Path(run_dir) / "run.json").read_text(encoding="utf-8")).get("run_id") or ""
         except Exception:
             pass
-        _pub_row = store.publication_get(ev["repo"], pr, to_sha, _run_id2) if _run_id2 else None
-        _github_posted = bool(_pub_row and _pub_row.get("outcome") == "posted")
+        _github_posted = _github_delivery_posted(store, ev["repo"], pr, to_sha, _run_id2)
     except Exception:
+        _run_id2 = ""
         _github_posted = False
     if _github_posted:
         try:
