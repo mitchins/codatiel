@@ -122,6 +122,16 @@ class EventConfig:
     operator_source: str = "env"
 
 
+# BUDGET-RETRY-01: bounded re-drive of pure budget refusals. A
+# ceiling-skipped (repo, PR, head) that is re-ingested under the same
+# deterministic delivery ID may be reviewed once spend budget is
+# available again — same head only, live-head confirmed, no prior
+# review of the head, and at most BUDGET_RETRY_MAX_ATTEMPTS re-drives.
+# Every attempt re-checks all spend caps before any inference; attempts
+# that are refused again keep their counter so the bound holds.
+BUDGET_RETRY_MAX_ATTEMPTS = 5
+
+
 def _env_list(name: str) -> list[str]:
     return [p.strip() for p in os.environ.get(name, "").split(",")
             if p.strip()]
@@ -855,6 +865,134 @@ def _is_readiness_rerun(ev: dict, store: store_mod.Store,
             and not cp.get("last_reviewed_head"))
 
 
+def _prior_retry_attempts(prior: dict) -> int:
+    """Recorded budget-retry attempts for a delivery row (0 when none)."""
+    try:
+        detail = json.loads(prior.get("detail") or "{}")
+    except Exception:
+        return 0
+    try:
+        return int(detail.get("budget_retry_attempts") or 0)
+    except Exception:
+        return 0
+
+
+def _ceiling_original_decision(prior: dict) -> str | None:
+    """The refusal a delivery row records, unwrapping replay wrappers.
+
+    Returns "skipped:ceiling" only for a pure ceiling refusal, either
+    directly or via a skipped:replay wrapper preserving it as the
+    original decision; None for every other shape.
+    """
+    dec = str(prior.get("decision") or "")
+    if dec == "skipped:replay":
+        try:
+            detail = json.loads(prior.get("detail") or "{}")
+        except Exception:
+            return None
+        dec = str(detail.get("original_decision") or "")
+    return dec if dec == "skipped:ceiling" else None
+
+
+def _prior_carries_spend(prior: dict) -> bool:
+    """True when a delivery row has non-zero spend attached."""
+    try:
+        return abs(float(prior.get("cost_usd") or 0.0)) > 0.0
+    except Exception:
+        return True
+
+
+def _same_generation(ev: dict, prior: dict) -> bool:
+    """True when the event names the exact refused (repo, PR, head)."""
+    head = ev.get("head_sha") or ""
+    if not head or head != (prior.get("head_sha") or ""):
+        return False
+    if str(ev.get("repo") or "") != str(prior.get("repo") or ""):
+        return False
+    try:
+        return int(ev.get("pr_number") or 0) == int(prior.get("pr") or 0)
+    except Exception:
+        return False
+
+
+def _head_unreviewed(store: store_mod.Store, ev: dict, head: str) -> bool:
+    """True when no review has since covered the head.
+
+    A checkpoint last_reviewed_head match — or a pinned claim for the
+    head, still owned by its claimant — blocks the retry so the same
+    head is never reviewed twice. The checkpoint pointer alone is not
+    enough: a later review of a newer head advances the pointer, so a
+    successful review of THIS head is checked directly in the reviews
+    history. A live reset to an already-reviewed head therefore stays
+    a blocked replay.
+    """
+    try:
+        cp = store.checkpoint_get(ev["repo"], int(ev["pr_number"])) or {}
+    except Exception:
+        return False
+    if (cp.get("last_reviewed_head") or "") == head:
+        return False
+    if (cp.get("status") or "") == "in_progress" and \
+            (cp.get("in_progress_head") or "") == head:
+        return False
+    try:
+        hit = store.cx.execute(
+            "SELECT 1 FROM reviews WHERE repo=? AND pr=?"
+            " AND head_sha=? AND status IN ('complete','inconclusive')"
+            " LIMIT 1",
+            (ev["repo"], int(ev["pr_number"]), head)).fetchone()
+    except Exception:
+        return False
+    return not bool(hit)
+
+
+def _head_still_live(ev: dict, head: str) -> bool:
+    """True when the live PR head positively confirms the head.
+
+    Unverifiable (gh unreachable or lookup error) fails closed: the
+    refusal is retried on a later tick, never on a guess.
+    """
+    try:
+        live = get_live_head(ev["repo"], int(ev["pr_number"] or 0))
+    except Exception:
+        return False
+    return bool(live) and live == head
+
+
+def _is_budget_retry(ev: dict, store: store_mod.Store,
+                     prior: dict) -> bool:
+    """True when a duplicate delivery may re-drive a budget refusal.
+
+    Narrow escape from replay protection, mirroring
+    _is_readiness_rerun: a pure skipped:ceiling row (directly, or via
+    a skipped:replay wrapper preserving it as the original decision)
+    for the same (repo, PR, head) may be processed as new work when —
+    and only when — every bound holds:
+
+    - the refusal carried no spend (spend-carrying rows are never
+      touched);
+    - the re-ingested event names the exact refused head;
+    - no review has since covered that head (checkpoint, pinned
+      claim, or the reviews history itself — so a later review that
+      advanced the checkpoint pointer does not re-arm an old
+      refusal);
+    - the live PR head positively confirms the refused head is still
+      current;
+    - fewer than BUDGET_RETRY_MAX_ATTEMPTS re-drives recorded.
+
+    All spend caps are re-checked by the normal flow after re-rooting;
+    this predicate authorizes no inference by itself.
+    """
+    head = ev.get("head_sha") or ""
+    return (bool(head)
+            and _ceiling_original_decision(prior) == "skipped:ceiling"
+            and not _prior_carries_spend(prior)
+            and _same_generation(ev, prior)
+            and _prior_retry_attempts(prior) < BUDGET_RETRY_MAX_ATTEMPTS
+            and _head_unreviewed(store, ev, head)
+            and _head_still_live(ev, head))
+
+
 def _record(store: store_mod.Store, ev: dict, decision: str, reason: str,
              cost: float | None, detail: dict | None = None,
              now: float | None = None) -> dict:
@@ -1069,8 +1207,27 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         else:
             # Webhook retry / worker restart: the stored decision stands
             # and the duplicate is recorded as a blocked replay.
-            # No inference.
-            return store.delivery_mark_replay(ev["delivery_id"], prior)
+            # No inference. Two narrow escapes re-root instead: the
+            # draft readiness transition, and a bounded budget retry of
+            # a pure ceiling refusal (same head, still live, budget
+            # re-checked downstream).
+            if _is_budget_retry(ev, store, prior):
+                attempt = _prior_retry_attempts(prior) + 1
+                reopened, won = store.delivery_reopen_budget(
+                    ev["delivery_id"], attempt=attempt,
+                    max_attempts=BUDGET_RETRY_MAX_ATTEMPTS, now=now)
+                if won and (reopened or {}).get("decision") == \
+                        "in_progress":
+                    prior = None
+                else:
+                    # Lost the atomic reclaim (or the row moved under
+                    # us): fall back to replay, never process as new
+                    # work. The replay mark cannot overwrite the
+                    # winner's active claim.
+                    return store.delivery_mark_replay(
+                        ev["delivery_id"], prior)
+            else:
+                return store.delivery_mark_replay(ev["delivery_id"], prior)
     if prior is None:
         _record(store, ev, "in_progress", "claimed", None, now=now)
     cp = None
@@ -1140,7 +1297,9 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             store, ev, "skipped:ceiling",
             f"spend cap ${cfg.spend_cap_usd:.2f} reached "
             f"(settled ${totals['settled_usd']:.4f}); inference stopped, "
-            f"event recorded; no backlog processing on reset", 0.0, now=now)
+            f"event recorded; a later tick may bounded-retry this exact "
+            f"head once budget is available (same head, live-head "
+            f"confirmed, max {BUDGET_RETRY_MAX_ATTEMPTS} attempts)", 0.0, now=now)
     live = get_live_head(ev["repo"], pr)
     if live is not None and live != to_sha:
         # PROD-02: the event's head is no longer the PR's head (older

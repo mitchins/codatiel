@@ -674,6 +674,8 @@ def ingest_gate(cfg: Any, store: Any, ev: dict[str, Any],
                     f"daily Codatiel budget ${float(daily_cap):.2f} "
                     f"reached (ledger ${spent['codatiel_ledger_usd']:.4f} "
                     f"on {today}); inference stopped, event recorded; "
-                    "no backlog processing on reset"),
+                    "a later tick may bounded-retry this exact head "
+                    "once budget is available (same head, live-head "
+                    "confirmed, bounded attempts)"),
             }
     return None
