@@ -877,6 +877,74 @@ def _prior_retry_attempts(prior: dict) -> int:
         return 0
 
 
+def _ceiling_original_decision(prior: dict) -> str | None:
+    """The refusal a delivery row records, unwrapping replay wrappers.
+
+    Returns "skipped:ceiling" only for a pure ceiling refusal, either
+    directly or via a skipped:replay wrapper preserving it as the
+    original decision; None for every other shape.
+    """
+    dec = str(prior.get("decision") or "")
+    if dec == "skipped:replay":
+        try:
+            detail = json.loads(prior.get("detail") or "{}")
+        except Exception:
+            return None
+        dec = str(detail.get("original_decision") or "")
+    return dec if dec == "skipped:ceiling" else None
+
+
+def _prior_carries_spend(prior: dict) -> bool:
+    """True when a delivery row has non-zero spend attached."""
+    try:
+        return float(prior.get("cost_usd") or 0.0) != 0.0
+    except Exception:
+        return True
+
+
+def _same_generation(ev: dict, prior: dict) -> bool:
+    """True when the event names the exact refused (repo, PR, head)."""
+    head = ev.get("head_sha") or ""
+    if not head or head != (prior.get("head_sha") or ""):
+        return False
+    if str(ev.get("repo") or "") != str(prior.get("repo") or ""):
+        return False
+    try:
+        return int(ev.get("pr_number") or 0) == int(prior.get("pr") or 0)
+    except Exception:
+        return False
+
+
+def _head_unreviewed(store: store_mod.Store, ev: dict, head: str) -> bool:
+    """True when no review has since covered the head.
+
+    A checkpoint last_reviewed_head match — or a pinned claim for the
+    head, still owned by its claimant — blocks the retry so the same
+    head is never reviewed twice.
+    """
+    try:
+        cp = store.checkpoint_get(ev["repo"], int(ev["pr_number"])) or {}
+    except Exception:
+        return False
+    if (cp.get("last_reviewed_head") or "") == head:
+        return False
+    return not ((cp.get("status") or "") == "in_progress"
+                and (cp.get("in_progress_head") or "") == head)
+
+
+def _head_still_live(ev: dict, head: str) -> bool:
+    """True when the live PR head positively confirms the head.
+
+    Unverifiable (gh unreachable or lookup error) fails closed: the
+    refusal is retried on a later tick, never on a guess.
+    """
+    try:
+        live = get_live_head(ev["repo"], int(ev["pr_number"] or 0))
+    except Exception:
+        return False
+    return bool(live) and live == head
+
+
 def _is_budget_retry(ev: dict, store: store_mod.Store,
                      prior: dict) -> bool:
     """True when a duplicate delivery may re-drive a budget refusal.
@@ -887,62 +955,26 @@ def _is_budget_retry(ev: dict, store: store_mod.Store,
     for the same (repo, PR, head) may be processed as new work when —
     and only when — every bound holds:
 
-    - the refusal carried no spend (cost None or $0; spend-carrying
-      rows are never touched);
+    - the refusal carried no spend (spend-carrying rows are never
+      touched);
     - the re-ingested event names the exact refused head;
-    - no review has since covered that head (checkpoint
-      last_reviewed_head differs; a pinned claim for the head stays
-      owned by its claimant);
+    - no review has since covered that head (checkpoint or pinned
+      claim);
     - the live PR head positively confirms the refused head is still
-      current (unverifiable — gh unreachable — fails closed);
+      current;
     - fewer than BUDGET_RETRY_MAX_ATTEMPTS re-drives recorded.
 
     All spend caps are re-checked by the normal flow after re-rooting;
     this predicate authorizes no inference by itself.
     """
-    dec = str(prior.get("decision") or "")
-    if dec == "skipped:replay":
-        try:
-            detail = json.loads(prior.get("detail") or "{}")
-        except Exception:
-            detail = {}
-        dec = str(detail.get("original_decision") or "")
-    if dec != "skipped:ceiling":
-        return False
-    cost = prior.get("cost_usd")
-    if cost is not None:
-        try:
-            if float(cost) != 0.0:
-                return False
-        except Exception:
-            return False
     head = ev.get("head_sha") or ""
-    if not head or head != (prior.get("head_sha") or ""):
-        return False
-    if str(ev.get("repo") or "") != str(prior.get("repo") or ""):
-        return False
-    try:
-        if int(ev.get("pr_number") or 0) != int(prior.get("pr") or 0):
-            return False
-    except Exception:
-        return False
-    if _prior_retry_attempts(prior) >= BUDGET_RETRY_MAX_ATTEMPTS:
-        return False
-    try:
-        cp = store.checkpoint_get(ev["repo"], int(ev["pr_number"]))
-    except Exception:
-        return False
-    cp = cp or {}
-    if (cp.get("last_reviewed_head") or "") == head:
-        return False
-    if (cp.get("status") or "") == "in_progress" and \
-            (cp.get("in_progress_head") or "") == head:
-        return False
-    try:
-        live = get_live_head(ev["repo"], int(ev["pr_number"]))
-    except Exception:
-        return False
-    return bool(live) and live == head
+    return (bool(head)
+            and _ceiling_original_decision(prior) == "skipped:ceiling"
+            and not _prior_carries_spend(prior)
+            and _same_generation(ev, prior)
+            and _prior_retry_attempts(prior) < BUDGET_RETRY_MAX_ATTEMPTS
+            and _head_unreviewed(store, ev, head)
+            and _head_still_live(ev, head))
 
 
 def _record(store: store_mod.Store, ev: dict, decision: str, reason: str,
