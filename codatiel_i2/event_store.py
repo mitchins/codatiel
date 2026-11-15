@@ -413,6 +413,69 @@ class Store:
             raise StoreError("delivery vanished after reopen")
         return row
 
+    def delivery_reopen_budget(self, delivery_id: str, *,
+                               attempt: int, max_attempts: int,
+                               now: float | None = None) -> dict:
+        """Supersede a pure budget refusal for a bounded retry re-drive.
+
+        Narrow escape from replay protection, mirroring
+        delivery_reopen_draft: only a terminal skipped:ceiling decision
+        (or a skipped:replay wrapper preserving it as the original
+        decision — verified by the caller) may be reclaimed to
+        in_progress. Every other decision is left untouched and the row
+        returned.
+
+        Boundedness is enforced compare-and-set in SQL: the row is only
+        reclaimed when its recorded budget_retry_attempts equals
+        attempt-1 and attempt does not exceed max_attempts, so a lost
+        race or a double drive can never silently widen the retry
+        budget. The attempt counter, the original refusal decision and
+        its reason are preserved in detail (stored original_* and
+        budget_retry_from_* keys win on conflict).
+        """
+        ts = time.time() if now is None else now
+        try:
+            self.cx.execute(_BEGIN)
+            cur = self.cx.execute(
+                "SELECT detail FROM deliveries WHERE delivery_id=?",
+                (delivery_id,)).fetchone()
+            try:
+                existing = json.loads((cur[0] if cur else None) or "{}")
+            except Exception:
+                existing = {}
+            merged = dict(existing)
+            merged["budget_retry_attempts"] = int(attempt)
+            merged.setdefault("budget_retry_from_decision",
+                              existing.get("original_decision")
+                              or "skipped:ceiling")
+            merged.setdefault("budget_retry_from_reason",
+                              existing.get("original_reason")
+                              or existing.get("reason") or "")
+            self.cx.execute(
+                "UPDATE deliveries SET decision='in_progress',"
+                " reason=?, cost_usd=NULL, received_ts=?, detail=?"
+                " WHERE delivery_id=? AND (decision='skipped:ceiling'"
+                " OR decision='skipped:replay')"
+                " AND coalesce(json_extract(detail,"
+                " '$.budget_retry_attempts'), 0) = ?"
+                " AND ? <= ?",
+                (f"budget retry re-claimed from ceiling refusal "
+                 f"(attempt {int(attempt)} of {int(max_attempts)}); "
+                 f"spend caps re-checked before any inference",
+                 ts, json.dumps(merged, sort_keys=True), delivery_id,
+                 int(attempt) - 1, int(attempt), int(max_attempts)))
+            self.cx.execute(_COMMIT)
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"budget retry reopen failed: {exc}")
+        row = self.delivery_get(delivery_id)
+        if row is None:
+            raise StoreError("delivery vanished after budget reopen")
+        return row
+
     def checkpoint_get(self, repo: str, pr: int) -> dict | None:
         try:
             row = self.cx.execute(
