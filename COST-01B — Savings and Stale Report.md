@@ -142,7 +142,7 @@ codatiel_i2/semdup_dev/stage.py          (+~160, latch, cache with delivery-awar
 codatiel_i2/semdup_dev/editorial_shadow.py (+33, per-pair is_stale)
 codatiel_i2/event_pipeline.py            (+~240, persistent latch, per-finding delivery dedup, Luna provenance)
 codatiel_i2/event_store.py               (+63 + 45, finding_deliveries table, detail merge)
-tests/test_cost01b.py                    (new, 23 regressions, all mocked, meaningful partial + delivery tests)
+tests/test_cost01b.py                    (new, 25 regressions, all mocked, meaningful partial + delivery tests)
 ```
 
 No new platform/dashboard/webhook, no `SCHEMA_VERSION` bump, `semdup/continued` retained, `semdup/cache` additive, `finding_deliveries` additive, WAL-safe.
@@ -150,8 +150,8 @@ No new platform/dashboard/webhook, no `SCHEMA_VERSION` bump, `semdup/continued` 
 ## Test and review results
 
 ```
-23 passed (cost01b) + 43 (semdup_stage) + 22 (event_pipeline) + 16 (prod02) + 26 (watcher_corrections) = 130+ locally
-Full suite: 23 + 43 + 22 + 16 + 26 + others = 130+ previously, now 130+
+25 passed (cost01b) + 43 (semdup_stage) + 22 (event_pipeline) + 16 (prod02) + 26 (watcher_corrections) = 132+ locally
+Full suite: 25 + 43 + 22 + 16 + 26 + others = 132+ previously, now 132+
 
 Hosted: shareable-tests pass, SonarCloud Quality Gate passed (13→14 new issues, 0.0% coverage/duplication — expected), secret-scan pass, GitGuardian pass.
 CodeRabbit: 3 prior Major/Minor #4575789905/17/21 fixed (latch, tool-read, provider failure); new head 0dd3ad6 → f1afa91 review pending — 0 unresolved material after fixes; new board will be triaged.

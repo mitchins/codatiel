@@ -941,19 +941,24 @@ def _provenance_detail(*, repo: str, pr: int, base: str, head: str,
         except Exception:
             # Fallback to result fields when semdup.json not yet written.
             # Reuse counts stay visible even on cache-only reviews.
-            for _k, _dk in (("pairs_examined", "pairs_examined"),
-                            ("pairs_reused", "pairs_reused"),
-                            ("pairs_cache_hits", "pairs_cache_hits"),
-                            ("pairs_total", "pairs_total"),
-                            ("spend_terra_usd", "semdup_terra_spend_usd"),
-                            ("spend_luna_usd", "semdup_luna_spend_usd"),
-                            ("spend_terra_unknown",
-                             "semdup_terra_spend_unknown"),
-                            ("spend_luna_unknown",
-                             "semdup_luna_spend_unknown"),
-                            ("spend_unknown", "semdup_spend_unknown")):
-                if result.get("semdup_" + _k) is not None:
-                    detail[_dk] = result.get("semdup_" + _k)
+            # Result keys are read directly (they already carry the
+            # semdup_ prefix as written by _maybe_semdup_stage).
+            for _rk, _dk in (("semdup_pairs_examined", "pairs_examined"),
+                             ("semdup_pairs_reused", "pairs_reused"),
+                             ("semdup_pairs_cache_hits", "pairs_cache_hits"),
+                             ("semdup_pairs_total", "pairs_total"),
+                             ("semdup_terra_spend_usd",
+                              "semdup_terra_spend_usd"),
+                             ("semdup_luna_spend_usd",
+                              "semdup_luna_spend_usd"),
+                             ("semdup_terra_spend_unknown",
+                              "semdup_terra_spend_unknown"),
+                             ("semdup_luna_spend_unknown",
+                              "semdup_luna_spend_unknown"),
+                             ("semdup_spend_unknown",
+                              "semdup_spend_unknown")):
+                if result.get(_rk) is not None:
+                    detail[_dk] = result.get(_rk)
         # Fallback Terra spend from metrics.json when not in result
         if "terra_spend_usd" not in detail:
             try:

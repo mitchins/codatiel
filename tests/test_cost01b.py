@@ -790,3 +790,51 @@ def test_semdup_spend_reconciliation_mocked(tmp_path: Path, dupe_repo, monkeypat
     assert out2["pairs_examined"] == 0
     assert out2["pairs_reused"] > 0, "cache-only review must report its reuse counts"
     assert "reused" in (out2.get("reason") or "")
+
+def test_ambiguous_legacy_verdicts_retry(tmp_path: Path):
+    """Legacy failures hide behind empty details: editor_error-only Luna
+    records and ambiguous no-lead rows retry; completed verdicts reuse."""
+    state = tmp_path / "state_legacy"
+    db = tmp_path / "db_legacy.sqlite"
+    _cache_test_db(db)
+    ident = CACHE.build_identity(merged_db=db, target={"path": "a.py", "symbol": "f", "sha256": "h1"}, counterpart={"path": "b.py", "symbol": "g", "sha256": "h2"}, classification="introduced", terra_model="m", luna_model="m2", terra_instructions_id="tid", luna_instructions_id="lid", stage_version=ST.STAGE_VERSION)
+    anchors = {"target": {"path": "a.py", "symbol": "f", "sha256": "h1"}, "counterpart": {"path": "b.py", "symbol": "g", "sha256": "h2"}}
+    # Failed Luna record carrying only editor_error with an empty detail
+    # (no completion flags): must retry, never cached.
+    luna_fail = {"target": {"path": "a.py", "symbol": "f"}, "counterpart": {"path": "b.py", "symbol": "g"}, "anchors": anchors, "path": "suppressed", "reason": "editor_unpublishable", "detail": "", "editor_error": "ProviderTimeout: request timed out", "assess_ran": True, "edit_ran": True, "terra_tool_calls": 0, "luna_tool_calls": 0}
+    assert CACHE.is_completed_row(luna_fail) is False
+    assert CACHE.is_provider_failure_row(luna_fail) is True
+    before = CACHE.load_cache(state, "o/r", 30)
+    CACHE.store(state, "o/r", 30, ident, luna_fail)
+    assert CACHE.load_cache(state, "o/r", 30) == before
+    assert CACHE.lookup(state, "o/r", 30, ident, cache={**before, CACHE.cache_key(ident): luna_fail}) is None
+    # Ambiguous legacy no-lead (empty detail, no flags: failure and
+    # completed no-lead are indistinguishable) → retry.
+    terra_ambiguous = {"target": {"path": "a.py", "symbol": "f"}, "counterpart": {"path": "b.py", "symbol": "g"}, "anchors": anchors, "path": "suppressed", "reason": "terra_no_lead", "detail": "", "assess_ran": True, "terra_tool_calls": 0}
+    assert CACHE.is_completed_row(terra_ambiguous) is False
+    assert CACHE.is_provider_failure_row(terra_ambiguous) is True
+    # Flagged completed no-lead is unaffected (still reusable).
+    flagged_done = {**terra_ambiguous, "completed": True, "budget_refused": False, "terra_completed": True, "luna_completed": None}
+    assert CACHE.is_completed_row(flagged_done) is True
+    assert CACHE.is_provider_failure_row(flagged_done) is False
+    CACHE.store(state, "o/r", 31, ident, flagged_done)
+    assert CACHE.lookup(state, "o/r", 31, ident) is not None
+    # Legacy editor_drop (completed Luna decision) stays reusable and is
+    # never classified as a provider failure, whatever its detail says.
+    drop = {"target": {"path": "a.py", "symbol": "f"}, "counterpart": {"path": "b.py", "symbol": "g"}, "anchors": anchors, "reason": "editor_drop", "detail": "validation failed", "assess_ran": True, "edit_ran": True}
+    assert CACHE.is_completed_row(drop) is True
+    assert CACHE.is_provider_failure_row(drop) is False
+
+def test_provenance_fallback_per_model_keys(tmp_path: Path):
+    """Fallback reads the result keys _maybe_semdup_stage writes (no prefix bug)."""
+    run_empty = tmp_path / "run_fallback"
+    run_empty.mkdir()
+    res = {"run_dir": str(run_empty), "cost_usd": 0.6, "cost_unknown": False, "semdup_status": "ok", "semdup_published": 1, "semdup_spend_usd": 0.05, "semdup_spend_unknown": False, "semdup_terra_spend_usd": 0.03, "semdup_luna_spend_usd": 0.02, "semdup_terra_spend_unknown": False, "semdup_luna_spend_unknown": False, "semdup_pairs_examined": 0, "semdup_pairs_reused": 2, "semdup_pairs_cache_hits": 1, "semdup_pairs_total": 2}
+    prov = P._provenance_detail(repo=REPO, pr=1, base="a" * 40, head="b" * 40, result=res, kind="incremental", info=None, superseded=False)
+    assert prov["semdup_terra_spend_usd"] == 0.03
+    assert prov["semdup_luna_spend_usd"] == 0.02
+    assert prov["semdup_terra_spend_unknown"] is False
+    assert prov["semdup_luna_spend_unknown"] is False
+    assert prov["pairs_reused"] == 2, "reuse counts must survive the semdup.json fallback"
+    assert prov["pairs_cache_hits"] == 1
+    assert prov["pairs_examined"] == 0

@@ -174,17 +174,21 @@ def is_completed_row(row: dict) -> bool:
         return False
     if _has_completion_flags(row):
         return bool(row.get("completed"))
-    # Legacy fallback for rows predating completion flags.
-    if row.get("reason") == "budget_stop":
+    # Legacy fallback for rows predating completion flags: retry unless
+    # unambiguously completed. A failed legacy call can hide behind an
+    # empty detail (e.g. a failed Luna record carrying only editor_error),
+    # so the absence of failure keywords never proves completion.
+    reason = row.get("reason")
+    if reason == "budget_stop":
         return False
-    if row.get("reason") in ("terra_no_lead", "editor_unpublishable", "editor_drop"):
-        detail = str(row.get("detail") or "")
-        if detail and any(k in detail for k in ("timeout", "unavailable", "failed", "Provider", "model_failed", "unreadable", "invalid", "BudgetCeiling")):
-            return False
-        if "exceeds remaining budget" in detail or "BudgetCeilingExceeded" in detail:
-            return False
-    if row.get("reason") in ("evidence_failed", "stale_superseded"):
+    if reason in ("evidence_failed", "stale_superseded"):
         return False
+    if reason in ("terra_no_lead", "editor_unpublishable"):
+        # Ambiguous without flags (provider failure vs completed no-lead)
+        # → retry. New flagged rows keep the completed no-lead reusable.
+        return False
+    if reason == "editor_drop":
+        return True  # completed Luna decision to drop
     return True
 
 
@@ -217,11 +221,22 @@ def is_provider_failure_row(row: dict) -> bool:
         if bool(row.get("budget_refused")):
             return False  # budget stops are classified separately
         return not bool(row.get("completed"))
-    if row.get("reason") in ("terra_no_lead", "editor_unpublishable", "editor_drop"):
+    reason = row.get("reason")
+    if reason == "editor_drop":
+        return False  # completed Luna decision, never a provider failure
+    if reason in ("terra_no_lead", "editor_unpublishable"):
         detail = str(row.get("detail") or "")
-        # Budget stops already excluded above; remaining non-empty details
-        # with provider keywords are failures, not completed assessments.
+        if "exceeds remaining budget" in detail or "BudgetCeilingExceeded" in detail:
+            return True  # retryable (budget classification takes precedence)
+        # Failed-call signals: error detail keywords, a recorded
+        # editor_error, or an attempted-but-undecided Luna call. A failed
+        # legacy Luna record may carry only editor_error with an empty
+        # detail — that still retries.
         if detail and any(k in detail for k in ("timeout", "unavailable", "failed", "Provider", "model_failed", "unreadable", "invalid", "BudgetCeiling")):
+            return True
+        if str(row.get("editor_error") or ""):
+            return True
+        if row.get("edit_ran") and not (row.get("editor") or {}).get("decision"):
             return True
         # Also treat rows without assess_ran as failures (no completed verdict)
         if not row.get("assess_ran"):
@@ -229,6 +244,9 @@ def is_provider_failure_row(row: dict) -> bool:
             # In _review_inner, terra_no_lead rows have assess_ran True even when overlap false? Let's check: they set assess_ran True before.
             # So this is defensive.
             return False
+        # Ambiguous legacy verdict (e.g. empty detail, no error signal):
+        # retryable, never reused.
+        return True
     return False
 
 def lookup(
