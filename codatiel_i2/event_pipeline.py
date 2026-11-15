@@ -583,6 +583,14 @@ def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
     result["semdup_status"] = "off"
     result["semdup_published"] = 0
     result["semdup_spend_usd"] = 0.0
+    result["semdup_spend_unknown"] = False
+    result["semdup_terra_spend_usd"] = 0.0
+    result["semdup_luna_spend_usd"] = 0.0
+    result["semdup_terra_spend_unknown"] = False
+    result["semdup_luna_spend_unknown"] = False
+    result["semdup_pairs_examined"] = 0
+    result["semdup_pairs_reused"] = 0
+    result["semdup_pairs_cache_hits"] = 0
     result["semdup_budget_usd"] = 0.0
     if cfg.env != "dev" or not cfg.semdup_enabled or not run_dir:
         return result
@@ -632,24 +640,39 @@ def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
         sem = {"status": "unavailable", "published": [],
                "spend_usd": 0.0, "spend_unknown": True,
                "reason": f"stage harness error: {type(exc).__name__}"}
-    spend = sem.get("spend_usd") or 0.0
+    spend = sem.get("spend_usd")
     try:
-        spend = float(spend)
+        spend = float(spend) if spend is not None else None
     except (TypeError, ValueError):
-        spend, sem_unknown = 0.0, True
+        spend, sem_unknown = None, True
         sem["spend_unknown"] = True
     else:
         sem_unknown = bool(sem.get("spend_unknown"))
     base_cost = result.get("cost_usd")
     if isinstance(base_cost, (int, float)):
-        result["cost_usd"] = round(float(base_cost) + spend, 6)
-    elif spend:
+        # Unknown semdup spend never collapses to confirmed $0: keep the
+        # base cost and mark the total unknown.
+        result["cost_usd"] = round(float(base_cost) + (spend or 0.0), 6)
+    elif spend is not None:
         result["cost_usd"] = round(spend, 6)
     if sem_unknown:
         result["cost_unknown"] = True
     result["semdup_status"] = sem.get("status", "unavailable")
     result["semdup_published"] = len(sem.get("published") or [])
-    result["semdup_spend_usd"] = round(spend, 6)
+    # Per-model spend from the priced ledger results (persisted by the
+    # stage at completion). None = unknown, never $0 confirmed.
+    result["semdup_spend_usd"] = spend
+    result["semdup_spend_unknown"] = sem_unknown
+    result["semdup_terra_spend_usd"] = sem.get("spend_terra_usd")
+    result["semdup_luna_spend_usd"] = sem.get("spend_luna_usd")
+    result["semdup_terra_spend_unknown"] = bool(sem.get("spend_terra_unknown", sem_unknown))
+    result["semdup_luna_spend_unknown"] = bool(sem.get("spend_luna_unknown", sem_unknown))
+    # Reuse counts stay visible even on cache-only reviews (examined may
+    # be 0 while reused carries the work).
+    for _k in ("pairs_examined", "pairs_reused", "pairs_cache_hits",
+               "pairs_total", "continuation_reused", "spend_unknown"):
+        if sem.get(_k) is not None:
+            result["semdup_" + _k] = sem.get(_k)
     result["semdup_reason"] = str(sem.get("reason") or "")[:300]
     return result
 
@@ -883,7 +906,13 @@ def _provenance_detail(*, repo: str, pr: int, base: str, head: str,
         detail["terra_findings"] = result.get("terra_findings")
         detail["luna_added"] = result.get("added")
         detail["semdup_status"] = result.get("semdup_status")
-        detail["semdup_spend_usd"] = result.get("semdup_spend_usd")
+        # Semdup spend from the stage's persisted priced-ledger results
+        # (result fields, written by the stage at completion). None =
+        # unknown and is omitted, never represented as confirmed $0.
+        if result.get("semdup_spend_usd") is not None:
+            detail["semdup_spend_usd"] = result.get("semdup_spend_usd")
+        if result.get("semdup_spend_unknown") is not None:
+            detail["semdup_spend_unknown"] = result.get("semdup_spend_unknown")
         detail["semdup_published"] = result.get("semdup_published")
         # Explicit Luna/Terra stage spend (Gate D)
         if result.get("terra_spend_usd") is not None:
@@ -901,24 +930,30 @@ def _provenance_detail(*, repo: str, pr: int, base: str, head: str,
                     detail["pairs_cache_hits"] = sd.get("pairs_cache_hits")
                 detail["pairs_total"] = sd.get("pairs_total")
                 detail["semdup_wall_s"] = sd.get("wall_s")
-                # Semdup per-model breakdown from ledger files (explicit)
+                # Semdup per-model spend from the stage's persisted
+                # priced-ledger results (semdup.json, written at stage
+                # completion). None = unknown and is omitted, never $0.
                 for side in ("terra", "luna"):
-                    p = Path(run_dir) / f"spend_semdup_{side}.jsonl"
-                    if p.exists():
-                        total = 0.0
-                        for line in p.read_text(encoding="utf-8").splitlines():
-                            if not line.strip():
-                                continue
-                            try:
-                                j = json.loads(line)
-                                total += float(j.get("priced_cost_usd") or j.get("cost_usd") or 0)
-                            except Exception:
-                                continue
-                        detail[f"semdup_{side}_spend_usd"] = round(total, 6)
+                    if sd.get(f"spend_{side}_usd") is not None:
+                        detail[f"semdup_{side}_spend_usd"] = sd.get(f"spend_{side}_usd")
+                    if sd.get(f"spend_{side}_unknown") is not None:
+                        detail[f"semdup_{side}_spend_unknown"] = sd.get(f"spend_{side}_unknown")
         except Exception:
-            # Fallback to result fields when semdup.json not yet written
-            if "semdup_pairs_examined" in (result or {}):
-                detail["pairs_examined"] = result.get("semdup_pairs_examined")
+            # Fallback to result fields when semdup.json not yet written.
+            # Reuse counts stay visible even on cache-only reviews.
+            for _k, _dk in (("pairs_examined", "pairs_examined"),
+                            ("pairs_reused", "pairs_reused"),
+                            ("pairs_cache_hits", "pairs_cache_hits"),
+                            ("pairs_total", "pairs_total"),
+                            ("spend_terra_usd", "semdup_terra_spend_usd"),
+                            ("spend_luna_usd", "semdup_luna_spend_usd"),
+                            ("spend_terra_unknown",
+                             "semdup_terra_spend_unknown"),
+                            ("spend_luna_unknown",
+                             "semdup_luna_spend_unknown"),
+                            ("spend_unknown", "semdup_spend_unknown")):
+                if result.get("semdup_" + _k) is not None:
+                    detail[_dk] = result.get("semdup_" + _k)
         # Fallback Terra spend from metrics.json when not in result
         if "terra_spend_usd" not in detail:
             try:
@@ -934,13 +969,35 @@ def _provenance_detail(*, repo: str, pr: int, base: str, head: str,
     return {k: v for k, v in detail.items() if v is not None}
 
 
+def _recommendation_fingerprint(row: dict) -> str:
+    """Deterministic fingerprint of the material recommendation.
+
+    Exact hash of (decision + revised_comment), never an LLM similarity
+    check: the same code pair with a different recommended comment is a
+    different finding and must not be suppressed by an earlier delivery.
+    """
+    decision = str(row.get("decision") or "")
+    comment = str(row.get("revised_comment") or "")
+    return hashlib.sha256(
+        f"{decision}|{comment}".encode("utf-8")).hexdigest()[:16]
+
+
 def _finding_hash_from_row(row: dict) -> str:
-    """Stable hash for a finding, independent of line numbers."""
+    """Stable hash for a finding: code anchors + recommendation.
+
+    Line-independent (no line numbers). Two rows on the same code pair
+    with different recommended text hash differently, so a revised
+    recommendation is delivered rather than wrongly suppressed.
+    """
     a = row.get("anchors") or {}
     t = a.get("target") or {}
     c = a.get("counterpart") or {}
-    # Content hashes + paths are the finding identity (line-independent)
-    raw = f"{t.get('path')}|{t.get('sha256')}|{c.get('path')}|{c.get('sha256')}"
+    # Content hashes + paths are the code identity (line-independent);
+    # the recommendation fingerprint distinguishes materially different
+    # suggestions on the same pair.
+    rec = _recommendation_fingerprint(row)
+    raw = (f"{t.get('path')}|{t.get('sha256')}|{c.get('path')}|"
+           f"{c.get('sha256')}|{rec}")
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 

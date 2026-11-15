@@ -153,9 +153,47 @@ def save_cache(state_dir: Path | str, repo: str, pr: int, entries: dict) -> None
         except Exception:
             pass
 
+def _has_completion_flags(row: dict) -> bool:
+    """True when the row carries explicit completion state (new records).
+
+    Legacy rows predate the flags and fall back to reason-string checks.
+    """
+    return isinstance(row, dict) and ("completed" in row or "budget_refused" in row)
+
+
+def is_completed_row(row: dict) -> bool:
+    """Authority for cache reuse: only completed decisions are reusable.
+
+    Every failure (budget stop, provider failure, evidence failure,
+    stale skip) retries; completed decisions (published, deterministic
+    drops, completed no-lead / no-opportunity / editor-drop verdicts)
+    retain their existing reuse behaviour (including tool-dependency
+    and provider guards applied separately).
+    """
+    if not isinstance(row, dict):
+        return False
+    if _has_completion_flags(row):
+        return bool(row.get("completed"))
+    # Legacy fallback for rows predating completion flags.
+    if row.get("reason") == "budget_stop":
+        return False
+    if row.get("reason") in ("terra_no_lead", "editor_unpublishable", "editor_drop"):
+        detail = str(row.get("detail") or "")
+        if detail and any(k in detail for k in ("timeout", "unavailable", "failed", "Provider", "model_failed", "unreadable", "invalid", "BudgetCeiling")):
+            return False
+        if "exceeds remaining budget" in detail or "BudgetCeilingExceeded" in detail:
+            return False
+    if row.get("reason") in ("evidence_failed", "stale_superseded"):
+        return False
+    return True
+
+
 def is_budget_stop_row(row: dict) -> bool:
     if not isinstance(row, dict):
         return False
+    # Completion state first: budget refusals always retry, never cached.
+    if _has_completion_flags(row):
+        return bool(row.get("budget_refused"))
     if row.get("reason") == "budget_stop":
         return True
     # Also catch mislabeled refusals that hid a budget error
@@ -167,14 +205,18 @@ def is_budget_stop_row(row: dict) -> bool:
     return False
 
 def is_provider_failure_row(row: dict) -> bool:
-    """Unsuccessful provider calls must not be cached (CodeRabbit).
+    """Unsuccessful provider calls must not be cached.
 
-    Terra `ok=False` or Luna `ok=False` produces `terra_no_lead` /
-    `editor_unpublishable` with a non-budget error detail. Those are
-    retryable and must not become reused suppressions.
+    Completion state first: any non-completed, non-budget row is a
+    retryable failure. Legacy rows without flags fall back to the
+    reason-string check.
     """
     if not isinstance(row, dict):
         return False
+    if _has_completion_flags(row):
+        if bool(row.get("budget_refused")):
+            return False  # budget stops are classified separately
+        return not bool(row.get("completed"))
     if row.get("reason") in ("terra_no_lead", "editor_unpublishable", "editor_drop"):
         detail = str(row.get("detail") or "")
         # Budget stops already excluded above; remaining non-empty details
@@ -205,6 +247,8 @@ def lookup(
         return None
     if is_budget_stop_row(row) or is_provider_failure_row(row):
         return None
+    if not is_completed_row(row):
+        return None
     # Tool-dependent verdicts must not be reused (helper file change)
     if row.get("terra_tool_calls") or row.get("luna_tool_calls"):
         return None
@@ -224,6 +268,8 @@ def store(
 ) -> dict:
     """Persist row under identity; returns updated cache dict."""
     if is_budget_stop_row(row) or is_provider_failure_row(row):
+        return cache if cache is not None else _load_raw(state_dir, repo, pr)
+    if not is_completed_row(row):
         return cache if cache is not None else _load_raw(state_dir, repo, pr)
     if row.get("terra_tool_calls") or row.get("luna_tool_calls"):
         return cache if cache is not None else _load_raw(state_dir, repo, pr)

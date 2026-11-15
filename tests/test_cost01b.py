@@ -653,3 +653,140 @@ def test_provenance_superseded_traceable(tmp_path: Path, dupe_repo):
         assert detail.get("superseded") is True
     finally:
         EP.get_live_head = orig_live
+
+def _cache_test_db(path: Path):
+    import sqlite3
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE files (path TEXT PRIMARY KEY, sha256 TEXT, bytes INT, language TEXT, parse_status TEXT)")
+    conn.execute("INSERT INTO files VALUES (?,?,?,?,?)", ("a.py", "fh", 100, "python", "ok"))
+    conn.execute("INSERT INTO files VALUES (?,?,?,?,?)", ("b.py", "fh2", 100, "python", "ok"))
+    conn.commit(); conn.close()
+
+def test_completion_state_not_error_strings(tmp_path: Path):
+    """Cache gate uses completion state: every failure retries, completed reuse."""
+    state = tmp_path / "state_completion"
+    db = tmp_path / "db_completion.sqlite"
+    _cache_test_db(db)
+    ident = CACHE.build_identity(merged_db=db, target={"path": "a.py", "symbol": "f", "sha256": "h1"}, counterpart={"path": "b.py", "symbol": "g", "sha256": "h2"}, classification="introduced", terra_model="m", luna_model="m2", terra_instructions_id="tid", luna_instructions_id="lid", stage_version=ST.STAGE_VERSION)
+    failures = [
+        {"reason": "budget_stop", "completed": False, "budget_refused": True, "terra_completed": False, "luna_completed": None},
+        {"reason": "terra_no_lead", "detail": "ProviderTimeout: boom", "assess_ran": True, "completed": False, "budget_refused": False, "terra_completed": False, "luna_completed": None},
+        {"reason": "terra_no_lead", "detail": "", "assess_ran": True, "completed": False, "budget_refused": False, "terra_completed": False, "luna_completed": None},
+        {"reason": "editor_unpublishable", "detail": "some brand-new error wording", "assess_ran": True, "edit_ran": True, "completed": False, "budget_refused": False, "terra_completed": True, "luna_completed": False},
+        {"reason": "evidence_failed", "completed": False, "budget_refused": False, "terra_completed": False, "luna_completed": None},
+        {"reason": "stale_superseded", "completed": False, "budget_refused": False, "terra_completed": False, "luna_completed": None},
+    ]
+    for row in failures:
+        full = {"target": {"path": "a.py", "symbol": "f"}, "counterpart": {"path": "b.py", "symbol": "g"}, "path": "suppressed", **row}
+        assert CACHE.is_completed_row(full) is False, row["reason"]
+        assert CACHE.lookup(state, "o/r", 20, ident, cache={}) is None
+        before = CACHE.load_cache(state, "o/r", 20)
+        CACHE.store(state, "o/r", 20, ident, full)
+        assert CACHE.load_cache(state, "o/r", 20) == before, f"failure must not be stored: {row['reason']}"
+    assert CACHE.is_budget_stop_row({**failures[0], "target": {}, "counterpart": {}}) is True
+    # Completed decisions retain reuse (tool guards still apply separately)
+    completed = [
+        {"path": "published", "reason": "ok", "decision": "KEEP", "revised_comment": "reuse", "completed": True, "budget_refused": False, "terra_completed": True, "luna_completed": True, "assess_ran": True, "edit_ran": True},
+        {"path": "suppressed", "reason": "terra_no_lead", "detail": "", "assess_ran": True, "completed": True, "budget_refused": False, "terra_completed": True, "luna_completed": None},
+        {"path": "suppressed", "reason": "terra_no_opportunity", "completed": True, "budget_refused": False, "terra_completed": True, "luna_completed": None, "assess_ran": True},
+        {"path": "suppressed", "reason": "deterministic_drop", "completed": True, "budget_refused": False, "terra_completed": None, "luna_completed": None},
+        {"path": "suppressed", "reason": "editor_drop", "completed": True, "budget_refused": False, "terra_completed": True, "luna_completed": True, "assess_ran": True, "edit_ran": True},
+    ]
+    for i, row in enumerate(completed):
+        full = {"target": {"path": "a.py", "symbol": "f"}, "counterpart": {"path": "b.py", "symbol": "g"}, "anchors": {"target": {"path": "a.py", "symbol": "f", "sha256": "h1"}, "counterpart": {"path": "b.py", "symbol": "g", "sha256": "h2"}}, **row}
+        assert CACHE.is_completed_row(full) is True, row["reason"]
+        assert CACHE.is_budget_stop_row(full) is False
+        assert CACHE.is_provider_failure_row(full) is False
+        CACHE.store(state, "o/r", 21 + i, ident, full)
+        assert CACHE.lookup(state, "o/r", 21 + i, ident) is not None, row["reason"]
+    # Flags beat strings in both directions (no error-string matching)
+    scary_but_done = {"target": {}, "counterpart": {}, "reason": "terra_no_lead", "detail": "timeout unavailable failed Provider model_failed", "assess_ran": True, "completed": True, "budget_refused": False, "terra_completed": True, "luna_completed": None}
+    assert CACHE.is_completed_row(scary_but_done) is True
+    assert CACHE.is_provider_failure_row(scary_but_done) is False
+    benign_but_failed = {"target": {}, "counterpart": {}, "reason": "editor_drop", "detail": "", "completed": False, "budget_refused": False, "terra_completed": True, "luna_completed": False}
+    assert CACHE.is_completed_row(benign_but_failed) is False
+    assert CACHE.is_provider_failure_row(benign_but_failed) is True
+    # Legacy rows without flags keep prior behaviour
+    assert CACHE.is_completed_row({"reason": "budget_stop"}) is False
+    assert CACHE.is_provider_failure_row({"reason": "terra_no_lead", "detail": "ProviderTimeout: x", "assess_ran": True}) is True
+    assert CACHE.is_completed_row({"path": "published", "reason": "ok"}) is True
+
+def test_finding_hash_includes_recommendation(tmp_path: Path):
+    """Same anchors + revised recommendation => different finding; identical => suppressed."""
+    import codatiel_i2.event_pipeline as EP
+    anchors = {"target": {"path": "a.py", "sha256": "h1"}, "counterpart": {"path": "b.py", "sha256": "h2"}}
+    r1 = {**anchors, "anchors": anchors, "decision": "KEEP", "revised_comment": "reuse foo"}
+    r2 = {**anchors, "anchors": anchors, "decision": "KEEP", "revised_comment": "reuse foo"}
+    r3 = {**anchors, "anchors": anchors, "decision": "KEEP", "revised_comment": "reuse bar (different suggestion)"}
+    r4 = {**anchors, "anchors": anchors, "decision": "REVISE", "revised_comment": "reuse foo"}
+    assert EP._finding_hash_from_row(r1) == EP._finding_hash_from_row(r2)
+    assert EP._finding_hash_from_row(r1) != EP._finding_hash_from_row(r3)
+    assert EP._finding_hash_from_row(r1) != EP._finding_hash_from_row(r4)
+    # Line numbers never affect identity
+    moved_anchors = {"target": {"path": "a.py", "sha256": "h1", "start_line": 99}, "counterpart": {"path": "b.py", "sha256": "h2", "start_line": 7}}
+    moved = {"anchors": moved_anchors, "decision": "KEEP", "revised_comment": "reuse foo"}
+    assert EP._finding_hash_from_row(r1) == EP._finding_hash_from_row(moved)
+    # Delivery behaviour: identical suppressed after posted; revised still delivers
+    store = S.Store(tmp_path / "store_reco.sqlite")
+    store.meta_set("enabled_at", "2026-01-01T00:00:00Z")
+    head = "b" * 40
+    fh1 = EP._finding_hash_from_row(r1)
+    store.finding_delivery_record(repo="o/r", pr=1, finding_hash=fh1, channel="github", head_sha=head, run_id="run1", outcome="posted")
+    to_deliver, already = EP._filter_already_delivered(store, "o/r", 1, [r2], "github")
+    assert len(to_deliver) == 0 and len(already) == 1
+    to_deliver3, _ = EP._filter_already_delivered(store, "o/r", 1, [r3], "github")
+    assert len(to_deliver3) == 1, "revised recommendation must still deliver"
+    to_deliver4, _ = EP._filter_already_delivered(store, "o/r", 1, [r4], "github")
+    assert len(to_deliver4) == 1, "changed decision must still deliver"
+
+def test_semdup_spend_reconciliation_mocked(tmp_path: Path, dupe_repo, monkeypatch):
+    """Aggregate == terra + luna from priced ledgers; unknown never $0; reuse visible."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    root = dupe_repo["root"]; base = dupe_repo["base"]; head = dupe_repo["head_b"]
+    terra_ids = {"n": 0}; luna_ids = {"n": 0}
+    def _spending_assess(**kw):
+        terra_ids["n"] += 1
+        class Usage:
+            requests = 1
+            input_tokens = 1000
+            output_tokens = 200
+        kw["ledger"].record_response(f"terra-{terra_ids['n']}", Usage(), cached_input_tokens=0, cache_write_input_tokens=0)
+        return _fake_assess(**kw)
+    def _spending_edit(**kw):
+        luna_ids["n"] += 1
+        class Usage:
+            requests = 1
+            input_tokens = 500
+            output_tokens = 100
+        kw["ledger"].record_response(f"luna-{luna_ids['n']}", Usage(), cached_input_tokens=0, cache_write_input_tokens=0)
+        return _fake_edit(**kw)
+    run_dir = tmp_path / "run_spend"
+    run_dir.mkdir()
+    state = tmp_path / "state_spend"
+    out = ST.run_stage(repo_path=root, repo=REPO, pr=1, base_rev=base, head_rev=head, run_dir=run_dir, state_dir=state, allow_embeddings=False, assess_fn=_spending_assess, edit_fn=_spending_edit, ceiling_usd=2.0)
+    assert out["spend_terra_usd"] is not None and out["spend_terra_usd"] > 0
+    assert out["spend_luna_usd"] is not None and out["spend_luna_usd"] > 0
+    assert out["spend_unknown"] is False
+    assert out["spend_usd"] == round(out["spend_terra_usd"] + out["spend_luna_usd"], 6), "aggregate must reconcile with per-model"
+    # Persisted at stage completion (semdup.json carries priced results)
+    import json as _json
+    persisted = _json.loads((run_dir / "semdup.json").read_text(encoding="utf-8"))
+    assert persisted["spend_terra_usd"] == out["spend_terra_usd"]
+    assert persisted["spend_luna_usd"] == out["spend_luna_usd"]
+    # Unknown spend is omitted, never confirmed $0 (fresh run dir: no
+    # semdup.json to fall back to, result fields are the only source)
+    run_unknown = tmp_path / "run_unknown"
+    run_unknown.mkdir()
+    res_unknown = {"run_dir": str(run_unknown), "cost_usd": 0.5, "cost_unknown": True, "semdup_status": "ok", "semdup_published": 0, "semdup_spend_usd": None, "semdup_spend_unknown": True, "semdup_terra_spend_usd": None, "semdup_luna_spend_usd": None, "semdup_terra_spend_unknown": True, "semdup_luna_spend_unknown": True}
+    prov = P._provenance_detail(repo=REPO, pr=1, base=base, head=head, result=res_unknown, kind="incremental", info=None, superseded=False)
+    assert "semdup_spend_usd" not in prov, "unknown spend must be omitted, not $0"
+    assert "semdup_terra_spend_usd" not in prov
+    assert prov["semdup_spend_unknown"] is True
+    assert prov["cost_unknown"] is True
+    # Cache-only second run visibly reports reuse instead of examining nothing
+    run_dir2 = tmp_path / "run_spend2"
+    run_dir2.mkdir()
+    out2 = ST.run_stage(repo_path=root, repo=REPO, pr=1, base_rev=base, head_rev=head, run_dir=run_dir2, state_dir=state, allow_embeddings=False, assess_fn=_spending_assess, edit_fn=_spending_edit, ceiling_usd=2.0)
+    assert out2["pairs_examined"] == 0
+    assert out2["pairs_reused"] > 0, "cache-only review must report its reuse counts"
+    assert "reused" in (out2.get("reason") or "")

@@ -366,13 +366,17 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         cont_buf: list[dict] = []
 
         def _on_pair(row: dict) -> None:
-            # Budget-stopped or provider-failure pairs hold no completed
-            # verdict and must not be cached (retryable).
+            # Completion-state gate: every failure (budget, provider,
+            # evidence, stale) retries and is never cached. Completed
+            # decisions retain reuse (same-revision continuation always;
+            # cross-revision only when tool-independent).
             if not isinstance(row, dict):
                 return
             try:
                 from codatiel_i2.semdup_dev import cache as CACHE_CHK
                 if CACHE_CHK.is_budget_stop_row(row) or CACHE_CHK.is_provider_failure_row(row):
+                    return
+                if not CACHE_CHK.is_completed_row(row):
                     return
             except Exception:
                 if row.get("reason") == "budget_stop":
@@ -439,8 +443,14 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             if tree is not None:
                 _shutil.rmtree(str(Path(tree).parent), ignore_errors=True)
     outcome["models"] = judged.get("models", {})
-    outcome["spend_usd"] = judged.get("spend_usd", 0.0)
+    # Per-model spend from the priced ledger results (persisted with the
+    # stage outcome in semdup.json). None = unknown, never $0 confirmed.
+    outcome["spend_usd"] = judged.get("spend_usd")
     outcome["spend_unknown"] = judged.get("spend_unknown", False)
+    outcome["spend_terra_usd"] = judged.get("spend_terra_usd")
+    outcome["spend_luna_usd"] = judged.get("spend_luna_usd")
+    outcome["spend_terra_unknown"] = judged.get("spend_terra_unknown", False)
+    outcome["spend_luna_unknown"] = judged.get("spend_luna_unknown", False)
     outcome["preflight_usd"] = judged.get("preflight_usd")
     outcome["skipped"].extend(judged.get("skipped", []))
     if not judged.get("ok") or judged.get("stage") in (
@@ -813,7 +823,19 @@ def _partition_new(pairs: list[dict], known: dict) -> tuple[list, list]:
 
 
 def _mislabeled_refusal(row: dict) -> bool:
-    """A stored model-verdict label that actually hides a guard refusal."""
+    """A stored verdict that is actually a retryable failure.
+
+    Completion state first: any non-completed row (budget stop,
+    provider failure, evidence failure, stale skip) is re-judged, never
+    reused. Legacy rows without flags fall back to the budget-string
+    check so old mislabeled refusals still retry.
+    """
+    try:
+        from codatiel_i2.semdup_dev import cache as _CACHE
+        if hasattr(_CACHE, "is_completed_row"):
+            return not _CACHE.is_completed_row(row)
+    except Exception:
+        pass
     from codatiel_i2.semdup_dev import editorial_shadow as _ES
     if row.get("reason") not in ("terra_no_lead", "editor_unpublishable"):
         return False
