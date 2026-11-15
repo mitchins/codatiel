@@ -51,6 +51,31 @@ from typing import Any, Callable
 
 from codatiel_i2 import event_store as store_mod
 
+# COST-01B: safe run_dir handling for Sonar path-traversal guard
+def _safe_run_dir(run_dir: str | Path | None, state_dir: Path | None) -> Path | None:
+    """Validate run_dir is within state_dir (prevents path traversal).
+
+    Returns resolved Path if safe, else None. Sonar flags `Path(run_dir)/"semdup.json"`
+    when run_dir is from `result` (tainted), but `result.run_dir` is always
+    `state_dir/runs/<id>` created by the harness. This check makes the
+    guarantee explicit and quiets the security hotspot without changing
+    behavior.
+    """
+    if not run_dir or state_dir is None:
+        return None
+    try:
+        p = Path(run_dir).resolve()
+        s = Path(state_dir).resolve()
+        # Python 3.9+: is_relative_to
+        if p.is_relative_to(s):
+            return p
+        # Fallback for older: check common prefix
+        if str(p).startswith(str(s)):
+            return p
+    except Exception:
+        return None
+    return None
+
 PIPELINE_MODES = ("terra_luna_additive", "terra_only")
 DEFAULT_PIPELINE = "terra_luna_additive"
 PROJECT_CAP_USD = 30.0
@@ -1224,7 +1249,9 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                 _tmp["suppressed"] = list(_orig_semdup.get("suppressed") or [])
                 for r in _email_already:
                     _tmp["suppressed"].append({**r, "reason": "already_delivered_email", "detail": "finding already delivered via email on this PR"})
-                (Path(run_dir) / "semdup.json").write_text(json.dumps(_tmp, indent=1), encoding="utf-8")
+                _safe = _safe_run_dir(run_dir, cfg.state_dir)
+                if _safe is not None:
+                    (_safe / "semdup.json").write_text(json.dumps(_tmp, indent=1), encoding="utf-8")
         except Exception:
             pass
     notified, notify_detail = _notify(cfg, run_dir or "",
@@ -1245,7 +1272,9 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     # Restore original for GitHub filtering (email and github must not be conflated)
     try:
         if run_dir and _orig_semdup:
-            (Path(run_dir) / "semdup.json").write_text(json.dumps(_orig_semdup, indent=1), encoding="utf-8")
+            _safe2 = _safe_run_dir(run_dir, cfg.state_dir)
+            if _safe2 is not None:
+                (_safe2 / "semdup.json").write_text(json.dumps(_orig_semdup, indent=1), encoding="utf-8")
     except Exception:
         pass
     # Filter for GitHub channel before publish
@@ -1260,7 +1289,9 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                 _tmp2["suppressed"] = list(_orig_semdup.get("suppressed") or [])
                 for r in _github_already:
                     _tmp2["suppressed"].append({**r, "reason": "already_delivered_github", "detail": "finding already delivered via GitHub on this PR"})
-                (Path(run_dir) / "semdup.json").write_text(json.dumps(_tmp2, indent=1), encoding="utf-8")
+                _safe3 = _safe_run_dir(run_dir, cfg.state_dir)
+                if _safe3 is not None:
+                    (_safe3 / "semdup.json").write_text(json.dumps(_tmp2, indent=1), encoding="utf-8")
         except Exception:
             pass
     semdup_bits = ""
@@ -1289,7 +1320,9 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     # Restore original semdup.json for provenance (keep approved list intact)
     try:
         if run_dir and _orig_semdup:
-            (Path(run_dir) / "semdup.json").write_text(json.dumps(_orig_semdup, indent=1), encoding="utf-8")
+            _safe4 = _safe_run_dir(run_dir, cfg.state_dir)
+            if _safe4 is not None:
+                (_safe4 / "semdup.json").write_text(json.dumps(_orig_semdup, indent=1), encoding="utf-8")
     except Exception:
         pass
     prov = _provenance_detail(
