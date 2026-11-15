@@ -904,7 +904,7 @@ def test_estimate_uses_actual_evidence_size(
 
 
 def test_continuation_ignores_mislabeled_refusals(tmp_path: Path):
-    """Budget-mislabeled rows are re-judged, never reused as verdicts."""
+    """Budget-mislabeled and ambiguous legacy rows are re-judged, never reused."""
     from codatiel_i2.semdup_dev import stage as S
     pair = {"target": {"path": "n.py", "symbol": "f"},
             "counterpart": {"path": "e.py", "symbol": "g"}}
@@ -917,10 +917,21 @@ def test_continuation_ignores_mislabeled_refusals(tmp_path: Path):
     }
     new_pairs, reused = S._partition_new([pair], known)
     assert new_pairs == [pair] and reused == []
+    # Ambiguous legacy verdict (empty detail, no completion flags:
+    # provider failure and completed no-lead are indistinguishable) →
+    # re-judged, never reused.
     known[key] = {"target": pair["target"],
                   "counterpart": pair["counterpart"],
                   "path": "suppressed", "reason": "terra_no_lead",
                   "detail": ""}
+    new_pairs, reused = S._partition_new([pair], known)
+    assert new_pairs == [pair] and reused == []
+    # Explicitly completed rows are still reused.
+    known[key] = {"target": pair["target"],
+                  "counterpart": pair["counterpart"],
+                  "path": "suppressed", "reason": "terra_no_lead",
+                  "detail": "", "completed": True, "budget_refused": False,
+                  "terra_completed": True, "luna_completed": None}
     new_pairs, reused = S._partition_new([pair], known)
     assert new_pairs == [] and len(reused) == 1
 

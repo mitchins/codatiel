@@ -284,8 +284,15 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
         else:
             outcome["suppressed"].append(_suppressed_row(row))
     spent_t, spent_l = _spent(terra_ledger), _spent(luna_ledger)
-    outcome["spend_usd"] = round(
-        (spent_t or 0.0) + (spent_l or 0.0), 6)
+    outcome["spend_terra_usd"] = spent_t
+    outcome["spend_luna_usd"] = spent_l
+    outcome["spend_terra_unknown"] = spent_t is None
+    outcome["spend_luna_unknown"] = spent_l is None
+    if spent_t is None or spent_l is None:
+        outcome["spend_usd"] = (None if (spent_t is None and spent_l is None)
+                                else round((spent_t or 0.0) + (spent_l or 0.0), 6))
+    else:
+        outcome["spend_usd"] = round(spent_t + spent_l, 6)
     outcome["spend_unknown"] = spent_t is None or spent_l is None
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
@@ -328,7 +335,11 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
     if not ev["ok"]:
         row.update({"path": "suppressed",
                     "reason": "evidence_failed",
-                    "detail": f"{ev.get('code')}: {ev.get('detail', '')}"})
+                    "detail": f"{ev.get('code')}: {ev.get('detail', '')}",
+                    # Completion state (COST-01B): evidence failure is
+                    # inability, never a verdict — always retried.
+                    "completed": False, "budget_refused": False,
+                    "terra_completed": False, "luna_completed": None})
         return row
     row["anchors"] = {
         "target": {k: ev["target"][k] for k in
@@ -342,7 +353,11 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
                                ev["target"]["symbol"])
     if pre["wrapper"]:
         row.update({"path": "suppressed", "reason": "deterministic_drop",
-                    "detail": pre["detail"]})
+                    "detail": pre["detail"],
+                    # Deterministic prefilter verdict: completed without
+                    # model calls, safely reusable across revisions.
+                    "completed": True, "budget_refused": False,
+                    "terra_completed": None, "luna_completed": None})
         return row
     terra_ctx = R.ReviewContext(
         repo=cfg.repos[0] if cfg.repos else "dev", base_sha=base_rev,
@@ -358,7 +373,9 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         row.update({"path": "suppressed", "reason": "budget_stop",
                     "detail": ("terra estimate exceeds its half of the "
                                f"whole-PR ceiling ${ceiling_usd:.2f}; "
-                               "unexamined, not rejected")})
+                               "unexamined, not rejected"),
+                    "completed": False, "budget_refused": True,
+                    "terra_completed": False, "luna_completed": None})
         return row
     ta = assess(
         evidence={"target": ev["target"],
@@ -380,14 +397,22 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
             row.update({"path": "suppressed", "reason": "budget_stop",
                         "detail": ("Terra call refused by the spending "
                                    f"guard ({err[:160]}); unexamined, "
-                                   "not rejected")})
+                                   "not rejected"),
+                        "completed": False, "budget_refused": True,
+                        "terra_completed": False, "luna_completed": None})
             return row
+        terra_ok = bool(ta.get("ok"))
         row.update({"path": "suppressed", "reason": "terra_no_lead",
                     "detail": err,
                     "terra_note": str(
                         (ta.get("transcript") or {}).get("final_text",
                                                        "")
-                        or "")[:600]})
+                        or "")[:600],
+                    # Completion state: a successful Terra call that finds
+                    # no overlap is a completed no-lead verdict (reusable);
+                    # a failed call is inability (always retried).
+                    "terra_completed": terra_ok, "luna_completed": None,
+                    "budget_refused": False, "completed": terra_ok})
         return row
     terra = ta["terra"]
     row["terra"] = {k: terra.get(k) for k in
@@ -397,7 +422,9 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         row.update({"path": "suppressed",
                     "reason": "terra_no_opportunity",
                     "terra_note": str(terra.get("shared_component", "")
-                                      or "")[:300]})
+                                      or "")[:300],
+                    "terra_completed": True, "luna_completed": None,
+                    "budget_refused": False, "completed": True})
         return row
     proposed = ED.propose_comment(terra, ev)
     row["proposed_comment"] = proposed
@@ -415,7 +442,9 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
                     "detail": ("luna estimate exceeds its half of the "
                                f"whole-PR ceiling ${ceiling_usd:.2f}; "
                                "Terra proposal held, never published "
-                               "without Luna review")})
+                               "without Luna review"),
+                    "terra_completed": True, "luna_completed": None,
+                    "budget_refused": True, "completed": False})
         return row
     lt0 = time.monotonic()
     luna = edit(
@@ -433,22 +462,31 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
             row.update({"path": "suppressed", "reason": "budget_stop",
                         "detail": ("Luna call refused by the spending "
                                    "guard; Terra proposal held, never "
-                                   "published without Luna review")})
+                                   "published without Luna review"),
+                        "terra_completed": True, "luna_completed": False,
+                        "budget_refused": True, "completed": False})
             return row
         row.update({"path": "suppressed",
-                    "reason": "editor_unpublishable"})
+                    "reason": "editor_unpublishable",
+                    "detail": str(luna.get("error", "") or "")[:600],
+                    "terra_completed": True, "luna_completed": False,
+                    "budget_refused": False, "completed": False})
         return row
     decision = (luna.get("editor") or {}).get("decision")
     if decision not in ("KEEP", "REVISE"):
         row.update({"path": "suppressed", "reason": "editor_drop",
                     "detail": ((luna.get("editor") or {}).get("reason", "")
-                               or "")[:600]})
+                               or "")[:600],
+                    "terra_completed": True, "luna_completed": True,
+                    "budget_refused": False, "completed": True})
         return row
     row.update({"path": "published", "decision": decision,
                 "revised_comment": (luna.get("editor") or {}).get(
                     "revised_comment", ""),
                 "reason": ((luna.get("editor") or {}).get("reason", "")
-                           or "")[:800]})
+                           or "")[:800],
+                "terra_completed": True, "luna_completed": True,
+                "budget_refused": False, "completed": True})
     return row
 
 
@@ -488,7 +526,8 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
                            run_dir: Path, ceiling_usd: float,
                            assess_fn: Callable | None = None,
                            edit_fn: Callable | None = None,
-                           on_pair: Callable | None = None) -> dict:
+                           on_pair: Callable | None = None,
+                           is_stale: Callable[[], bool] | None = None) -> dict:
     """Terra-propose / Luna-edit over directly-retrieved pairs.
 
     SEMDUP-08 integrated stage: pairs come from deterministic retrieval
@@ -579,8 +618,36 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
     assess = assess_fn or OD.assess_pair
     edit = edit_fn or ED.edit_pair
     judged_preflight = _preflight_usd(pairs, merged_db, terra_res,
-                                      luna_res)
-    for pair in pairs:
+                                       luna_res)
+    for idx, pair in enumerate(pairs):
+        # COST-01B: check live head before each additional paid assessment
+        if is_stale is not None:
+            try:
+                if is_stale():
+                    # Remaining pairs unexamined due to staleness
+                    for remaining in pairs[idx:]:
+                        skipped = {
+                            "unit": f"{remaining['target']['path']}::{remaining['target']['symbol']} -> "
+                                     f"{remaining['counterpart']['path']}::{remaining['counterpart']['symbol']}",
+                            "reason": "stale_superseded",
+                            "detail": "target head no longer current during duplication; no inference issued",
+                        }
+                        outcome["skipped"].append(skipped)
+                        # Record a suppressed row for provenance (no inference)
+                        outcome["pairs"].append({
+                            "target": remaining["target"],
+                            "counterpart": remaining["counterpart"],
+                            "head_rev": head_rev,
+                            "base_rev": base_rev,
+                            "reason": "stale_superseded",
+                            "detail": "stale head; skipped before inference",
+                            "path": "suppressed",
+                            "completed": False, "budget_refused": False,
+                            "terra_completed": False, "luna_completed": None,
+                        })
+                    break
+            except Exception:
+                pass
         row = _review_pair(
             pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
             base_rev=base_rev, head_rev=head_rev, head_tree=head_tree,
@@ -601,8 +668,19 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
             except Exception:  # noqa: BLE001 - hook never breaks judging
                 pass
     spent_t, spent_l = _spent(terra_ledger), _spent(luna_ledger)
-    outcome["spend_usd"] = round(
-        (spent_t or 0.0) + (spent_l or 0.0), 6)
+    # Per-model spend from the priced ledger results (persisted with the
+    # stage outcome). None means unknown — never represented as $0.
+    # The aggregate is a confirmed lower bound only when both sides are
+    # known; otherwise it is None with spend_unknown True.
+    outcome["spend_terra_usd"] = spent_t
+    outcome["spend_luna_usd"] = spent_l
+    outcome["spend_terra_unknown"] = spent_t is None
+    outcome["spend_luna_unknown"] = spent_l is None
+    if spent_t is None or spent_l is None:
+        outcome["spend_usd"] = (None if (spent_t is None and spent_l is None)
+                                else round((spent_t or 0.0) + (spent_l or 0.0), 6))
+    else:
+        outcome["spend_usd"] = round(spent_t + spent_l, 6)
     outcome["spend_unknown"] = spent_t is None or spent_l is None
     outcome["preflight_usd"] = judged_preflight
     outcome["ok"] = True

@@ -115,6 +115,17 @@ CREATE TABLE IF NOT EXISTS publications (
     created_ts REAL NOT NULL DEFAULT 0,
     UNIQUE(repo, pr, head_sha, run_id)
 );
+CREATE TABLE IF NOT EXISTS finding_deliveries (
+    repo TEXT NOT NULL,
+    pr INTEGER NOT NULL,
+    finding_hash TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    head_sha TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL DEFAULT '',
+    created_ts REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (repo, pr, finding_hash, channel)
+);
 """
 
 
@@ -252,22 +263,46 @@ class Store:
     def delivery_update_decision(self, delivery_id: str, decision: str,
                                  reason: str,
                                  cost_usd: float | None,
-                                 now: float | None = None) -> None:
+                                 now: float | None = None,
+                                 detail: dict | None = None) -> None:
         """Narrow the in-progress placeholder to its final decision.
 
         Only the original claimant's placeholder may be narrowed: rows
         already holding a terminal decision are never overwritten.
         Stamps finished_ts so spend is attributed to the day it was
         incurred, not the day the delivery arrived.
+
+        When `detail` is given it is merged into the existing JSON
+        detail (stored detail wins on conflict for original_* keys).
         """
         ts = time.time() if now is None else now
         try:
             self.cx.execute(_BEGIN)
-            self.cx.execute(
-                "UPDATE deliveries SET decision=?, reason=?, cost_usd=?,"
-                " finished_ts=? "
-                "WHERE delivery_id=? AND decision='in_progress'",
-                (decision, reason, cost_usd, ts, delivery_id))
+            if detail is not None:
+                cur = self.cx.execute(
+                    "SELECT detail FROM deliveries WHERE delivery_id=?",
+                    (delivery_id,)).fetchone()
+                try:
+                    existing = json.loads((cur[0] if cur else None) or "{}")
+                except Exception:
+                    existing = {}
+                # Preserve original_* if already present
+                merged = dict(existing)
+                for k, v in (detail or {}).items():
+                    if k not in merged or not k.startswith("original_"):
+                        merged[k] = v
+                self.cx.execute(
+                    "UPDATE deliveries SET decision=?, reason=?, cost_usd=?,"
+                    " finished_ts=?, detail=? "
+                    "WHERE delivery_id=? AND decision='in_progress'",
+                    (decision, reason, cost_usd, ts,
+                     json.dumps(merged, sort_keys=True), delivery_id))
+            else:
+                self.cx.execute(
+                    "UPDATE deliveries SET decision=?, reason=?, cost_usd=?,"
+                    " finished_ts=? "
+                    "WHERE delivery_id=? AND decision='in_progress'",
+                    (decision, reason, cost_usd, ts, delivery_id))
             self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
@@ -275,6 +310,33 @@ class Store:
             except Exception:
                 pass
             raise StoreError(f"delivery update failed: {exc}")
+
+    def delivery_update_detail(self, delivery_id: str,
+                               detail_patch: dict) -> None:
+        """Merge detail_patch into delivery detail (best-effort)."""
+        if not detail_patch:
+            return
+        try:
+            self.cx.execute(_BEGIN)
+            cur = self.cx.execute(
+                "SELECT detail FROM deliveries WHERE delivery_id=?",
+                (delivery_id,)).fetchone()
+            try:
+                existing = json.loads((cur[0] if cur else None) or "{}")
+            except Exception:
+                existing = {}
+            merged = dict(existing)
+            merged.update(detail_patch)
+            self.cx.execute(
+                "UPDATE deliveries SET detail=? WHERE delivery_id=?",
+                (json.dumps(merged, sort_keys=True), delivery_id))
+            self.cx.execute(_COMMIT)
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"delivery detail update failed: {exc}")
 
     # -- checkpoints ------------------------------------------------------
     def delivery_mark_replay(self, delivery_id: str,
@@ -957,3 +1019,37 @@ class Store:
         except Exception as exc:
             raise StoreError(f"delivery stats failed: {exc}")
         return {d: n for d, n in rows}
+
+    # -- finding deliveries (per-finding, per-channel, for cache) ----
+    def finding_delivery_record(self, *, repo: str, pr: int, finding_hash: str,
+                                channel: str, head_sha: str, run_id: str,
+                                outcome: str, now: float | None = None) -> None:
+        """Record that a finding was delivered (or attempted) to a channel.
+
+        Insert-or-keep: first outcome for (repo,pr,finding,channel) wins.
+        """
+        ts = __import__("time").time() if now is None else now
+        try:
+            self.cx.execute(_BEGIN)
+            self.cx.execute(
+                "INSERT INTO finding_deliveries(repo, pr, finding_hash, channel, head_sha, run_id, outcome, created_ts)"
+                " VALUES(?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(repo, pr, finding_hash, channel) DO NOTHING",
+                (repo, pr, finding_hash, channel, head_sha, run_id, outcome, ts))
+            self.cx.execute(_COMMIT)
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"finding delivery record failed: {exc}")
+
+    def is_finding_delivered(self, repo: str, pr: int, finding_hash: str, channel: str) -> bool:
+        """True if finding was already delivered successfully to channel."""
+        try:
+            row = self.cx.execute(
+                "SELECT outcome FROM finding_deliveries WHERE repo=? AND pr=? AND finding_hash=? AND channel=?",
+                (repo, pr, finding_hash, channel)).fetchone()
+        except Exception as exc:
+            raise StoreError(f"finding delivery check failed: {exc}")
+        return bool(row and row[0] == "posted")
