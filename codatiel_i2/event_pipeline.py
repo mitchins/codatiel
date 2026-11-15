@@ -59,18 +59,16 @@ def _safe_run_dir(run_dir: str | Path | None, state_dir: Path | None) -> Path | 
     when run_dir is from `result` (tainted), but `result.run_dir` is always
     `state_dir/runs/<id>` created by the harness. This check makes the
     guarantee explicit and quiets the security hotspot without changing
-    behavior.
+    behavior. Strict `is_relative_to` ensures sibling dirs like
+    `/srv/state-backup` are rejected while legitimate nested
+    `state/runs/<id>` is accepted (requires Python 3.10+).
     """
     if not run_dir or state_dir is None:
         return None
     try:
         p = Path(run_dir).resolve()
         s = Path(state_dir).resolve()
-        # Python 3.9+: is_relative_to
         if p.is_relative_to(s):
-            return p
-        # Fallback for older: check common prefix
-        if str(p).startswith(str(s)):
             return p
     except Exception:
         return None
@@ -1306,14 +1304,20 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     publish_bits = _maybe_publish_comment(
         cfg=cfg, store=store, run_dir=run_dir or "",
         now=now)
-    # Record GitHub deliveries if posted
-    if "posted" in (publish_bits or ""):
+    # Record GitHub deliveries only on structured posted outcome (not substring)
+    _github_posted = False
+    try:
+        _run_id2 = ""
         try:
-            _run_id2 = ""
-            try:
-                _run_id2 = json.loads((Path(run_dir) / "run.json").read_text(encoding="utf-8")).get("run_id") or ""
-            except Exception:
-                pass
+            _run_id2 = json.loads((Path(run_dir) / "run.json").read_text(encoding="utf-8")).get("run_id") or ""
+        except Exception:
+            pass
+        _pub_row = store.publication_get(ev["repo"], pr, to_sha, _run_id2) if _run_id2 else None
+        _github_posted = bool(_pub_row and _pub_row.get("outcome") == "posted")
+    except Exception:
+        _github_posted = False
+    if _github_posted:
+        try:
             _record_finding_deliveries(store, ev["repo"], pr, _github_to_deliver, "github", to_sha, _run_id2, "posted")
         except Exception:
             pass

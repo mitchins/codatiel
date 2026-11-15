@@ -377,14 +377,15 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             except Exception:
                 if row.get("reason") == "budget_stop":
                     return
-            # Tool-dependent verdicts are not reused across revisions
-            if row.get("terra_tool_calls") or row.get("luna_tool_calls"):
-                return
+            # Preserve tool-dependent verdicts in exact-revision continuation
+            # (same base/head retry must remain $0); decline only cross-revision reuse
             cont_buf.append(row)
             if len(cont_buf) >= CONTINUATION_EVERY:
                 _merge_continuation(state_dir, repo, pr, base_rev,
                                     head_rev, cont_buf)
                 cont_buf.clear()
+            if row.get("terra_tool_calls") or row.get("luna_tool_calls"):
+                return
             # COST-01B: persist to cross-revision cache as well.
             try:
                 from codatiel_i2.semdup_dev import cache as CACHE2

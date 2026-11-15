@@ -530,8 +530,57 @@ def test_delivery_separate_approval_and_publication(tmp_path: Path, dupe_repo, m
     to_email, _ = _filter_already_delivered(store4, "o/r", 1, [row], "email")
     assert len(to_github) == 0 and len(to_email) == 1, "github success must not suppress email"
 
+def test_publisher_failure_mentions_posted_no_receipt(tmp_path: Path):
+    """Publisher failure mentioning 'posted' never creates delivery receipt; finding remains eligible."""
+    from codatiel_i2.event_store import Store
+    from codatiel_i2.event_pipeline import _finding_hash_from_row, _filter_already_delivered
+    state = tmp_path / "state_pub"
+    store = Store(state / "events.sqlite")
+    store.meta_set("enabled_at", "2026-01-01T00:00:00Z")
+    row = {"anchors": {"target": {"path": "a.py", "sha256": "h1"}, "counterpart": {"path": "b.py", "sha256": "h2"}}}
+    fh = _finding_hash_from_row(row)
+    # Simulate publisher failure that mentions "posted" in error text but outcome is refused
+    # No finding_deliveries record should be created for this failure
+    assert not store.is_finding_delivered("o/r", 1, fh, "github")
+    # Ensure the finding is still eligible (not filtered)
+    to_deliver, already = _filter_already_delivered(store, "o/r", 1, [row], "github")
+    assert len(to_deliver) == 1 and len(already) == 0
+    # Now simulate successful publication creates exactly one per-channel receipt
+    store.finding_delivery_record(repo="o/r", pr=1, finding_hash=fh, channel="github", head_sha="b"*40, run_id="run1", outcome="posted")
+    assert store.is_finding_delivered("o/r", 1, fh, "github")
+    assert not store.is_finding_delivered("o/r", 1, fh, "email")
+    # Second successful publication to same channel should not create duplicate
+    store.finding_delivery_record(repo="o/r", pr=1, finding_hash=fh, channel="github", head_sha="b"*40, run_id="run1", outcome="posted")
+    # Still exactly one, and still eligible check shows already delivered
+    to_deliver2, already2 = _filter_already_delivered(store, "o/r", 1, [row], "github")
+    assert len(to_deliver2) == 0 and len(already2) == 1
+    # Finding remains eligible for other channel
+    to_email, already_email = _filter_already_delivered(store, "o/r", 1, [row], "email")
+    assert len(to_email) == 1
+
+def test_safe_run_dir_sibling_rejected_nested_accepted(tmp_path: Path):
+    """Sibling-directory path is rejected; legitimate nested run directory is accepted."""
+    from codatiel_i2.event_pipeline import _safe_run_dir
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "runs").mkdir()
+    legit = state / "runs" / "abc123"
+    legit.mkdir()
+    sibling = tmp_path / "state-backup" / "runs" / "abc123"
+    sibling.parent.mkdir(parents=True)
+    sibling.mkdir()
+    # Legitimate nested should be accepted
+    assert _safe_run_dir(str(legit), state) is not None
+    assert _safe_run_dir(str(legit / "semdup.json"), state) is not None
+    # Sibling must be rejected (string prefix would incorrectly accept)
+    assert _safe_run_dir(str(sibling), state) is None
+    assert _safe_run_dir(str(sibling / "semdup.json"), state) is None
+    # Also test with run_dir outside state
+    assert _safe_run_dir("/tmp/evil/runs/1", state) is None
+    assert _safe_run_dir(None, state) is None
+    assert _safe_run_dir(str(legit), None) is None
+
 def test_provenance_superseded_traceable(tmp_path: Path, dupe_repo):
-    # Use real pipeline with is_stale flipping to create superseded delivery with provenance
     import codatiel_i2.event_pipeline as EP
     state = tmp_path / "estate"
     state.mkdir()

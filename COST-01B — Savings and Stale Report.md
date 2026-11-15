@@ -33,8 +33,8 @@ Reproduced against a SQLite-consistent `.backup` copy (WAL-safe, never the live 
 - Semdup orphan total **$1.668416** (corrected from $1.651134) — 80.9% of $2.062834; Terra/Luna remainder $0.394418
 
 **Disjoint categories (no double-count):**
-- Reviews $11.012281 **includes** semdup $8.823641 (Terra $1.2 + Luna $0.4 + semdup $8.8 = total). Superseded $2.062834 is **separate** (not in `settled`), counted once via `spend_on_day`. Total ledger $13.075115 = $11.012 + $2.063.
-- Cache waste $2.22 and stale waste $1.67 overlap on **11 pairs** ($0.056496) within orphans that were both repeated and superseded — deducted once in combined counterfactual.
+- Semdup total **$8.823641** = settled portion **$7.155225** (32 pairs in 36 reviews) + orphan portion **$1.668416** (4 runs, not in `settled`, only in `superseded` $2.062834). Reviews $11.012281 **includes** only settled semdup $7.155225 (Terra $3.1 + Luna $0.75 + settled semdup $7.15 = total); superseded $2.062834 (of which $1.668416 semdup) is **separate**. Total ledger $13.075115 = $11.012281 settled + $2.062834 superseded, semdup $8.823641 counted once (7.155 + 1.668).
+- Cache waste $2.223886 (replay-demonstrated, 433 eligible) and stale waste $1.668416 overlap on **11 pairs** ($0.056496) within orphans that were both repeated and superseded — deducted once in combined counterfactual.
 
 ## Gate B — Stop spending on stale reviews (persistent latch)
 
@@ -119,17 +119,18 @@ superseded, provenance_version="cost01b-v1", finished_at
 | Stale superseded semdup avoided | $1.668416 (80.9% of $2.062834) | **$1.668416** (all 4 orphans, if latch before dup) |
 | Overlap (repeated within orphans) | — | **11 pairs, $0.056496** — deducted once |
 | Combined non-overlapping savings | — | **$3.835806** ($2.223886 + $1.668416 − $0.056496) — vs $4.35 naive sum |
-| Counterfactual billed (non-overlapping) | $11.012281 settled (includes $8.823641 semdup) + $2.062834 superseded = $13.075115 | **$8.7021** settled ($11.012281 − $2.7046 upper) + $0.394418 superseded remainder ($2.062834 − $1.668416) = **$9.0965** — with demonstrated $2.223886: **$9.5770** |
-| 14 Nov counterfactual | $4.689998 | **$2.71** ($4.69 − $0.40 cache on #14@4eb8041 − $1.668416 stale + $0.06 overlap) |
+| Counterfactual billed (non-overlapping) | $11.012281 settled (incl. $7.155225 settled semdup) + $2.062834 superseded (incl. $1.668416 orphan semdup) = $13.075115 | **$8.307681** settled ($11.012281 − $2.7046 upper) + $0.394418 remainder = **$8.702099** — with demonstrated $2.223886: **$8.788395** settled ($11.012281 − $2.223886) + $0.394418 = **$9.182813**; less overlap $0.056496 → **$9.126317** |
+| 14 Nov counterfactual | $4.689998 | **$2.68** ($4.689998 − $0.403 cache on 14 Nov repeated 39/44 etc. − $1.668416 stale + $0.056496 overlap) |
 | Additional processing | — | file `SELECT text` + `cache.json` I/O, <1 ms/pair, no inference |
 | Remaining duplicate suggestions | 47 republished | **0** republished (delivery-layer `finding_deliveries` suppresses `already_delivered` per channel; `already_reported` not conflated) |
 | Correctness regressions | — | none (tool/provider/context correctly miss) |
 
 **Distinction (non-overlapping):**
-- **Actual billed (historical, snapshot):** $8.823641 semdup + $2.627164 reviews (including Terra/Luna/semdup) on 14 Nov + $2.062834 superseded = $4.69 day; cumulative settled $11.012281
-- **Upper bound savings:** $2.7046 cache + $1.668416 stale = $4.3730 (naive, includes overlap)
-- **Replay-demonstrated savings (new eligibility, chronological):** **$2.223886 cache + $1.668416 stale − $0.056496 overlap = $3.835806**
-- **Projected:** future workloads with ~25% eligible repeat rate → ~25% semdup + ~81% superseded semdup saved; varies with push frequency.
+- **Actual billed (historical, snapshot):** semdup $8.823641 (of which $7.155225 settled + $1.668416 orphan) + reviews $11.012281 (incl. settled semdup) + superseded $2.062834 = $13.075115 total ledger; 14 Nov $4.689998 day
+- **Upper bound (naive):** $2.7046 cache + $1.668416 stale = $4.3730 (includes overlap)
+- **Replay-demonstrated (chronological, new eligibility, mocked, no inference):** **$2.223886 cache** (433/1,718 eligible, $0.005136 avg)
+- **Conditional (if latch before duplication, head-change timing not modeled):** **$1.668416 stale** (4 orphans), combined **$3.835806** ($2.223886 + $1.668416 − $0.056496 overlap) — stale portion is conditional upper bound, not replay-demonstrated
+- **Projected:** future workloads with ~25% eligible repeat rate → ~25% semdup replay-demonstrated + ~81% superseded conditional; varies with push frequency.
 
 No broad paid inference; deterministic replay with mocked models, chronological per-PR `seen` set, new eligibility (tool/provider/file-hash) enforced.
 
