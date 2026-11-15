@@ -346,6 +346,9 @@ class Store:
         The row keeps the original outcome in its reason; the decision
         becomes skipped:replay so dashboards count blocked replays. A
         repeat replay returns the row unchanged (no reason chaining).
+        Rows already reclaimed to in_progress (an active claim or
+        re-drive) are never overwritten: the current row is returned
+        unchanged so a late duplicate cannot roll back live work.
         The original cost is preserved on the row (never zeroed): for
         superseded runs the delivery row is the sole spend record, and
         zeroing it would erase settled money from the daily ledger.
@@ -365,7 +368,8 @@ class Store:
             self.cx.execute(_BEGIN)
             self.cx.execute(
                 "UPDATE deliveries SET decision='skipped:replay',"
-                " reason=?, detail=? WHERE delivery_id=?",
+                " reason=?, detail=? WHERE delivery_id=?"
+                " AND decision<>'in_progress'",
                 (f"duplicate delivery; original decision "
                  f"{original.get('decision')}: "
                  f"{original.get('reason') or ''}"[:500],
@@ -415,15 +419,21 @@ class Store:
 
     def delivery_reopen_budget(self, delivery_id: str, *,
                                attempt: int, max_attempts: int,
-                               now: float | None = None) -> dict:
+                               now: float | None = None
+                               ) -> tuple[dict, bool]:
         """Supersede a pure budget refusal for a bounded retry re-drive.
 
         Narrow escape from replay protection, mirroring
         delivery_reopen_draft: only a terminal skipped:ceiling decision
         (or a skipped:replay wrapper preserving it as the original
         decision — verified by the caller) may be reclaimed to
-        in_progress. Every other decision is left untouched and the row
-        returned.
+        in_progress. Every other decision is left untouched.
+
+        Returns (row, won): won is True only when THIS call's UPDATE
+        matched exactly one row — i.e. this caller won the atomic
+        compare-and-set. A concurrent loser gets won=False with the
+        row untouched (still in_progress under the winner) and must
+        fall back to replay, never process the delivery as new work.
 
         Boundedness is enforced compare-and-set in SQL: the row is only
         reclaimed when its recorded budget_retry_attempts equals
@@ -451,7 +461,7 @@ class Store:
             merged.setdefault("budget_retry_from_reason",
                               existing.get("original_reason")
                               or existing.get("reason") or "")
-            self.cx.execute(
+            cursor = self.cx.execute(
                 "UPDATE deliveries SET decision='in_progress',"
                 " reason=?, cost_usd=NULL, received_ts=?, detail=?"
                 " WHERE delivery_id=? AND (decision='skipped:ceiling'"
@@ -464,6 +474,7 @@ class Store:
                  f"spend caps re-checked before any inference",
                  ts, json.dumps(merged, sort_keys=True), delivery_id,
                  int(attempt) - 1, int(attempt), int(max_attempts)))
+            won = cursor.rowcount == 1
             self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
@@ -474,7 +485,7 @@ class Store:
         row = self.delivery_get(delivery_id)
         if row is None:
             raise StoreError("delivery vanished after budget reopen")
-        return row
+        return row, won
 
     def checkpoint_get(self, repo: str, pr: int) -> dict | None:
         try:

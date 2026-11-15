@@ -920,7 +920,11 @@ def _head_unreviewed(store: store_mod.Store, ev: dict, head: str) -> bool:
 
     A checkpoint last_reviewed_head match — or a pinned claim for the
     head, still owned by its claimant — blocks the retry so the same
-    head is never reviewed twice.
+    head is never reviewed twice. The checkpoint pointer alone is not
+    enough: a later review of a newer head advances the pointer, so a
+    successful review of THIS head is checked directly in the reviews
+    history. A live reset to an already-reviewed head therefore stays
+    a blocked replay.
     """
     try:
         cp = store.checkpoint_get(ev["repo"], int(ev["pr_number"])) or {}
@@ -928,8 +932,18 @@ def _head_unreviewed(store: store_mod.Store, ev: dict, head: str) -> bool:
         return False
     if (cp.get("last_reviewed_head") or "") == head:
         return False
-    return not ((cp.get("status") or "") == "in_progress"
-                and (cp.get("in_progress_head") or "") == head)
+    if (cp.get("status") or "") == "in_progress" and \
+            (cp.get("in_progress_head") or "") == head:
+        return False
+    try:
+        hit = store.cx.execute(
+            "SELECT 1 FROM reviews WHERE repo=? AND pr=?"
+            " AND head_sha=? AND status IN ('complete','inconclusive')"
+            " LIMIT 1",
+            (ev["repo"], int(ev["pr_number"]), head)).fetchone()
+    except Exception:
+        return False
+    return not bool(hit)
 
 
 def _head_still_live(ev: dict, head: str) -> bool:
@@ -958,8 +972,10 @@ def _is_budget_retry(ev: dict, store: store_mod.Store,
     - the refusal carried no spend (spend-carrying rows are never
       touched);
     - the re-ingested event names the exact refused head;
-    - no review has since covered that head (checkpoint or pinned
-      claim);
+    - no review has since covered that head (checkpoint, pinned
+      claim, or the reviews history itself — so a later review that
+      advanced the checkpoint pointer does not re-arm an old
+      refusal);
     - the live PR head positively confirms the refused head is still
       current;
     - fewer than BUDGET_RETRY_MAX_ATTEMPTS re-drives recorded.
@@ -1197,12 +1213,17 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             # re-checked downstream).
             if _is_budget_retry(ev, store, prior):
                 attempt = _prior_retry_attempts(prior) + 1
-                reopened = store.delivery_reopen_budget(
+                reopened, won = store.delivery_reopen_budget(
                     ev["delivery_id"], attempt=attempt,
                     max_attempts=BUDGET_RETRY_MAX_ATTEMPTS, now=now)
-                if (reopened or {}).get("decision") == "in_progress":
+                if won and (reopened or {}).get("decision") == \
+                        "in_progress":
                     prior = None
                 else:
+                    # Lost the atomic reclaim (or the row moved under
+                    # us): fall back to replay, never process as new
+                    # work. The replay mark cannot overwrite the
+                    # winner's active claim.
                     return store.delivery_mark_replay(
                         ev["delivery_id"], prior)
             else:

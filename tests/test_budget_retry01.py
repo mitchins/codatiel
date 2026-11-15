@@ -215,7 +215,122 @@ def test_no_retry_for_non_ceiling_terminal_rows(cfg_store, chain,
     assert len(_runs(cfg)) == 1
 
 
-# -- store compare-and-set ----------------------------------------------------
+# -- atomic reclaim: only the winner may start work ---------------------------
+# CodeRabbit BUDGET-RETRY-01: the store must report whether THIS call
+# won the reclaim; a loser must fall back to replay, never process.
+
+
+def test_reclaim_reports_winner_and_loser(cfg_store, chain):
+    cfg, store = cfg_store
+    b = chain["B"]
+    store.delivery_record(
+        delivery_id="br8", event_type="pull_request", action="synchronize",
+        repo=REPO, pr=8, head_sha=b, decision="skipped:ceiling",
+        reason="cap", cost_usd=0.0, detail={})
+    row, won = store.delivery_reopen_budget(
+        "br8", attempt=1, max_attempts=5)
+    assert won is True
+    assert row["decision"] == "in_progress", row
+    # A stale second claimant loses: the row is untouched and the loss
+    # is reported (no silent double-drive of the same delivery).
+    row2, won2 = store.delivery_reopen_budget(
+        "br8", attempt=1, max_attempts=5)
+    assert won2 is False
+    assert row2["decision"] == "in_progress", row2
+    assert P._prior_retry_attempts(row2) == 1
+
+
+def test_pipeline_loser_falls_back_to_replay(cfg_store, chain, monkeypatch):
+    cfg, store = cfg_store
+    a, b = chain["A"], chain["B"]
+    _ceiling_refusal(cfg, store, monkeypatch, 9, a, b, "br9")
+    cfg.spend_cap_usd = 20.0
+    monkeypatch.setattr(P, "get_live_head", _live(b))
+    # Interleaving: this caller reads the ceiling row, then another
+    # worker wins the atomic reclaim first.
+    stale = store.delivery_get("br9")
+    row, won = store.delivery_reopen_budget(
+        "br9", attempt=1, max_attempts=P.BUDGET_RETRY_MAX_ATTEMPTS)
+    assert won is True
+    real_get = store.delivery_get
+    calls = {"n": 0}
+
+    def _flaky_get(did):
+        # Only the loser's initial prior read observes the stale
+        # ceiling snapshot; every later read sees current state.
+        calls["n"] += 1
+        if did == "br9" and calls["n"] == 1:
+            return dict(stale)
+        return real_get(did)
+
+    monkeypatch.setattr(store, "delivery_get", _flaky_get)
+    # The loser's reclaim loses: it must not process as new work and
+    # must not touch the winner's active claim — the current row is
+    # reported unchanged with no inference.
+    monkeypatch.setattr(
+        store, "delivery_reopen_budget",
+        lambda *a, **k: (dict(stale), False))
+    ev, err = P.normalize_event(pr_event("synchronize", 9, a, b), "br9")
+    assert err == "", err
+    out = P.process_event(cfg=cfg, store=store, ev=ev,
+                          model_factory=_refusing_factory())
+    assert out["decision"] == "in_progress", out
+    assert store.delivery_get("br9")["decision"] == "in_progress"
+    assert _runs(cfg) == []
+
+
+def test_replay_mark_never_overwrites_active_redrive(cfg_store, chain):
+    cfg, store = cfg_store
+    b = chain["B"]
+    store.delivery_record(
+        delivery_id="br10", event_type="pull_request",
+        action="synchronize", repo=REPO, pr=10, head_sha=b,
+        decision="skipped:ceiling", reason="cap", cost_usd=0.0,
+        detail={})
+    row, won = store.delivery_reopen_budget(
+        "br10", attempt=1, max_attempts=5)
+    assert won is True
+    # A late duplicate arriving after the reclaim must not clobber the
+    # active in_progress claim back to skipped:replay (that rollback
+    # would restore the old attempt counter and break the bound).
+    after = store.delivery_mark_replay(
+        "br10", {"decision": "skipped:ceiling", "reason": "cap",
+                 "detail": "{}"})
+    assert after["decision"] == "in_progress", after
+    assert P._prior_retry_attempts(after) == 1
+
+
+# -- completed history beats the checkpoint pointer ---------------------------
+# CodeRabbit BUDGET-RETRY-01: a head already successfully reviewed must
+# never become eligible again, even after a later review advances the
+# checkpoint pointer and the live head resets to the old head.
+
+
+def test_reviewed_head_never_retried_after_pointer_advances(
+        cfg_store, chain, monkeypatch):
+    cfg, store = cfg_store
+    a, b, c = chain["A"], chain["B"], chain["C"]
+    _ceiling_refusal(cfg, store, monkeypatch, 11, a, b, "br11")
+    cfg.spend_cap_usd = 20.0
+    monkeypatch.setattr(P, "get_live_head", _live(b))
+    # Head B is reviewed through another delivery, then C advances the
+    # checkpoint pointer past B.
+    row = _ingest(cfg, store, pr_event("synchronize", 11, a, b),
+                  "br11-cover", model_factory=_terra_factory())
+    assert row["decision"] == "completed", row
+    monkeypatch.setattr(P, "get_live_head", _live(c))
+    row = _ingest(cfg, store, pr_event("synchronize", 11, b, c),
+                  "br11-cover2", model_factory=_terra_factory())
+    assert row["decision"] == "completed", row
+    assert store.checkpoint_get(REPO, 11)["last_reviewed_head"] == c
+    # The live head resets to the old refused head B: the stale ceiling
+    # row must stay a blocked replay — B was already reviewed.
+    n_runs = len(_runs(cfg))
+    monkeypatch.setattr(P, "get_live_head", _live(b))
+    row = _ingest(cfg, store, pr_event("synchronize", 11, a, b), "br11",
+                  model_factory=_refusing_factory())
+    assert row["decision"] == "skipped:replay", row
+    assert len(_runs(cfg)) == n_runs
 def test_reopen_budget_is_compare_and_set(cfg_store, chain):
     cfg, store = cfg_store
     b = chain["B"]
@@ -224,17 +339,25 @@ def test_reopen_budget_is_compare_and_set(cfg_store, chain):
         repo=REPO, pr=8, head_sha=b, decision="skipped:ceiling",
         reason="cap", cost_usd=0.0, detail={})
     # Stale attempt (recorded counter is 0, caller claims 3): the row
-    # is left untouched so the caller falls back to replay.
-    row = store.delivery_reopen_budget("br7", attempt=3, max_attempts=5)
+    # is left untouched and the loss is reported so the caller falls
+    # back to replay.
+    row, won = store.delivery_reopen_budget(
+        "br7", attempt=3, max_attempts=5)
+    assert won is False
     assert row["decision"] == "skipped:ceiling", row
     # Fresh attempt reclaims exactly once.
-    row = store.delivery_reopen_budget("br7", attempt=1, max_attempts=5)
+    row, won = store.delivery_reopen_budget(
+        "br7", attempt=1, max_attempts=5)
+    assert won is True
     assert row["decision"] == "in_progress", row
     detail = json.loads(row["detail"] or "{}")
     assert detail["budget_retry_attempts"] == 1
     assert detail["budget_retry_from_decision"] == "skipped:ceiling"
-    # A second reclaim with the same attempt loses the race.
-    row = store.delivery_reopen_budget("br7", attempt=1, max_attempts=5)
+    # A second reclaim with the same attempt loses the race: the row
+    # keeps the winner's claim and reports the loss.
+    row, won = store.delivery_reopen_budget(
+        "br7", attempt=1, max_attempts=5)
+    assert won is False
     assert row["decision"] == "in_progress", row
     assert json.loads(row["detail"] or "{}")[
         "budget_retry_attempts"] == 1
