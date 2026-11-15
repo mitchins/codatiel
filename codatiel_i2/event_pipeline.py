@@ -897,7 +897,7 @@ def _ceiling_original_decision(prior: dict) -> str | None:
 def _prior_carries_spend(prior: dict) -> bool:
     """True when a delivery row has non-zero spend attached."""
     try:
-        return float(prior.get("cost_usd") or 0.0) != 0.0
+        return abs(float(prior.get("cost_usd") or 0.0)) > 0.0
     except Exception:
         return True
 
