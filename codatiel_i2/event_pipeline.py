@@ -911,6 +911,43 @@ def _provenance_detail(*, repo: str, pr: int, base: str, head: str,
     return {k: v for k, v in detail.items() if v is not None}
 
 
+def _finding_hash_from_row(row: dict) -> str:
+    """Stable hash for a finding, independent of line numbers."""
+    a = row.get("anchors") or {}
+    t = a.get("target") or {}
+    c = a.get("counterpart") or {}
+    # Content hashes + paths are the finding identity (line-independent)
+    raw = f"{t.get('path')}|{t.get('sha256')}|{c.get('path')}|{c.get('sha256')}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _filter_already_delivered(store, repo: str, pr: int, published: list, channel: str) -> tuple[list, list]:
+    """Split published into (to_deliver, already_delivered) per channel."""
+    to_deliver: list = []
+    already: list = []
+    for row in published or []:
+        try:
+            fh = _finding_hash_from_row(row)
+            if fh and store.is_finding_delivered(repo, pr, fh, channel):
+                already.append(row)
+            else:
+                to_deliver.append(row)
+        except Exception:
+            to_deliver.append(row)
+    return to_deliver, already
+
+
+def _record_finding_deliveries(store, repo: str, pr: int, published: list, channel: str, head_sha: str, run_id: str, outcome: str) -> None:
+    """Record each finding hash as delivered to channel."""
+    for row in published or []:
+        try:
+            fh = _finding_hash_from_row(row)
+            if fh:
+                store.finding_delivery_record(repo=repo, pr=pr, finding_hash=fh, channel=channel, head_sha=head_sha, run_id=run_id, outcome=outcome)
+        except Exception:
+            continue
+
+
 def process_event(*, cfg: EventConfig, store: store_mod.Store,
                   ev: dict, model_factory: Any = None,
                   transport: Any = None) -> dict:
@@ -1162,21 +1199,99 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         terra_findings=int(result.get("terra_findings") or 0),
         luna_added=int(result.get("added") or 0), cost_usd=cost,
         cost_unknown=unknown, run_dir=result.get("run_dir") or "")
-    notified, notify_detail = _notify(cfg, result.get("run_dir") or "",
+    # COST-01B 1.1: per-finding delivery deduplication (separate channels)
+    run_dir = result.get("run_dir") or ""
+    # Load original published list for filtering
+    _orig_semdup = {}
+    try:
+        if run_dir:
+            _orig_semdup = json.loads((Path(run_dir) / "semdup.json").read_text(encoding="utf-8"))
+    except Exception:
+        _orig_semdup = {}
+    _orig_published = list(_orig_semdup.get("published") or [])
+
+    # Filter for email channel before notify
+    _email_to_deliver = _orig_published
+    _email_already = []
+    if _orig_published:
+        try:
+            _email_to_deliver, _email_already = _filter_already_delivered(store, ev["repo"], pr, _orig_published, "email")
+            if len(_email_to_deliver) != len(_orig_published):
+                # Temporarily write filtered published for email digest
+                _tmp = dict(_orig_semdup)
+                _tmp["published"] = _email_to_deliver
+                # Keep suppressed as is, but add already-delivered to suppressed for audit
+                _tmp["suppressed"] = list(_orig_semdup.get("suppressed") or [])
+                for r in _email_already:
+                    _tmp["suppressed"].append({**r, "reason": "already_delivered_email", "detail": "finding already delivered via email on this PR"})
+                (Path(run_dir) / "semdup.json").write_text(json.dumps(_tmp, indent=1), encoding="utf-8")
+        except Exception:
+            pass
+    notified, notify_detail = _notify(cfg, run_dir or "",
                         result["status"], transport,
                         context=(f"{cfg.env}:{ev['repo']}#{pr}"
                                  if cfg.env == "dev" else None))
+    # Record email deliveries for actually delivered findings
+    if notified:
+        try:
+            _run_id = ""
+            try:
+                _run_id = json.loads((Path(run_dir) / "run.json").read_text(encoding="utf-8")).get("run_id") or ""
+            except Exception:
+                pass
+            _record_finding_deliveries(store, ev["repo"], pr, _email_to_deliver, "email", to_sha, _run_id, "posted")
+        except Exception:
+            pass
+    # Restore original for GitHub filtering (email and github must not be conflated)
+    try:
+        if run_dir and _orig_semdup:
+            (Path(run_dir) / "semdup.json").write_text(json.dumps(_orig_semdup, indent=1), encoding="utf-8")
+    except Exception:
+        pass
+    # Filter for GitHub channel before publish
+    _github_to_deliver = _orig_published
+    _github_already = []
+    if _orig_published:
+        try:
+            _github_to_deliver, _github_already = _filter_already_delivered(store, ev["repo"], pr, _orig_published, "github")
+            if len(_github_to_deliver) != len(_orig_published):
+                _tmp2 = dict(_orig_semdup)
+                _tmp2["published"] = _github_to_deliver
+                _tmp2["suppressed"] = list(_orig_semdup.get("suppressed") or [])
+                for r in _github_already:
+                    _tmp2["suppressed"].append({**r, "reason": "already_delivered_github", "detail": "finding already delivered via GitHub on this PR"})
+                (Path(run_dir) / "semdup.json").write_text(json.dumps(_tmp2, indent=1), encoding="utf-8")
+        except Exception:
+            pass
     semdup_bits = ""
     if result.get("semdup_status", "off") != "off":
-        semdup_bits = (f", semdup {result.get('semdup_status')}/"
-                       f"{result.get('semdup_published', 0)}")
+        # Report actually delivered count, not just approved
+        _delivered_count = len(_github_to_deliver) if _orig_published else result.get("semdup_published", 0)
+        semdup_bits = (f", semdup {result.get('semdup_status')}/{_delivered_count}")
     # GitHub comment publisher (PROD-01 Track A): email already
     # attempted above and its outcome recorded; publishing runs second
     # in try/except and can never change the email outcome. Default
     # HOLD (CODATIEL_GITHUB_COMMENTS=off) makes this a no-op.
     publish_bits = _maybe_publish_comment(
-        cfg=cfg, store=store, run_dir=result.get("run_dir") or "",
+        cfg=cfg, store=store, run_dir=run_dir or "",
         now=now)
+    # Record GitHub deliveries if posted
+    if "posted" in (publish_bits or ""):
+        try:
+            _run_id2 = ""
+            try:
+                _run_id2 = json.loads((Path(run_dir) / "run.json").read_text(encoding="utf-8")).get("run_id") or ""
+            except Exception:
+                pass
+            _record_finding_deliveries(store, ev["repo"], pr, _github_to_deliver, "github", to_sha, _run_id2, "posted")
+        except Exception:
+            pass
+    # Restore original semdup.json for provenance (keep approved list intact)
+    try:
+        if run_dir and _orig_semdup:
+            (Path(run_dir) / "semdup.json").write_text(json.dumps(_orig_semdup, indent=1), encoding="utf-8")
+    except Exception:
+        pass
     prov = _provenance_detail(
         repo=ev["repo"], pr=pr, base=from_sha, head=to_sha,
         result=result, kind=kind, info=info, superseded=False)

@@ -115,6 +115,17 @@ CREATE TABLE IF NOT EXISTS publications (
     created_ts REAL NOT NULL DEFAULT 0,
     UNIQUE(repo, pr, head_sha, run_id)
 );
+CREATE TABLE IF NOT EXISTS finding_deliveries (
+    repo TEXT NOT NULL,
+    pr INTEGER NOT NULL,
+    finding_hash TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    head_sha TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL DEFAULT '',
+    created_ts REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (repo, pr, finding_hash, channel)
+);
 """
 
 
@@ -1008,3 +1019,37 @@ class Store:
         except Exception as exc:
             raise StoreError(f"delivery stats failed: {exc}")
         return {d: n for d, n in rows}
+
+    # -- finding deliveries (per-finding, per-channel, for cache) ----
+    def finding_delivery_record(self, *, repo: str, pr: int, finding_hash: str,
+                                channel: str, head_sha: str, run_id: str,
+                                outcome: str, now: float | None = None) -> None:
+        """Record that a finding was delivered (or attempted) to a channel.
+
+        Insert-or-keep: first outcome for (repo,pr,finding,channel) wins.
+        """
+        ts = __import__("time").time() if now is None else now
+        try:
+            self.cx.execute(_BEGIN)
+            self.cx.execute(
+                "INSERT INTO finding_deliveries(repo, pr, finding_hash, channel, head_sha, run_id, outcome, created_ts)"
+                " VALUES(?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(repo, pr, finding_hash, channel) DO NOTHING",
+                (repo, pr, finding_hash, channel, head_sha, run_id, outcome, ts))
+            self.cx.execute(_COMMIT)
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            raise StoreError(f"finding delivery record failed: {exc}")
+
+    def is_finding_delivered(self, repo: str, pr: int, finding_hash: str, channel: str) -> bool:
+        """True if finding was already delivered successfully to channel."""
+        try:
+            row = self.cx.execute(
+                "SELECT outcome FROM finding_deliveries WHERE repo=? AND pr=? AND finding_hash=? AND channel=?",
+                (repo, pr, finding_hash, channel)).fetchone()
+        except Exception as exc:
+            raise StoreError(f"finding delivery check failed: {exc}")
+        return bool(row and row[0] == "posted")

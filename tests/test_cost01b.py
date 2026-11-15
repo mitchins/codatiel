@@ -129,35 +129,57 @@ def test_stale_during_dup_no_further_pairs(tmp_path: Path, dupe_repo, monkeypatc
     # Remaining pairs should be skipped with stale reason
     assert any(s.get("reason") == "stale_superseded" for s in out.get("skipped", []))
 
-def test_partial_stale_accounted(tmp_path: Path, dupe_repo, monkeypatch):
-    """Partial completed work is accounted for even though superseded."""
+def test_partial_stale_accounted(tmp_path: Path, monkeypatch):
+    """Completes one assessment, detects new head, stops further paid assessments, retains cost, does not publish stale."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
-    # Stale during dup: first pair assessed, cost recorded, then stale
-    root = dupe_repo["root"]
-    base = dupe_repo["base"]
-    head = dupe_repo["head_b"]
-    calls = {"n": 0}
-    def _count_assess(**kw):
-        calls["n"] += 1
-        # Simulate cost via ledger: we need to have spend tracked
-        # Use real providers path? Instead we check that stage's spend_usd includes first pair's cost
-        # Our fake assess doesn't actually charge ledger; we need to simulate via spend ledger
-        # Instead we test that after stale, outcome spend reflects only judged pairs, not total
-        return _fake_assess(**kw)
-    counter = {"i": 0}
+    # Build a repo with 3 duplicate targets to ensure multiple pairs
+    root = tmp_path / "repo_partial"
+    root.mkdir()
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    (root / "existing.py").write_text(DUPE_EXISTING)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "base")
+    base = _git(root, "rev-parse", "HEAD")
+    snippet = '    quantized = round(float(a), places)\n    return f"{quantized:,.{places}f}"\n'
+    text = '"""x"""\n'
+    for name in ("alpha_price", "beta_price", "gamma_price"):
+        text += f'\n\ndef {name}(a, places=2):\n    """Format."""\n' + snippet
+    (root / "new.py").write_text(text)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "add")
+    head = _git(root, "rev-parse", "HEAD")
+
+    # Fake assess that records nonzero simulated spending via the ledger
+    def _spending_assess(*, evidence, head_rev, target_kind, tools, model, model_settings, ledger, ctx=None, call=None):
+        # Simulate $0.05 per Terra assessment
+        class Usage:
+            requests = 1
+            input_tokens = 1000
+            output_tokens = 200
+        ledger.record_response(f"test-{evidence['pair_sha256'][:8]}", Usage(), cached_input_tokens=0, cache_write_input_tokens=0)
+        return _fake_assess(evidence=evidence, head_rev=head_rev, target_kind=target_kind, tools=tools, model=model, model_settings=model_settings, ledger=ledger, ctx=ctx, call=call)
+
+    counter = {"calls": 0}
     def _flip():
-        counter["i"] += 1
-        return counter["i"] > 1
-    run_dir = tmp_path / "run3"
+        # Stale after first assessment: initial check (before dup) is call 1 (false),
+        # first pair check is call 2 (false), second pair check is call 3 (true)
+        counter["calls"] += 1
+        return counter["calls"] > 2
+
+    run_dir = tmp_path / "run_partial"
     run_dir.mkdir()
-    # Use a ceiling that allows at least one pair
-    out = ST.run_stage(repo_path=root, repo=REPO, pr=1, base_rev=base, head_rev=head, run_dir=run_dir, state_dir=tmp_path / "state3", allow_embeddings=False, assess_fn=_count_assess, edit_fn=_fake_edit, is_stale=_flip, ceiling_usd=2.0)
-    # Even though stale, the first pair's work (if any) would be in published/suppressed
-    # Here we just check that outcome has spend and not zeroed, and that stale is marked
-    assert out["status"] in ("ok", "stale_skipped", "partial", "degraded")
-    # If stale triggered, spend should be accounted (not lost)
-    # Since our fake doesn't charge, spend is 0, but we check that outcome is persisted
-    assert (run_dir / "semdup.json").exists()
+    out = ST.run_stage(repo_path=root, repo=REPO, pr=1, base_rev=base, head_rev=head, run_dir=run_dir, state_dir=tmp_path / "state_partial", allow_embeddings=False, assess_fn=_spending_assess, edit_fn=_fake_edit, is_stale=_flip, ceiling_usd=2.0)
+
+    # Should have completed exactly one assessment before stale
+    assert out["pairs_examined"] == 1, "should stop after first pair when stale observed"
+    assert out["spend_usd"] > 0, "incurred cost must be retained (nonzero simulated spending)"
+    assert any(s.get("reason") == "stale_superseded" for s in out.get("skipped", [])), "remaining pairs should be skipped as stale_superseded"
+    # Must not publish the stale result (no new findings from skipped pairs)
+    assert out["pairs_total"] >= 2, "should have had multiple pairs total"
+    # The published from the first pair may exist, but no findings from skipped pairs
+    assert len(out.get("published", [])) <= 1
 
 def test_stale_cannot_overwrite_newer(tmp_path: Path, monkeypatch):
     """A stale result cannot overwrite or publish over a newer successful review."""
@@ -247,12 +269,26 @@ def test_cache_unchanged_reused(tmp_path: Path, dupe_repo, monkeypatch):
     # Since head_c is different from head_b, but target pair unchanged, cache should hit
     assert calls2["n"] == 0, "unchanged pair should be reused without inference"
     assert out3["pairs_reused"] >= 1
-    # Cross-commit duplicate suppression: published from first run should not be republished
-    assert out3["published"] == [], "reused published verdict should be suppressed as duplicate across commits"
-    assert any(r.get("reason") == "already_reported_on_pr" for r in out3.get("suppressed", [])), "suppressed should contain already_reported_on_pr"
+    # Stage now keeps reused published as published; delivery layer will suppress
+    assert len(out3["published"]) >= 1, "stage keeps reused published for delivery-layer deduplication"
+    # Verify delivery-layer would suppress if prior delivered
+    from codatiel_i2.event_store import Store
+    from codatiel_i2.event_pipeline import _finding_hash_from_row, _filter_already_delivered
+    store = Store(state / "test_store.sqlite")
+    store.meta_set("enabled_at", "2026-01-01T00:00:00Z")
+    # Simulate prior delivery via finding_deliveries
+    fh = _finding_hash_from_row(out1["published"][0])
+    store.finding_delivery_record(repo="o/r", pr=1, finding_hash=fh, channel="github", head_sha=head_b, run_id="run1", outcome="posted")
+    to_deliver, already = _filter_already_delivered(store, "o/r", 1, out3["published"], "github")
+    assert len(already) == 1 and len(to_deliver) == 0, "already delivered via github should be filtered"
+    # If prior was stale (no delivery), should deliver
+    store2 = Store(state / "test_store2.sqlite")
+    store2.meta_set("enabled_at", "2026-01-01T00:00:00Z")
+    to_deliver2, already2 = _filter_already_delivered(store2, "o/r", 1, out3["published"], "github")
+    assert len(to_deliver2) == 1 and len(already2) == 0, "no prior delivery → should deliver"
 
 def test_cross_commit_duplicate_suppressed(tmp_path: Path, dupe_repo, monkeypatch):
-    """Cross-commit duplicate: second run suppresses already-reported finding, no new inference."""
+    """Cross-commit duplicate: delivery layer suppresses already-delivered finding, no new inference."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
     root = dupe_repo["root"]; base = dupe_repo["base"]; head_b = dupe_repo["head_b"]; head_c = dupe_repo["head_c"]
     state = tmp_path / "state2"
@@ -266,9 +302,20 @@ def test_cross_commit_duplicate_suppressed(tmp_path: Path, dupe_repo, monkeypatc
     run2 = tmp_path / "run2"; run2.mkdir()
     out2 = ST.run_stage(repo_path=root, repo=REPO, pr=5, base_rev=base, head_rev=head_c, run_dir=run2, state_dir=state, allow_embeddings=False, assess_fn=_count, edit_fn=_fake_edit)
     assert calls["n"] == 0
-    assert out2["published"] == []
+    assert len(out2["published"]) >= 1  # stage keeps it
     assert out2["pairs_cache_hits"] >= 1
-    assert any(r.get("reason") == "already_reported_on_pr" for r in out2["suppressed"])
+    # Delivery layer should suppress if prior delivered
+    from codatiel_i2.event_pipeline import _finding_hash_from_row, _filter_already_delivered
+    from codatiel_i2.event_store import Store
+    store = Store(state / "store_dup.sqlite")
+    store.meta_set("enabled_at", "2026-01-01T00:00:00Z")
+    fh = _finding_hash_from_row(out1["published"][0])
+    store.finding_delivery_record(repo="o/r", pr=5, finding_hash=fh, channel="github", head_sha=head_b, run_id="run1", outcome="posted")
+    to_deliver, already = _filter_already_delivered(store, "o/r", 5, out2["published"], "github")
+    assert len(to_deliver) == 0 and len(already) == 1
+    # Email channel not conflated
+    to_email, already_email = _filter_already_delivered(store, "o/r", 5, out2["published"], "email")
+    assert len(to_email) == 1, "github delivery must not suppress email"
 
 def test_cache_same_line_reused(tmp_path: Path, dupe_repo):
     """Same code moved to a different line: verdict reused if decision evidence is unchanged."""
@@ -449,8 +496,41 @@ def test_no_duplicate_publication_on_repeat(tmp_path: Path):
     # No duplicate review record
     assert len(store.reviews_list()) == 0
 
+def test_delivery_separate_approval_and_publication(tmp_path: Path, dupe_repo, monkeypatch):
+    """Goal 1.1: Cache verdict independent of publication; suppress only when prior delivery confirmed."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy")
+    from codatiel_i2.event_store import Store
+    from codatiel_i2.event_pipeline import _finding_hash_from_row, _filter_already_delivered
+    state = tmp_path / "state_deliver"
+    store = Store(state / "events.sqlite")
+    store.meta_set("enabled_at", "2026-01-01T00:00:00Z")
+    # Simulate finding X
+    row = {"anchors": {"target": {"path": "a.py", "sha256": "h1"}, "counterpart": {"path": "b.py", "sha256": "h2"}}}
+    fh = _finding_hash_from_row(row)
+    # Case 1: B delivered successfully → C should suppress
+    store.finding_delivery_record(repo="o/r", pr=1, finding_hash=fh, channel="github", head_sha="b"*40, run_id="runB", outcome="posted")
+    to_deliver, already = _filter_already_delivered(store, "o/r", 1, [row], "github")
+    assert len(to_deliver) == 0 and len(already) == 1
+    # Case 2: B stale before delivery (no record) → C should deliver
+    store2 = Store(state / "events2.sqlite")
+    store2.meta_set("enabled_at", "2026-01-01T00:00:00Z")
+    to_deliver2, already2 = _filter_already_delivered(store2, "o/r", 1, [row], "github")
+    assert len(to_deliver2) == 1 and len(already2) == 0
+    # Case 3: B delivery failed → C can still deliver
+    store3 = Store(state / "events3.sqlite")
+    store3.meta_set("enabled_at", "2026-01-01T00:00:00Z")
+    store3.finding_delivery_record(repo="o/r", pr=1, finding_hash=fh, channel="github", head_sha="b"*40, run_id="runB", outcome="failed")
+    to_deliver3, already3 = _filter_already_delivered(store3, "o/r", 1, [row], "github")
+    assert len(to_deliver3) == 1, "failed delivery should not suppress"
+    # Case 4: GitHub and email not conflated
+    store4 = Store(state / "events4.sqlite")
+    store4.meta_set("enabled_at", "2026-01-01T00:00:00Z")
+    store4.finding_delivery_record(repo="o/r", pr=1, finding_hash=fh, channel="github", head_sha="b"*40, run_id="runB", outcome="posted")
+    to_github, _ = _filter_already_delivered(store4, "o/r", 1, [row], "github")
+    to_email, _ = _filter_already_delivered(store4, "o/r", 1, [row], "email")
+    assert len(to_github) == 0 and len(to_email) == 1, "github success must not suppress email"
+
 def test_provenance_superseded_traceable(tmp_path: Path, dupe_repo):
-    """Gate D: superseded review's cost traceable to run and stages."""
     # Use real pipeline with is_stale flipping to create superseded delivery with provenance
     import codatiel_i2.event_pipeline as EP
     state = tmp_path / "estate"

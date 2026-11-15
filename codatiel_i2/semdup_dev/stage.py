@@ -457,13 +457,12 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         return outcome
     # Merge reused verdicts (prior paid work, $0 this run) with fresh
     # judgments. No numerical cap: every Luna-approved pair publishes
-    # for same-revision continuation; cross-revision cache hits that
-    # were previously published are suppressed as already reported on
-    # this PR (COST-01B duplicate suppression).
+    # for same-revision continuation; cross-revision cache hits are
+    # kept as published here — delivery-layer (event_pipeline) will
+    # suppress only when prior delivery is confirmed (COST-01B 1.1).
     new_rows = [r for r in judged.get("pairs", []) if isinstance(r, dict)]
     published = list(judged.get("published", []))
     suppressed = list(judged.get("suppressed", []))
-    # Continuation: same base/head rerun — republish as before
     for r in continuation_reused:
         if not isinstance(r, dict):
             continue
@@ -471,17 +470,11 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             published.append(ES._public_row(r))
         else:
             suppressed.append(ES._suppressed_row(r))
-    # Cross-revision cache: suppress duplicates across commits
     for r in cache_hits:
         if not isinstance(r, dict):
             continue
         if r.get("path") == "published":
-            row_sup = ES._suppressed_row(r)
-            row_sup = dict(row_sup)
-            row_sup["reason"] = "already_reported_on_pr"
-            row_sup["detail"] = "reused verdict already reported on this PR; suppressed as duplicate across commits"
-            row_sup["reused"] = True
-            suppressed.append(row_sup)
+            published.append(ES._public_row(r))
         else:
             suppressed.append(ES._suppressed_row(r))
     # Mirror consolidation: when both directions of the same unordered
