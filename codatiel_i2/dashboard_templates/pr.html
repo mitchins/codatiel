@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block body %}
+<p><a href="{{ d["github_url"] }}">{{ d["repo"] }}#{{ d["pr"] }} on GitHub</a></p>
+{% if not d.get("available") %}<p class="warn">{{ d.get("reason", "store unavailable") }}</p>{% endif %}
+{% set cp = d.get("checkpoint") %}
+<h2>Checkpoint</h2>
+{% if cp %}
+<table>
+<tr><th>Status</th><td><span class="chip {{ cp["status"] }}">{{ cp["status"] }}</span></td></tr>
+<tr><th>Reviewed head</th><td>{{ cp.get("last_reviewed_head_short") or "—" }}</td></tr>
+<tr><th>Reviewed base</th><td>{{ cp.get("last_reviewed_base_short") or "—" }}</td></tr>
+<tr><th>Last cost USD</th><td>{{ cp.get("last_cost_usd") if cp.get("last_cost_usd") is not none else ("unknown" if cp.get("cost_unknown") else "—") }}</td></tr>
+<tr><th>Note</th><td>{{ cp.get("note") or "—" }}</td></tr>
+</table>
+{% else %}<p class="note">No checkpoint recorded for this PR.</p>{% endif %}
+<h2>Findings: generated vs delivered vs suppressed</h2>
+{% set g = d.get("generated_vs_delivered") or {} %}
+<table>
+<tr><th>Terra findings (all reviews)</th><td>{{ g.get("terra_findings") }}</td></tr>
+<tr><th>Semdup published</th><td>{{ g.get("semdup_published") }}</td></tr>
+<tr><th>Semdup suppressed</th><td>{{ g.get("semdup_suppressed") }}</td></tr>
+<tr><th>Generated total</th><td>{{ g.get("generated_total") }}</td></tr>
+<tr><th>Finding receipts posted</th><td>{{ g.get("finding_deliveries_posted") }}</td></tr>
+<tr><th>Publications posted</th><td>{{ g.get("publications_posted") }}</td></tr>
+<tr><th>Suppressed as previously delivered</th><td>{{ g.get("suppressed_as_previously_delivered") }}</td></tr>
+</table>
+<p class="note">Generated counts internal approvals; posted counts successful channel
+deliveries; previously-delivered suppressions are never counted as delivered.</p>
+<h2>Review history</h2>
+{% if d.get("reviews") %}
+<table><tr><th>Kind</th><th>Pipeline</th><th>Status</th><th>Cost USD</th><th>Terra</th><th>Luna+</th></tr>
+{% for r in d["reviews"] %}<tr><td>{{ r["kind"] }}</td><td>{{ r["pipeline"] }}</td>
+<td><span class="chip {{ r["state"] }}">{{ r["status"] }}</span></td>
+<td>{{ r["cost_usd"] if r["cost_usd"] is not none else ("unknown" if r["cost_unknown"] else "—") }}</td>
+<td>{{ r["terra_findings"] }}</td><td>{{ r["luna_added"] }}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">No reviews recorded.</p>{% endif %}
+<h2>Delivery history</h2>
+{% if d.get("deliveries") %}
+<table><tr><th>Decision</th><th>Reason</th><th>Cost</th><th>Cache reuse</th></tr>
+{% for x in d["deliveries"] %}<tr><td><span class="chip {{ x["state"] }}">{{ x["decision"] }}</span></td>
+<td>{{ (x["reason"] or "")[:200] }}</td>
+<td>{{ x["cost_usd"] if x["cost_usd"] is not none else "—" }}</td>
+<td>{% set c = x.get("cache_reuse") or {} %}{% if c.get("pairs_examined") is not none %}examined {{ c["pairs_examined"] }}, reused {{ c.get("pairs_reused") }}, cache hits {{ c.get("pairs_cache_hits") }} ({{ c.get("semdup_status") }}){% else %}—{% endif %}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">No deliveries recorded.</p>{% endif %}
+<h2>Publications (GitHub comments)</h2>
+{% if d.get("publications") %}
+<table><tr><th>Head</th><th>Outcome</th><th>Reason</th></tr>
+{% for p in d["publications"] %}<tr><td>{{ p.get("head_sha", "")[:12] }}</td>
+<td><span class="chip {{ "completed" if p["outcome"] == "posted" else "failed" }}">{{ p["outcome"] }}</span></td>
+<td>{{ (p["reason"] or "")[:160] }}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">No publication attempts recorded.</p>{% endif %}
+{% endblock %}

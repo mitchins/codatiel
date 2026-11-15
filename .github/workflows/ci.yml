@@ -20,8 +20,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install package with test and SDK extras
-        run: pip install -e ".[test,sdk]"
+      - name: Install package with test, SDK and dashboard extras
+        run: pip install -e ".[test,sdk,dashboard]"
       - name: Compile check
         run: python -m compileall -q codatiel_i2 eval tests
       - name: Shareable product tests (synthetic repos only; no network, no credentials)

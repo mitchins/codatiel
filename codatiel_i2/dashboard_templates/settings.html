@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block body %}
+{% if saved %}<p class="ok">Settings saved and audit-logged.</p>{% endif %}
+{% for err in errors %}<p class="err">{{ err }}</p>{% endfor %}
+<p>Source: <strong>{{ d.get("operator_source") }}</strong>
+(absent = worker uses env configuration only).</p>
+<form method="post" action="/settings">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<label>monthly_budget_usd (USD; empty = env default)
+<input type="text" name="monthly_budget_usd" value="{{ vals["monthly_budget_usd"] }}"></label>
+<label>daily_budget_usd (USD; empty = no daily budget)
+<input type="text" name="daily_budget_usd" value="{{ vals["daily_budget_usd"] }}"></label>
+<label>per_pr_breaker_usd (USD; empty = env default)
+<input type="text" name="per_pr_breaker_usd" value="{{ vals["per_pr_breaker_usd"] }}"></label>
+<label>alert warn_frac (0, 1]
+<input type="text" name="warn_frac" value="{{ vals["warn_frac"] }}"></label>
+<label>alert critical_frac (0, 1], above warn
+<input type="text" name="critical_frac" value="{{ vals["critical_frac"] }}"></label>
+<label><input type="checkbox" name="pause_reviews"{% if (d.get("settings") or {}).get("pause_reviews") %} checked{% endif %}> pause_reviews</label>
+<label><input type="checkbox" name="pause_github_comments"{% if (d.get("settings") or {}).get("pause_github_comments", True) %} checked{% endif %}> pause_github_comments</label>
+<label><input type="checkbox" name="email_enabled"{% if (d.get("settings") or {}).get("email_enabled", True) %} checked{% endif %}> email_enabled</label>
+<label><input type="checkbox" name="email_on_complete"{% if (d.get("settings") or {}).get("email_on_complete", True) %} checked{% endif %}> email_on_complete</label>
+<label>notify_to (comma-separated; empty = env recipients)
+<input type="text" name="notify_to" value="{{ vals["notify_to"] }}"></label>
+<label>notify_sender (empty = env sender)
+<input type="text" name="notify_sender" value="{{ vals["notify_sender"] }}"></label>
+<label>model_profile (fixed choices only — cannot bypass spend/review contracts)
+<select name="model_profile">{% for c in [""] + profiles %}<option value="{{ c }}"{% if c == vals["model_profile"] %} selected{% endif %}>{{ c or "env default" }}</option>{% endfor %}</select></label>
+<label>repos — one <code>owner/repo</code> per line; append <code>=off</code>
+to disable a repo without removing it (empty = no file constraint, env allowlist stands)
+<textarea name="repos" rows="6">{{ vals["repos"] }}</textarea></label>
+<label>openai_project_limit_usd (DISPLAY ONLY — never fetched, never enforced)
+<input type="text" name="openai_project_limit_usd" value="{{ vals["openai_project_limit_usd"] }}"></label>
+<label>openai_billing_url
+<input type="text" name="openai_billing_url" value="{{ vals["openai_billing_url"] }}"></label>
+<label>actor (audit identity)
+<input type="text" name="actor" value="dashboard"></label>
+<input type="submit" value="Save settings">
+</form>
+<h2>Effective resolution (env vs file → effective)</h2>
+{% set eff = d.get("effective", {}) %}
+{% if eff.get("available") %}
+<table>
+<tr><th>Monthly cap effective USD</th><td>{{ eff.get("monthly_effective_usd") }}</td></tr>
+<tr><th>Daily cap effective USD</th><td>{{ eff.get("daily_effective_usd") }}</td></tr>
+<tr><th>Per-PR breaker effective USD</th><td>{{ eff.get("per_pr_effective_usd") }}</td></tr>
+<tr><th>Pipeline</th><td>{{ eff.get("pipeline") }}</td></tr>
+<tr><th>Effective repos</th><td>{{ (eff.get("repos") or []) | join(", ") }}</td></tr>
+</table>
+{% else %}<p class="note">{{ eff.get("note", "") }}</p>{% endif %}
+<h2>Env config (values shown; secrets never read)</h2>
+<table>{% for k, v in ((d.get("env") or {}) | dictsort) %}<tr><th>{{ k }}</th><td>{{ v.get("display") }}</td></tr>{% endfor %}</table>
+<h2>Audit trail (most recent first)</h2>
+{% if d.get("audit") %}
+<table><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr>
+{% for a in d["audit"][:20] %}<tr><td>{{ a.get("ts") }}</td><td>{{ a.get("actor") }}</td>
+<td>{{ a.get("action") }}</td><td><pre>{{ a.get("changes", a.get("errors", "")) | tojson }}</pre></td></tr>{% endfor %}</table>
+{% else %}<p>No audit entries yet.</p>{% endif %}
+{% endblock %}

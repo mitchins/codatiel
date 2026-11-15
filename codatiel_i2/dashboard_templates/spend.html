@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block body %}
+{% if not d.get("available") %}<p class="warn">{{ d.get("reason", "store unavailable") }}</p>{% endif %}
+<p class="note">{{ ledger_label }} Daily budget periods reset at 00:00 UTC; caps shown are the
+effective Codatiel limits, not monthly billing unless stated.</p>
+<form method="get" action="/spend"><label>Days
+<select name="days">{% for n in [7, 30, 90] %}<option value="{{ n }}"{% if n == days %} selected{% endif %}>{{ n }}</option>{% endfor %}
+</select></label> <input type="submit" value="Apply"></form>
+<h2>Totals (authoritative ledger)</h2>
+{% set l = d.get("ledger") or {} %}
+<table>
+<tr><th>Settled USD</th><td>{{ l.get("settled_usd") }}</td></tr>
+<tr><th>Reserved USD</th><td>{{ l.get("reserved_usd") }}</td></tr>
+<tr><th>Unknown-cost holds</th><td>{{ l.get("unknown_holds") }}</td></tr>
+</table>
+<h2>Daily ledger (last {{ days }} days)</h2>
+{% if d.get("daily") %}
+<table><tr><th>Day (UTC)</th><th>Ledger USD</th><th>Reviews</th><th>Unknown-cost</th><th>Superseded USD</th></tr>
+{% for row in d["daily"] %}{% if row.get("error") %}<tr><td>{{ row.get("day") }}</td><td colspan="4">unreadable: {{ row.get("error") }}</td></tr>
+{% else %}<tr><td>{{ row.get("day") }}</td><td>{{ row.get("codatiel_ledger_usd") }}</td>
+<td>{{ row.get("reviews") }}</td><td>{{ row.get("unknown_cost_reviews") }}</td>
+<td>{{ row.get("superseded_inference_usd") }}</td></tr>{% endif %}{% endfor %}</table>
+{% endif %}
+<h2>By repository</h2>
+{% if d.get("by_repo") %}
+<table><tr><th>Repo</th><th>Reviews</th><th>Known USD</th><th>Unknown-cost</th></tr>
+{% for r in d["by_repo"] %}<tr><td>{{ r["repo"] }}</td><td>{{ r["reviews"] }}</td>
+<td>{{ r["known_usd"] }}</td><td>{{ r["unknown_cost_reviews"] }}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">No review spend recorded.</p>{% endif %}
+<h2>By PR</h2>
+{% if d.get("by_pr") %}
+<table><tr><th>PR</th><th>Reviews</th><th>Known USD</th><th>Unknown-cost</th></tr>
+{% for r in d["by_pr"] %}<tr><td><a href="/pr/{{ r["repo"] }}/{{ r["pr"] }}">{{ r["repo"] }}#{{ r["pr"] }}</a></td>
+<td>{{ r["reviews"] }}</td><td>{{ r["known_usd"] }}</td><td>{{ r["unknown_cost_reviews"] }}</td></tr>{% endfor %}</table>
+{% endif %}
+<h2>Stage memo (informational — not additive)</h2>
+{% set m = d.get("stage_memo") or {} %}
+{% if m.get("available") %}
+<table>
+<tr><th>Terra stage USD</th><td>{{ m.get("terra_usd") }}</td></tr>
+<tr><th>Luna stage USD</th><td>{{ m.get("luna_usd") }}</td></tr>
+<tr><th>Semdup Terra USD</th><td>{{ m.get("semdup_terra_usd") }}</td></tr>
+<tr><th>Semdup Luna USD</th><td>{{ m.get("semdup_luna_usd") }}</td></tr>
+<tr><th>Semdup total USD</th><td>{{ m.get("semdup_usd") }}</td></tr>
+<tr><th>Unknown components</th><td>{{ m.get("unknown_components") }}</td></tr>
+</table>
+<p class="note">{{ m.get("note") }}</p>
+{% else %}<p class="note">{{ m.get("reason", "unavailable") }}.</p>{% endif %}
+<h2>Superseded inference</h2>
+{% set s = d.get("superseded") or {} %}
+<table><tr><th>Superseded runs</th><td>{{ s.get("count") }}</td></tr>
+<tr><th>Known USD</th><td>{{ s.get("known_usd") }}</td></tr>
+<tr><th>Unknown</th><td>{{ s.get("unknown") }}</td></tr></table>
+<p class="note">{{ s.get("note") }}</p>
+<h2>Unknown cost</h2>
+{% set u = d.get("unknown") or {} %}
+<table><tr><th>Reviews with unknown cost</th><td>{{ u.get("reviews") if u.get("reviews") is not none else "Unavailable" }}</td></tr>
+<tr><th>Superseded with unknown cost</th><td>{{ u.get("superseded") if u.get("superseded") is not none else "Unavailable" }}</td></tr></table>
+<p class="note">{{ u.get("note") }}</p>
+<h2>Applicable ceilings</h2>
+{% set eff = d.get("effective") or {} %}
+{% if eff.get("available") %}
+<table>
+<tr><th>Monthly cap (effective)</th><td>{{ eff.get("monthly_effective_usd") }}</td></tr>
+<tr><th>Daily budget (effective)</th><td>{{ eff.get("daily_effective_usd") if eff.get("daily_effective_usd") is not none else "unset" }}</td></tr>
+<tr><th>Per-PR breaker (effective)</th><td>{{ eff.get("per_pr_effective_usd") if eff.get("per_pr_effective_usd") is not none else "—" }}</td></tr>
+<tr><th>Per-review reserve</th><td>{{ eff.get("reserve_usd") }}</td></tr>
+</table>
+{% else %}<p class="note">{{ eff.get("note", "unavailable") }}.</p>{% endif %}
+{% endblock %}
