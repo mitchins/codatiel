@@ -1800,12 +1800,9 @@ def gate_ack(*, store: store_mod.Store, ev: dict, row: dict | None,
     goes through the usual checkpoint guard in request_ack.
     """
     try:
-        stored, _, _ = _original_outcome(row)
-        if stored in ACK_DECISION_STATE and stored != gate.get("decision"):
-            _reconcile_ack_on_replay(store, ev, row, ack_gh=ack_gh)
-            return {"outcome": "reconciled-stored", "decision": stored,
-                    "repo": ev.get("repo") or "", "pr": ev.get("pr_number"),
-                    "head_sha": ev.get("head_sha") or ""}
+        hit = _reconcile_stored_row(store, ev, row, gate, ack_gh=ack_gh)
+        if hit is not None:
+            return hit
         if _reconcile_cross_delivery(store, ev, ack_gh=ack_gh):
             return {"outcome": "reconciled-stored",
                     "decision": "completed",
@@ -1827,6 +1824,26 @@ def gate_ack(*, store: store_mod.Store, ev: dict, row: dict | None,
         return {"outcome": "error",
                 "reason": f"{type(exc).__name__}: {exc}"[:300],
                 "repo": ev.get("repo") or ""}
+
+
+def _reconcile_stored_row(store: store_mod.Store, ev: dict,
+                            row: dict | None, gate: dict,
+                            ack_gh: Any = None) -> dict | None:
+    """Reconcile the stored row's own terminal outcome, if it differs
+    from the gate refusal. Returns the outcome dict, or None when the
+    deferred path should proceed. Never raises."""
+    try:
+        stored, _, _ = _original_outcome(row)
+    except Exception:
+        return None
+    if stored not in ACK_DECISION_STATE:
+        return None
+    if stored == gate.get("decision"):
+        return None
+    _reconcile_ack_on_replay(store, ev, row, ack_gh=ack_gh)
+    return {"outcome": "reconciled-stored", "decision": stored,
+            "repo": ev.get("repo") or "", "pr": ev.get("pr_number"),
+            "head_sha": ev.get("head_sha") or ""}
 
 
 def _reconcile_cross_delivery(store: store_mod.Store, ev: dict,
