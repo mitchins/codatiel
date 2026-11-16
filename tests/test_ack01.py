@@ -62,6 +62,8 @@ class FakeGH:
             self.comments.append(comment)
             return comment
         if path == "PATCH":
+            if getattr(self, "fail_patch", False):
+                raise RuntimeError("comment patch failed (boom)")
             _, repo, cid, body = (path,) + tuple(args)
             for c in self.comments:
                 if str(c.get("id")) == str(cid):
@@ -152,7 +154,7 @@ def test_queued_posts_then_reconciles_current(store):
 
 def test_reviewed_never_shown_before_completion(store):
     gh = FakeGH()
-    for state in ("queued", "deferred", "in_progress"):
+    for state in ("deferred", "queued", "in_progress"):
         out = _sync(store, gh, C40, state, detail="x")
         assert out["outcome"] in ("posted", "updated")
     body = gh.comments[0]["body"]
@@ -165,6 +167,7 @@ def test_reviewed_never_shown_before_completion(store):
 def test_head_change_patches_and_keeps_history(store):
     gh = FakeGH()
     assert _sync(store, gh, C40, "queued")["outcome"] == "posted"
+    gh.head = D40  # live head moves with the claim, as in production
     out = _sync(store, gh, D40, "in_progress", detail="run.")
     assert out["outcome"] == "updated"
     assert len(gh.posts) == 1 and len(gh.patches) == 1
@@ -397,17 +400,140 @@ def test_pipeline_failed_requests_failed_ack(tmp_path, monkeypatch,
     store.close()
 
 
-def test_pipeline_replay_is_silent(tmp_path, monkeypatch, gitroot):
+def test_pipeline_replay_reconciles_without_rewrite(tmp_path, monkeypatch,
+                                                  gitroot):
     root, a, b = gitroot
     cfg, store = _cfg_store(tmp_path, monkeypatch, root)
-    calls = []
-    monkeypatch.setattr(P, "request_ack",
-                        lambda **kw: calls.append(kw) or {"outcome": "ok"})
-    first = P.process_event(cfg=cfg, store=store, ev=_ev(b, a, draft=True))
+    gh = FakeGH()
+    store.meta_set(C.ARMED_META_KEY, "1.0")
+    first = P.process_event(cfg=cfg, store=store, ev=_ev(b, a, draft=True),
+                            ack_gh=gh)
     assert first["decision"] == "skipped:draft"
-    n = len(calls)
-    assert n >= 1
-    second = P.process_event(cfg=cfg, store=store, ev=_ev(b, a, draft=True))
+    assert len(gh.posts) == 1
+    second = P.process_event(cfg=cfg, store=store, ev=_ev(b, a, draft=True),
+                             ack_gh=gh)
     assert second["decision"] == "skipped:replay"
-    assert len(calls) == n, "replays must not re-acknowledge"
+    assert len(gh.posts) == 1 and gh.patches == [], \
+        "replays reconcile reads only; never rewrite, never duplicate"
     store.close()
+
+
+# -- ACK-01 follow-up: no-regression rule ----------------------------------
+# One consistent rule: acknowledgement state must never regress for the
+# same head, and an obsolete head must never replace the live head's
+# status. Failing-first regression tests for the four review findings.
+
+def _seed_completed(store, gh, head):
+    out = _sync(store, gh, head, "in_progress", detail="run.")
+    assert out["outcome"] == "posted"
+    out = _sync(store, gh, head, "completed",
+                findings_comment_id="6904971847")
+    assert out["outcome"] == "updated"
+    return gh.comments[0]["body"]
+
+
+def test_deferred_never_regresses_completed_head(store):
+    """Finding 1: a gate deferral for a completed head must not replace
+    its completed status (or drop the findings link)."""
+    gh = FakeGH()
+    _seed_completed(store, gh, C40)
+    before = gh.comments[0]["body"]
+    out = _sync(store, gh, C40, "deferred", detail="budget.")
+    assert out["outcome"] == "already-current"
+    assert len(gh.patches) == 1, "only the seed's completion PATCH"
+    assert gh.comments[0]["body"] == before
+    assert "#issuecomment-6904971847" in gh.comments[0]["body"]
+
+
+def test_deferred_never_regresses_in_progress_head(store):
+    gh = FakeGH()
+    first = _sync(store, gh, C40, "in_progress", detail="run.")
+    assert first["outcome"] == "posted"
+    out = _sync(store, gh, C40, "deferred", detail="budget.")
+    assert out["outcome"] == "already-current"
+    assert gh.patches == []
+    assert C40[:12] in gh.comments[0]["body"]
+
+
+def test_replay_retries_failed_terminal_ack_without_inference(
+        tmp_path, monkeypatch, gitroot):
+    """Finding 2: a failed completed-PATCH must be retried from the
+    stored terminal outcome when the delivery replays — no inference."""
+    import json
+    from codatiel_i2 import runtime_sdk
+    root, a, b = gitroot
+    cfg, store = _cfg_store(tmp_path, monkeypatch, root)
+    inferences = []
+
+    def _mk_factory(*args, **kwargs):
+        inferences.append(1)
+        text = json.dumps({"status": "silence", "summary": "ok",
+                           "findings": []})
+
+        def _mk(role: str):
+            script = [runtime_sdk.scripted_tool_call(
+                call_id="t1", name="read_file",
+                arguments={"path": "app.py", "revision": "head",
+                           "start_line": 1, "end_line": 0},
+                response_id="r1"),
+                runtime_sdk.scripted_final(text, response_id="f1")]
+            return runtime_sdk.ScriptedModel(script), "scripted:t"
+        return {"model_factory": _mk}
+
+    real_run = P.run_review_for_range
+
+    def _spy(*args, **kwargs):
+        kwargs.update(_mk_factory())
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(P, "run_review_for_range", _spy)
+    gh = FakeGH(head=b, base=a)
+    gh.fail_patch = True
+    store.meta_set(C.ARMED_META_KEY, "1.0")
+    first = P.process_event(cfg=cfg, store=store, ev=_ev(b, a, did="d-flaky"),
+                            ack_gh=gh)
+    assert first["decision"] == "completed"
+    assert inferences == [1]
+    assert gh.posts and not gh.patches, "completed PATCH must have failed"
+    gh.fail_patch = False  # transport recovers; delivery will replay
+    second = P.process_event(cfg=cfg, store=store,
+                             ev=_ev(b, a, did="d-flaky"), ack_gh=gh)
+    assert second["decision"] == "skipped:replay"
+    assert inferences == [1], "replay must not repeat inference"
+    assert len(gh.patches) == 1, "stored outcome must retry the PATCH"
+    assert "reviewed" in gh.comments[0]["body"]
+    store.close()
+
+
+def test_repeated_sync_after_head_change_is_stable(store):
+    """Finding 3: re-rendering after a head change must not accumulate
+    punctuation or PATCH when state is unchanged."""
+    gh = FakeGH()
+    assert _sync(store, gh, C40, "queued")["outcome"] == "posted"
+    gh.head = D40  # live head moves with the claim, as in production
+    assert _sync(store, gh, D40, "in_progress",
+                 detail="run.")["outcome"] == "updated"
+    assert len(gh.patches) == 1
+    again = _sync(store, gh, D40, "in_progress", detail="run.")
+    assert again["outcome"] == "already-current"
+    assert len(gh.patches) == 1, "no punctuation drift, no extra PATCH"
+    third = _sync(store, gh, D40, "in_progress", detail="run.")
+    assert third["outcome"] == "already-current"
+    assert len(gh.patches) == 1
+
+
+def test_stale_head_never_replaces_live_status(store):
+    """Finding 4: a superseded event for an older head must keep the
+    live head current and record the older head in history."""
+    gh = FakeGH(head=D40, base=A40)
+    _seed_completed(store, gh, D40)
+    live_body = gh.comments[0]["body"]
+    assert D40[:12] in live_body
+    out = _sync(store, gh, C40, "superseded", live_head=D40,
+                detail="partial cost recorded.")
+    body = gh.comments[0]["body"]
+    assert D40[:12] in body.split("### Previous heads")[0], \
+        "live head must stay current"
+    assert C40[:12] in body.split("### Previous heads")[1], \
+        "obsolete head recorded in history"
+    assert out["outcome"] == "updated"

@@ -1580,8 +1580,12 @@ def cmd_events(args) -> dict:
                     cost_usd=0.0, detail={"operator_gate": True},
                     now=cfg.clock())
                 # CODATIEL-ACK-01: the synchronous poller acknowledges
-                # deferred heads every tick even while a review runs —
-                # discovery is fast and never waits on inference.
+                # deferred heads on ticks when the worker is between
+                # reviews. Ticks serialize fully under the cron flock
+                # (inference holds it), so while a review runs no tick —
+                # and no deferred ack — fires; the first tick after the
+                # worker frees emits it. Only the in-progress ack is
+                # truly pre-inference.
                 if ev.get("pr_number") and gate["decision"] in (
                         "skipped:paused", "skipped:ceiling"):
                     pipe_mod.request_ack(

@@ -1245,9 +1245,16 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                     # us): fall back to replay, never process as new
                     # work. The replay mark cannot overwrite the
                     # winner's active claim.
+                    _reconcile_ack_on_replay(
+                        store, ev, prior, ack_gh=ev.get("_ack_gh"))
                     return store.delivery_mark_replay(
                         ev["delivery_id"], prior)
             else:
+                # CODATIEL-ACK-01: a replayed terminal delivery retries
+                # its acknowledgement from the stored outcome (a failed
+                # PATCH converges here). No inference, no state change.
+                _reconcile_ack_on_replay(
+                    store, ev, prior, ack_gh=ev.get("_ack_gh"))
                 return store.delivery_mark_replay(ev["delivery_id"], prior)
     if prior is None:
         _record(store, ev, "in_progress", "claimed", None, now=now)
@@ -1751,6 +1758,36 @@ def request_ack(*, store: store_mod.Store, repo: str, pr: int,
         return {"outcome": "error",
                 "reason": f"{type(exc).__name__}: {exc}"[:300],
                 "repo": repo, "pr": pr, "head_sha": head}
+
+
+def _reconcile_ack_on_replay(store: store_mod.Store, ev: dict,
+                               prior: dict | None,
+                               ack_gh: Any = None) -> None:
+    """Retry a terminal acknowledgement from the stored delivery row.
+
+    Replays carry no inference and change no review state; they only
+    re-render the stored terminal outcome through the ack path, so a
+    PATCH that failed after the decision was stored converges on the
+    next duplicate delivery. Never raises.
+    """
+    try:
+        prior = prior or {}
+        decision = str(prior.get("decision") or "")
+        if decision not in ACK_DECISION_STATE:
+            return
+        raw_detail = prior.get("detail") or {}
+        if isinstance(raw_detail, str):
+            try:
+                detail = json.loads(raw_detail)
+            except ValueError:
+                detail = {}
+        else:
+            detail = raw_detail if isinstance(raw_detail, dict) else {}
+        _ack_for_terminal(store, ev, decision,
+                          str(prior.get("reason") or ""), detail,
+                          ack_gh=ack_gh, live_head="")
+    except Exception:
+        pass
 
 
 def _ack_for_terminal(store: store_mod.Store, ev: dict, decision: str,
