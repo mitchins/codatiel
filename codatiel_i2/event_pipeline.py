@@ -877,20 +877,14 @@ def _prior_retry_attempts(prior: dict) -> int:
         return 0
 
 
-def _ceiling_original_decision(prior: dict) -> str | None:
+def _ceiling_original_decision(prior: dict | None) -> str | None:
     """The refusal a delivery row records, unwrapping replay wrappers.
 
     Returns "skipped:ceiling" only for a pure ceiling refusal, either
     directly or via a skipped:replay wrapper preserving it as the
     original decision; None for every other shape.
     """
-    dec = str(prior.get("decision") or "")
-    if dec == "skipped:replay":
-        try:
-            detail = json.loads(prior.get("detail") or "{}")
-        except Exception:
-            return None
-        dec = str(detail.get("original_decision") or "")
+    dec, _, _ = _original_outcome(prior)
     return dec if dec == "skipped:ceiling" else None
 
 

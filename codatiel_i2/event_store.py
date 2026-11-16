@@ -135,6 +135,18 @@ class StoreError(RuntimeError):
     """Any persistence problem: caller must refuse/stop, never default."""
 
 
+_DELIVERY_KEYS = ("delivery_id", "received_ts", "event_type", "action",
+                  "repo", "pr", "head_sha", "decision", "reason",
+                  "cost_usd", "detail")
+
+
+def _delivery_row(row: Any) -> dict | None:
+    """Delivery row tuple to dict; None stays None."""
+    if not row:
+        return None
+    return dict(zip(_DELIVERY_KEYS, row))
+
+
 class Store:
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -218,12 +230,7 @@ class Store:
                 (delivery_id,)).fetchone()
         except Exception as exc:
             raise StoreError(f"delivery read failed: {exc}")
-        if not row:
-            return None
-        keys = ("delivery_id", "received_ts", "event_type", "action",
-                "repo", "pr", "head_sha", "decision", "reason",
-                "cost_usd", "detail")
-        return dict(zip(keys, row))
+        return _delivery_row(row)
 
     def delivery_get_completed(self, repo: str, pr: int,
                                head_sha: str) -> dict | None:
@@ -232,9 +239,6 @@ class Store:
         Supports acknowledgement repair when the completed outcome
         lives under a different delivery ID than the gated event.
         """
-        keys = ("delivery_id", "received_ts", "event_type", "action",
-                "repo", "pr", "head_sha", "decision", "reason",
-                "cost_usd", "detail")
         try:
             row = self.cx.execute(
                 "SELECT delivery_id, received_ts, event_type, action,"
@@ -245,9 +249,7 @@ class Store:
                 (repo, int(pr), head_sha)).fetchone()
         except Exception as exc:
             raise StoreError(f"completed delivery read failed: {exc}")
-        if not row:
-            return None
-        return dict(zip(keys, row))
+        return _delivery_row(row)
 
     def delivery_record(self, *, delivery_id: str, event_type: str,
                         action: str, repo: str, pr: int, head_sha: str,
