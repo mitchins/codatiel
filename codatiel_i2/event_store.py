@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS reviews (
     finished_ts REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_reviews_repo_pr ON reviews(repo, pr);
+CREATE INDEX IF NOT EXISTS idx_deliveries_repo_pr_head
+    ON deliveries(repo, pr, head_sha);
 CREATE TABLE IF NOT EXISTS publications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     repo TEXT NOT NULL,
@@ -221,6 +223,30 @@ class Store:
         keys = ("delivery_id", "received_ts", "event_type", "action",
                 "repo", "pr", "head_sha", "decision", "reason",
                 "cost_usd", "detail")
+        return dict(zip(keys, row))
+
+    def delivery_get_completed(self, repo: str, pr: int,
+                               head_sha: str) -> dict | None:
+        """Latest completed delivery for (repo, PR, head), if any.
+
+        Supports acknowledgement repair when the completed outcome
+        lives under a different delivery ID than the gated event.
+        """
+        keys = ("delivery_id", "received_ts", "event_type", "action",
+                "repo", "pr", "head_sha", "decision", "reason",
+                "cost_usd", "detail")
+        try:
+            row = self.cx.execute(
+                "SELECT delivery_id, received_ts, event_type, action,"
+                " repo, pr, head_sha, decision, reason, cost_usd, detail"
+                " FROM deliveries WHERE repo=? AND pr=?"
+                " AND head_sha=? AND decision='completed'"
+                " ORDER BY rowid DESC LIMIT 1",
+                (repo, int(pr), head_sha)).fetchone()
+        except Exception as exc:
+            raise StoreError(f"completed delivery read failed: {exc}")
+        if not row:
+            return None
         return dict(zip(keys, row))
 
     def delivery_record(self, *, delivery_id: str, event_type: str,
