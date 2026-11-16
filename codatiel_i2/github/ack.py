@@ -50,6 +50,7 @@ pass fakes; production shells out to the gh CLI.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from typing import Any, Callable
@@ -239,8 +240,46 @@ def parse_ack_body(body: str) -> dict | None:
             "live_head": live}
 
 
+def _enrich_history(store: Any, repo: str, pr: int,
+                    history: tuple[tuple[str, str, str], ...]
+                    ) -> tuple[tuple[str, str, str], ...]:
+    """Upgrade history entries whose heads completed in the store.
+
+    A head recorded as deferred/queued/superseded/failed that later
+    completed (findings published) renders as completed with its
+    findings link. Lookups are local indexed reads; any failure keeps
+    the original entry. Never raises.
+    """
+    out: list[tuple[str, str, str]] = []
+    for h, s, d in history:
+        if s == "completed":
+            out.append((h, s, d))
+            continue
+        try:
+            row = store.delivery_get_completed(repo, int(pr), h)
+        except Exception:
+            row = None
+        if row is None:
+            out.append((h, s, d))
+            continue
+        try:
+            detail = json.loads(row.get("detail") or "{}")
+            run_id = str(detail.get("run_id") or "")
+            pub = store.publication_get(
+                repo, int(pr), str(row.get("head_sha") or ""), run_id) \
+                if run_id else None
+            cid = str((pub or {}).get("comment_id") or "")
+        except Exception:
+            cid = ""
+        link = (f"[published findings](https://github.com/{repo}"
+                f"/pull/{pr}#issuecomment-{cid})" if cid else "")
+        out.append((str(row.get("head_sha") or h), "completed", link))
+    return tuple(out)
+
+
 def _render_keep_current(*, repo: str, pr: int, parsed: dict,
-                         extra: tuple[str, str, str]) -> str:
+                         extra: tuple[str, str, str],
+                         store: Any = None) -> str:
     """Re-render preserving the existing current head exactly (including
     its findings link), with one more head folded into history."""
     merged = list(parsed["history"]) + [extra]
@@ -251,6 +290,8 @@ def _render_keep_current(*, repo: str, pr: int, parsed: dict,
         kept.append((h, s, d))
         if len(kept) >= MAX_HISTORY:
             break
+    if store is not None:
+        kept = list(_enrich_history(store, repo, pr, tuple(kept)))
     return render_ack(
         repo=repo, pr=pr, head=parsed["head"],
         state=parsed["state"] or "queued", detail=parsed["detail"],
@@ -400,6 +441,7 @@ def _sync_ack(*, repo: str, pr: int, head: str, state: str,
     parsed = parse_ack_body(str((existing or {}).get("body") or "")) \
         if existing is not None else None
     history = _history_for(parsed, head, state, detail)
+    history = _enrich_history(store, repo, pr_int, history)
     desired = render_ack(repo=repo, pr=pr_int, head=head, state=state,
                          detail=detail,
                          findings_comment_id=findings_comment_id,
@@ -440,7 +482,7 @@ def _sync_ack(*, repo: str, pr: int, head: str, state: str,
             and _same_head(parsed["head"], live_sha):
         keep_body = _render_keep_current(
             repo=repo, pr=pr_int, parsed=parsed,
-            extra=(head, state, _strip_one_dot(detail)))
+            extra=(head, state, _strip_one_dot(detail)), store=store)
         if str(existing.get("body") or "").strip() == keep_body.strip():
             return {"outcome": "already-current",
                     "comment_id": str(existing.get("id") or ""),

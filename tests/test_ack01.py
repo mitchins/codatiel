@@ -733,3 +733,32 @@ def test_gate_finds_replay_wrapped_completion(tmp_path, monkeypatch):
     assert "reviewed" in body
     assert "#issuecomment-4242" in body
     store.close()
+
+
+def test_history_upgrades_completed_head_with_link(tmp_path, monkeypatch):
+    """A history entry for a head that completed must render as
+    completed with its findings link, not as deferred."""
+    monkeypatch.setenv(C.SWITCH_ENV, "on")
+    store = _armed_store(tmp_path)
+    _completed_row(store, did="dy", head=C40)
+    gh = FakeGH(head=D40, base=A40)
+    seed = A.render_ack(
+        repo=REPO, pr=PR, head=D40, state="deferred",
+        detail="daily budget exhausted.",
+        history=((C40[:12], "deferred", "daily budget exhausted"),))
+    gh.comments.append({"id": 4242, "body": seed})
+    out = P.request_ack(store=store, repo=REPO, pr=PR, head=D40,
+                        state="deferred", detail="daily budget exhausted.",
+                        ack_gh=gh)
+    assert out["outcome"] == "updated"
+    body = gh.comments[0]["body"]
+    assert D40[:12] in body.split("### Previous heads")[0]
+    hist = body.split("### Previous heads")[1]
+    assert C40[:12] in hist and "reviewed" in hist
+    assert "#issuecomment-4242" in hist
+    again = P.request_ack(store=store, repo=REPO, pr=PR, head=D40,
+                          state="deferred",
+                          detail="daily budget exhausted.", ack_gh=gh)
+    assert again["outcome"] == "already-current"
+    assert len(gh.patches) == 1
+    store.close()
