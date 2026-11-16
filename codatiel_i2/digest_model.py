@@ -535,6 +535,7 @@ _REASON_GLOSSARY = {
     "deterministic_drop": "a deterministic overlap check ruled it out",
     "duplicate_of_review": "the ordinary review already covers it",
     "mirror_of_published": "the same pair published in the other direction",
+    "scaffold_setup": "shared test setup/teardown skipped before inference",
     "delta pair budget exhausted": "pair budget reached before it",
     "experimental pair budget": "held back by the explicit experiment limit",
     "budget_stop": "stopped by the spending guard before inference",

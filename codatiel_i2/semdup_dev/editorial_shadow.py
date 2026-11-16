@@ -97,6 +97,161 @@ def _split_unit(ref: str) -> tuple[str, str] | None:
     return path, symbol
 
 
+# SCAFFOLD-01: deterministic pre-examination suppression of test
+# setup/teardown/fixture scaffolding. All inputs are pre-inference
+# (unit texts from the evidence package, file paths); no model
+# judgment, no shared_component, no yield signal is consulted.
+# Matched against the whitespace-collapsed (not fully stripped)
+# line, so verdict keywords keep word boundaries ("throw " never
+# matches "throws"; "assert " never matches an identifier containing
+# "assert"). Substring matching errs toward failing open.
+SCAFFOLD_ASSERT_TOKENS = (
+    "assert ", "#expect", "#require", "xctassert", "xctfail",
+    "issue.record", "pytest.raises", "require(", "expect(", "wait(",
+    "fatalerror", "precondition", "raise ", "throw ", "throw(",
+    "check(",
+)
+
+_SCAFFOLD_TRIVIAL = {"{", "}", "}", "(", ")", ",", ";"}
+
+
+def _scaffold_mask_collapsed(line: str) -> str:
+    """Skeleton form: string literals masked, whitespace collapsed.
+
+    Assertion tokens are matched against this form so keywords keep
+    word boundaries."""
+    import re as _re
+    try:
+        masked = _re.sub(r'"(?:[^"\\]|\\.)*"', '""', line)
+        masked = _re.sub(r"'(?:[^'\\]|\\.)*'", "''", masked)
+        return _re.sub(r"\s+", " ", masked).strip()
+    except Exception:
+        return ""
+
+
+def _scaffold_mask(line: str) -> str:
+    """Sharing key: collapsed skeleton with all whitespace stripped,
+    so purely stylistic spacing never splits a shared setup line."""
+    try:
+        return "".join(_scaffold_mask_collapsed(line).split())
+    except Exception:
+        return ""
+
+
+def _scaffold_trivial(masked: str) -> bool:
+    if not masked or masked in _SCAFFOLD_TRIVIAL:
+        return True
+    if len(masked) < 3 and not masked[0].isalnum():
+        return True
+    if masked.startswith("//"):
+        return True
+    if masked.startswith("#") and not masked.startswith(
+            ("#expect", "#require")):
+        return True
+    return False
+
+
+def _scaffold_is_test_path(path: str) -> bool:
+    """Positive test-only identification: existing classifier plus the
+    *-Tests directory convention (e.g. PresentationTests/)."""
+    try:
+        from pathlib import PurePosixPath as _PPP
+        from codatiel_i2.core import files as _F
+        if _F._is_test_path(_PPP(str(path or ""))):
+            return True
+    except Exception:
+        pass
+    try:
+        parts = str(path or "").split("/")
+        return any(p.lower().endswith("tests") for p in parts[:-1])
+    except Exception:
+        return False
+
+
+def scaffold_preskip_decision(target: dict,
+                              counterpart: dict) -> dict:
+    """Decide pre-examination scaffolding suppression (deterministic).
+
+    ``target``/``counterpart`` carry ``path`` and ``text`` (unit text
+    from the evidence package). Returns {"skip", "shared", "detail"}.
+    Skips only when: both units are test-only; the skeleton-shared
+    lines are non-empty and carry no assertion/verdict token; and every
+    shared line lies in the setup region (before the first assertion)
+    or teardown region (after the last assertion) of BOTH units.
+    Fails open (no skip) on any ambiguity, including unparseable
+    input — never raises.
+    """
+    no = {"skip": False, "shared": 0, "detail": ""}
+    try:
+        t = target or {}
+        c = counterpart or {}
+        if not (_scaffold_is_test_path(t.get("path"))
+                and _scaffold_is_test_path(c.get("path"))):
+            return dict(no, detail="not both test-only")
+
+        def normalized(text):
+            # (sharing key, collapsed line) pairs; sharing compares
+            # whitespace-insensitively while assertions and regions are
+            # judged on the collapsed form with word boundaries intact.
+            out = []
+            for raw in str(text or "").splitlines():
+                col = _scaffold_mask_collapsed(raw)
+                if not col or _scaffold_trivial(col):
+                    continue
+                out.append(("".join(col.split()), col))
+            return out
+
+        tnorm = normalized(t.get("text"))
+        cnorm = normalized(c.get("text"))
+        if not tnorm or not cnorm:
+            return dict(no, detail="empty unit")
+        tkeys = [k for k, _ in tnorm]
+        ckeys = [k for k, _ in cnorm]
+        shared = sorted(set(tkeys) & set(ckeys))
+        if not shared:
+            return dict(no, detail="no shared skeleton lines")
+
+        def key_asserted(lines, key):
+            # Assertion status of the collapsed line behind a key.
+            for k, col in lines:
+                if k == key and any(tok in col.lower()
+                                    for tok in SCAFFOLD_ASSERT_TOKENS):
+                    return True
+            return False
+
+        bad = [k for k in shared
+               if key_asserted(tnorm, k) or key_asserted(cnorm, k)]
+        if bad:
+            return dict(no, detail=f"shared assertions ({len(bad)})")
+
+        def regions(lines):
+            first, last = None, -1
+            for i, (_, col) in enumerate(lines):
+                if any(tok in col.lower()
+                       for tok in SCAFFOLD_ASSERT_TOKENS):
+                    if first is None:
+                        first = i
+                    last = i
+            if first is None:
+                return set(range(len(lines))), set()
+            return set(range(first)), set(range(last + 1, len(lines)))
+
+        def in_setup(lines, key):
+            idx = [i for i, (k, _) in enumerate(lines) if k == key]
+            ok = regions(lines)[0] | regions(lines)[1]
+            return bool(idx) and all(i in ok for i in idx)
+
+        if any(not in_setup(tnorm, k) for k in shared):
+            return dict(no, detail="shared outside setup/teardown (target)")
+        if any(not in_setup(cnorm, k) for k in shared):
+            return dict(no, detail="shared outside setup/teardown")
+        return {"skip": True, "shared": len(shared),
+                "detail": (f"shared test setup ({len(shared)} lines, "
+                           "no assertions); skipped before examination")}
+    except Exception:
+        return dict(no, detail="unreadable input")
+
+
 def candidate_pairs(records: list, max_pairs: int) -> tuple[list, list]:
     """Collect (target, counterpart) candidates from finding records.
 
@@ -241,7 +396,9 @@ def run_editorial(*, cfg, repo_path: Path, merged_db: Path,
         "pairs": [], "published": [], "suppressed": [],
         "skipped": [], "spend_usd": 0.0, "wall_s": 0.0,
         "mirror_skipped": 0, "mirror_saved_usd_est": None,
-        "mirror_saved_wall_s_est": None,
+        "mirror_saved_wall_s_est": None, "scaffold_skipped": 0,
+        "scaffold_saved_usd_est": None,
+        "scaffold_saved_wall_s_est": None,
     }
     try:
         return _run(cfg=cfg, repo_path=repo_path, merged_db=merged_db,
@@ -363,39 +520,57 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
         outcome["spend_usd"] = round(spent_t + spent_l, 6)
     outcome["spend_unknown"] = spent_t is None or spent_l is None
     _record_mirror_savings(outcome, spent_t, spent_l, t0)
+    _record_scaffold_savings(outcome, spent_t, spent_l, t0)
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     return outcome
 
 
 def _record_mirror_savings(outcome: dict, spent_t, spent_l, t0) -> None:
-    """Estimated dollars/latency saved by pre-examination mirror skips.
+    _record_skip_savings(outcome, spent_t, spent_l, t0, "mirror_skipped",
+                         "mirror_saved_usd_est", "mirror_saved_wall_s_est")
+
+
+def _record_scaffold_savings(outcome: dict, spent_t, spent_l, t0) -> None:
+    # Scaffold skips land inside _review_inner (no loop counter), so
+    # count suppressed scaffold_setup rows at finalize time.
+    outcome["scaffold_skipped"] = sum(
+        1 for r in outcome.get("pairs", [])
+        if isinstance(r, dict) and r.get("reason") == "scaffold_setup")
+    _record_skip_savings(outcome, spent_t, spent_l, t0,
+                         "scaffold_skipped", "scaffold_saved_usd_est",
+                         "scaffold_saved_wall_s_est")
+
+
+def _record_skip_savings(outcome: dict, spent_t, spent_l, t0, count_key: str,
+                         usd_key: str, wall_key: str) -> None:
+    """Estimated dollars/latency saved by pre-examination skips.
 
     Estimates only (labeled _est): skipped examinations are valued at
     the run's mean examined-pair cost and latency. The mean includes
     cheap Terra-only rejections, so the dollar figure is a
-    conservative floor (a skipped mirror twin of a published pair
-    would have cost Terra+Luna). USD is None when the spend is
+    conservative floor (a skipped examination that would have run both
+    models costs more than the mean). USD is None when the spend is
     unknown or no examination baseline exists; latency needs only the
     wall clock.
     """
-    mirror_n = int(outcome.get("mirror_skipped") or 0)
-    outcome["mirror_skipped"] = mirror_n
-    outcome["mirror_saved_usd_est"] = None
-    outcome["mirror_saved_wall_s_est"] = None
+    mirror_n = int(outcome.get(count_key) or 0)
+    outcome[count_key] = mirror_n
+    outcome[usd_key] = None
+    outcome[wall_key] = None
     if not mirror_n:
-        outcome["mirror_saved_usd_est"] = 0.0
-        outcome["mirror_saved_wall_s_est"] = 0.0
+        outcome[usd_key] = 0.0
+        outcome[wall_key] = 0.0
         return
     examined = sum(1 for r in outcome.get("pairs", [])
                    if isinstance(r, dict) and r.get("assess_ran"))
     if not examined:
         return
     if spent_t is not None and spent_l is not None:
-        outcome["mirror_saved_usd_est"] = round(
+        outcome[usd_key] = round(
             mirror_n * (spent_t + spent_l) / examined, 6)
     wall = round(time.monotonic() - t0, 1)
-    outcome["mirror_saved_wall_s_est"] = round(mirror_n * wall / examined, 1)
+    outcome[wall_key] = round(mirror_n * wall / examined, 1)
 
 
 def _review_pair(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
@@ -457,6 +632,22 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
                     # model calls, safely reusable across revisions.
                     "completed": True, "budget_refused": False,
                     "terra_completed": None, "luna_completed": None})
+        return row
+    # SCAFFOLD-01: deterministic test-scaffolding suppression. Runs on
+    # pre-inference evidence only (unit texts + paths); completed like
+    # other deterministic verdicts, so retries and revisions reuse it
+    # without re-examination. Never fires on shared assertions, test
+    # logic, oracles, or non-test code (fail open).
+    sc = scaffold_preskip_decision(
+        {"path": pair["target"].get("path"),
+         "text": ev["target"]["text"]},
+        {"path": pair["counterpart"].get("path"),
+         "text": ev["counterpart"]["text"]})
+    if sc["skip"]:
+        row.update({"path": "suppressed", "reason": "scaffold_setup",
+                    "detail": sc["detail"],
+                    "completed": True, "budget_refused": False,
+                    "terra_completed": False, "luna_completed": None})
         return row
     terra_ctx = R.ReviewContext(
         repo=cfg.repos[0] if cfg.repos else "dev", base_sha=base_rev,
@@ -657,6 +848,8 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
         "skipped": [], "spend_usd": 0.0, "wall_s": 0.0,
         "preflight_usd": None, "mirror_skipped": 0,
         "mirror_saved_usd_est": None, "mirror_saved_wall_s_est": None,
+        "scaffold_skipped": 0, "scaffold_saved_usd_est": None,
+        "scaffold_saved_wall_s_est": None,
     }
     try:
         from codatiel_i2 import providers as P
@@ -820,6 +1013,7 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
     outcome["spend_unknown"] = spent_t is None or spent_l is None
     outcome["preflight_usd"] = judged_preflight
     _record_mirror_savings(outcome, spent_t, spent_l, t0)
+    _record_scaffold_savings(outcome, spent_t, spent_l, t0)
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     return outcome

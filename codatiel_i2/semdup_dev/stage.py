@@ -468,6 +468,11 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     outcome["mirror_saved_usd_est"] = judged.get("mirror_saved_usd_est")
     outcome["mirror_saved_wall_s_est"] = judged.get(
         "mirror_saved_wall_s_est")
+    outcome["scaffold_skipped"] = judged.get("scaffold_skipped", 0)
+    outcome["scaffold_saved_usd_est"] = judged.get(
+        "scaffold_saved_usd_est")
+    outcome["scaffold_saved_wall_s_est"] = judged.get(
+        "scaffold_saved_wall_s_est")
     outcome["skipped"].extend(judged.get("skipped", []))
     if not judged.get("ok") or judged.get("stage") in (
             "backends_unavailable",):
@@ -531,6 +536,8 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             "pairs_examined": examined_pairs,
             "pairs_reused": len(reused_rows),
             "pairs_mirror_skipped": int(outcome.get("mirror_skipped") or 0),
+            "pairs_scaffold_skipped": int(
+                outcome.get("scaffold_skipped") or 0),
             "skipped": list(outcome["skipped"]),
         },
         "editorial": {"published": len(published),
@@ -549,6 +556,9 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     mirror_n = int(outcome.get("mirror_skipped") or 0)
     mirror_note = (f"; {mirror_n} mirror(s) skipped pre-examination"
                    if mirror_n else "")
+    scaffold_n = int(outcome.get("scaffold_skipped") or 0)
+    scaffold_note = (f"; {scaffold_n} scaffolding pair(s) skipped "
+                     "pre-examination" if scaffold_n else "")
     # Any retrieval failure means the delta was only partially examined:
     # degraded, never a clean-looking zero.
     if retrieval_failures:
@@ -559,7 +569,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                              f"{len(published)} approved; "
                              f"{retrieval_failures} target(s) failed "
                              "retrieval and were not examined"
-                             f"{skip_summary}{mirror_note}")
+                             f"{skip_summary}{mirror_note}{scaffold_note}")
     else:
         outcome["status"] = "ok"
         outcome["coverage"] = ("partial"
@@ -567,7 +577,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         outcome["reason"] = (f"examined {examined_targets} targets, "
                              f"{examined_pairs} pairs{reused_note}; "
                              f"{len(published)} approved"
-                             f"{skip_summary}{guard_note}{mirror_note}")
+                             f"{skip_summary}{guard_note}{mirror_note}{scaffold_note}")
     # Dedup against the ordinary review's advisory anchors.
     published, dups = _dedup(run_dir, published)
     suppressed.extend(dups)
