@@ -166,7 +166,8 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                  playbook_name: str | None = None,
                  playbook_text: str | None = None,
                  inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False,
-                 delegation: Any | None = None) -> dict[str, Any]:
+                 delegation: Any | None = None,
+                 delivery_id: str | None = None) -> dict[str, Any]:
     """Run one canonical review over a local repository revision pair."""
     ws = prepare_local_workspace(Path(repo_root), base, head,
                                  Path(work_root))
@@ -183,7 +184,8 @@ def review_local(repo_root: Path | str, base: str, head: str, *, model: Any,
                        playbook_text=playbook_text,
                        inventory_strategy=inventory_strategy,
                        enable_final=enable_final,
-                       delegation=delegation)
+                       delegation=delegation,
+                       delivery_id=delivery_id)
 
 
 def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
@@ -193,14 +195,15 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
               rate: dict[str, Any] | None = None,
               rate_status: str = "unconfirmed",
               max_usd_per_review: float | None = None,
-              tool_budget: int = 40,
+               tool_budget: int = 40,
                variant: str = "baseline",
                expected_base: str | None = None,
                expected_head: str | None = None,
                playbook_name: str | None = None,
                playbook_text: str | None = None,
                inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False,
-               delegation: Any | None = None) -> dict[str, Any]:
+               delegation: Any | None = None,
+               delivery_id: str | None = None) -> dict[str, Any]:
     """Run one canonical review over a GitHub PR (base/head from the PR).
 
     When ``expected_base``/``expected_head`` are given (frozen roster SHAs),
@@ -239,7 +242,8 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                       playbook_text=playbook_text,
                       inventory_strategy=inventory_strategy,
                       enable_final=enable_final,
-                      delegation=delegation)
+                      delegation=delegation,
+                      delivery_id=delivery_id)
     if out.get("status") in ("complete", "inconclusive") and out.get(
             "run_dir"):
         # IDENTITY-01: bind the review to its (repo, PR, SHAs, run ID)
@@ -250,7 +254,8 @@ def review_pr(repo: str, pr: int, *, model: Any, model_name: str,
                 out["run_dir"], repo_slug=repo, pr_number=pr,
                 base_sha=ws.base_sha, head_sha=ws.head_sha,
                 run_id=Path(out["run_dir"]).name,
-                binder="service:review_pr")
+                binder="service:review_pr",
+                delivery_id=delivery_id)
         except Exception as exc:
             return {"status": "failed", "stage": "identity",
                     "error": f"identity binding refused: {exc}",
@@ -341,7 +346,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                playbook_name: str | None = None,
                playbook_text: str | None = None,
                inventory_strategy: str = INVENTORY_STRATEGY, enable_final: bool = False,
-               delegation: Any | None = None) -> dict[str, Any]:
+               delegation: Any | None = None,
+               delivery_id: str | None = None) -> dict[str, Any]:
     import os
 
     from codatiel_i2 import providers as providers_mod
@@ -615,7 +621,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                             playbook_text=playbook_text,
                             inventory_strategy_name=inventory_strategy_name,
                             pr_number=pr_number,
-                            delegation_summary=_delegation_summary())
+                            delegation_summary=_delegation_summary(),
+                            delivery_id=delivery_id)
                 except Exception:
                     pass
             partial_result = getattr(exc, "run_data", None)
@@ -632,7 +639,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 playbook_text=playbook_text,
                 inventory_strategy_name=inventory_strategy_name,
                 pr_number=pr_number,
-                delegation_summary=_delegation_summary())
+                delegation_summary=_delegation_summary(),
+                delivery_id=delivery_id)
         # R1.1 pricing halts are controlled incomplete states with the same
         # partial-trace preservation. PricingUnbounded: the ledger holds a
         # PRICING_PARTIAL request whose true cost is unbounded above, so no
@@ -656,7 +664,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 playbook_text=playbook_text,
                 inventory_strategy_name=inventory_strategy_name,
                 pr_number=pr_number,
-                delegation_summary=_delegation_summary())
+                delegation_summary=_delegation_summary(),
+                delivery_id=delivery_id)
         is_budget_ceiling = type(exc).__name__ == "BudgetCeilingExceeded"
         if is_budget_ceiling:
             partial_result = getattr(exc, "run_data", None)
@@ -672,7 +681,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
                 playbook_text=playbook_text,
                 inventory_strategy_name=inventory_strategy_name,
                 pr_number=pr_number,
-                delegation_summary=_delegation_summary())
+                delegation_summary=_delegation_summary(),
+                delivery_id=delivery_id)
         # For other agent failures, try to preserve partial trace if available
         partial_result = getattr(exc, "run_data", None)
         return _write_failed_run(
@@ -686,7 +696,8 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
             playbook_text=playbook_text,
             inventory_strategy_name=inventory_strategy_name,
             pr_number=pr_number,
-            delegation_summary=_delegation_summary())
+            delegation_summary=_delegation_summary(),
+            delivery_id=delivery_id)
 
     tool_evidence = _harvest_tool_evidence(result)
     # CONTEXT-01 arm C: the bundle's citable line evidence was returned
@@ -833,6 +844,7 @@ def _run_review(ws: Workspace, *, diff_repo: Path, model: Any,
         run_dir=run_dir, scan_key=scan_key, run_id=run_id, repo=ws.repo,
         base_sha=base_sha, head_sha=head_sha, config=config,
         pr_number=pr_number, pr_url=pr_url,
+        delivery_id=delivery_id,
         workspace=ws.to_dict(), changes=changes,
         classification=classification, coverage=coverage,
         candidates=candidates, evidence=evidence,
@@ -1420,6 +1432,7 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                playbook_text: str | None = None,
                inventory_strategy_name: str | None = None,
                pr_number: int | None = None,
+               delivery_id: str | None = None,
                delegation_summary: dict[str, Any] | None = None) -> dict[str, Any]:
     """Minimal immutable record for runs that die before disposition.
 
@@ -1508,6 +1521,7 @@ def _write_failed_run(runs_root: Path, ws: Workspace, changes: list[dict],
                 "repo": ws.repo, "base_sha": ws.base_sha,
                 "head_sha": ws.head_sha,
                 "pr_number": pr_number, "pr_url": pr_url,
+                "delivery_id": delivery_id,
                 "created_at": time_mod.utc_now_iso(),
                 "workspace": ws.to_dict(), "status": status,
                 "stage": stage, "error": error})

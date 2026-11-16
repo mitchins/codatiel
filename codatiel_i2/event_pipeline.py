@@ -548,7 +548,8 @@ def _read_spend_usd(run_dir: str | None) -> float | None:
 
 
 def _bind_review_identity(repo: str, pr: int, base: str, head: str,
-                          run_dir: str) -> dict:
+                          run_dir: str,
+                          delivery_id: str | None = None) -> dict:
     """Bind the (repo, PR, SHAs, run) identity at review creation.
 
     Called with the same event arguments that drive the review, so the
@@ -568,7 +569,8 @@ def _bind_review_identity(repo: str, pr: int, base: str, head: str,
     return identity_mod.bind_run(
         run_dir, repo_slug=repo, pr_number=pr, base_sha=base,
         head_sha=head, run_id=artifact_run_id or Path(run_dir).name,
-        binder="pipeline:run_review_for_range")
+        binder="pipeline:run_review_for_range",
+        delivery_id=delivery_id)
 
 
 def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
@@ -692,7 +694,8 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
                          repo_path: Path,
                          runs_root: Path, work_root: Path,
                          model_factory: Any = None,
-                         is_stale: Callable[[], bool] | None = None) -> dict:
+                         is_stale: Callable[[], bool] | None = None,
+                         delivery_id: str | None = None) -> dict:
     """Execute one review for base..head via the configured pipeline.
 
     Terra's canonical review runs first and unchanged; additive mode seals
@@ -722,7 +725,8 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
             runs_root=runs_root, work_root=work_root,
             rate=rate, rate_status=rate_status,
             max_usd_per_review=primary_cap,
-            inventory_strategy="bundle-0.1", enable_final=True)
+            inventory_strategy="bundle-0.1", enable_final=True,
+            delivery_id=delivery_id)
         if out.get("status") not in ("complete", "inconclusive") or \
                 not out.get("run_dir"):
             return {"status": out.get("status", "failed"),
@@ -740,7 +744,8 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
                 "terra_spend_usd": cost,
                 "luna_spend_usd": 0.0}
         try:
-            _bind_review_identity(repo, pr, base, head, out["run_dir"])
+            _bind_review_identity(repo, pr, base, head, out["run_dir"],
+                                    delivery_id=delivery_id)
         except Exception as exc:
             return {"status": "failed", "stage": "identity",
                     "error": f"identity binding refused: {exc}",
@@ -765,7 +770,8 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
         target={"mode": "local", "case": f"{repo}#{pr}",
                 "root": str(repo_path), "base": base, "head": head},
         runs_root=runs_root, work_root=work_root,
-        primary_ceiling_usd=primary_cap, sub_ceiling_usd=sub_cap)
+        primary_ceiling_usd=primary_cap, sub_ceiling_usd=sub_cap,
+        delivery_id=delivery_id)
     if out.get("status") not in ("complete", "inconclusive") or \
             not out.get("run_dir"):
         return {"status": out.get("status", "failed"),
@@ -784,7 +790,8 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
             "terra_spend_usd": round(parent, 4),
             "luna_spend_usd": round(sub, 4)}
     try:
-        _bind_review_identity(repo, pr, base, head, out["run_dir"])
+        _bind_review_identity(repo, pr, base, head, out["run_dir"],
+                              delivery_id=delivery_id)
     except Exception as exc:
         return {"status": "failed", "stage": "identity",
                 "error": f"identity binding refused: {exc}",
@@ -1377,7 +1384,12 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                      if ev.get("pr_number") else None)
     _claimed_auto_run = (_claimed_auto or {}).get("in_progress_run") or ""
     _claimed_auto_base = (_claimed_auto or {}).get("in_progress_base") or ""
-    store.reserve(cfg.reserve_usd)
+    # RESERVE-RECOVERY-01: the reservation is attributed to the claim's
+    # generation token, so a later recovery can settle or release
+    # exactly this claim's hold (never another worker's).
+    store.reserve(cfg.reserve_usd, holder=_claimed_auto_run,
+                  repo=ev["repo"], pr=pr, head_sha=to_sha,
+                  delivery_id=ev.get("delivery_id") or "")
     # CODATIEL-ACK-01: the claim is atomic and paid inference has not
     # started — this is the early visible acknowledgement, pinned to
     # the exact head under review.
@@ -1403,10 +1415,12 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         cfg=cfg, repo=ev["repo"], pr=pr, base=from_sha, head=to_sha,
         kind=kind, repo_path=access.path,
         runs_root=cfg.state_dir / "runs", work_root=cfg.state_dir / "work",
-        model_factory=model_factory, is_stale=_is_stale)
+        model_factory=model_factory, is_stale=_is_stale,
+        delivery_id=ev.get("delivery_id"))
     cost = result.get("cost_usd")
     unknown = bool(result.get("cost_unknown")) or cost is None
-    store.settle(cfg.reserve_usd, None if unknown else float(cost or 0.0))
+    store.settle(cfg.reserve_usd, None if unknown else float(cost or 0.0),
+                 holder=_claimed_auto_run)
     cp_now = (store.checkpoint_get(ev["repo"], pr)
               if ev.get("pr_number") else None)
     owned = bool(
@@ -1888,9 +1902,21 @@ def _original_outcome(row: dict | None) -> tuple[str, str, dict]:
     return decision, reason, detail
 
 
+def explicit_delivery_id(repo: str, number: int, head: str,
+                          run_token: str) -> str:
+    """Unique delivery ID for an explicit (operator-driven) review.
+
+    Bound to the claim's generation token, not just (repo, PR, head):
+    repeated explicit re-drives of one head must not share a delivery
+    ID, or recovery could match the wrong run dir and double-count
+    proven spend against a new reservation.
+    """
+    return f"explicit:{repo}:{int(number)}:{head}:{run_token}"
+
+
 def _reconcile_ack_on_replay(store: store_mod.Store, ev: dict,
-                               prior: dict | None,
-                               ack_gh: Any = None) -> None:
+                             prior: dict | None,
+                             ack_gh: Any = None) -> None:
     """Retry a terminal acknowledgement from the stored delivery row.
 
     Replays carry no inference and change no review state; they only
@@ -2162,12 +2188,235 @@ def recover(*, cfg: EventConfig, store: store_mod.Store) -> dict:
                 "worker restart: pinned review did not seal; operator "
                 "must explicitly re-drive (no automatic re-spend)")
             marked.append(f"{cp['repo']}#{cp['pr']}")
-    return {"status": "ok", "interrupted": marked}
+    recovered = recover_reservations(cfg, store, now=now)
+    return {"status": "ok", "interrupted": marked,
+            "reservations_recovered": recovered}
+
+
+def _proven_spend(run_dir: Path | str | None) -> tuple[float, bool]:
+    """Priced spend proven by a run dir, and whether it ever started.
+
+    Proven = priced Terra ledger lines + priced semdup stage total +
+    priced Luna sweep lines. Luna sink rows are raw usage records, so
+    they restore through a ledger (corrections applied in order, last
+    row per response wins) and price at the current verified Luna
+    rates — the same semantics as a live ledger; if rates are
+    unavailable the rows stay unproven (conservative). Started = the
+    run dir exists (created before paid inference). Anything unpriced
+    stays uncertain and is handled by the caller as an unknown hold,
+    never as $0.
+    """
+    if not run_dir:
+        return 0.0, False
+    root = Path(run_dir)
+    try:
+        if not root.is_dir():
+            return 0.0, False
+    except Exception:
+        return 0.0, False
+    proven = 0.0
+    try:
+        metrics = json.loads(
+            (root / "metrics.json").read_text(encoding="utf-8"))
+        for row in metrics.get("spend", {}).get("request_ledger", []):
+            if isinstance(row, dict):
+                proven += float(row.get("priced_cost_usd") or 0.0)
+    except Exception:
+        pass
+    try:
+        semdup = json.loads(
+            (root / "semdup.json").read_text(encoding="utf-8"))
+        proven += float(semdup.get("spend_usd") or 0.0)
+    except Exception:
+        pass
+    proven += _proven_luna_sink(root)
+    return round(proven, 6), True
+
+
+def _proven_luna_sink(run_dir: Path) -> float:
+    """Price restored Luna sink rows at current verified Luna rates."""
+    try:
+        from codatiel_i2 import providers as providers_mod
+        from codatiel_i2.core import spend as spend_mod
+        resolved = providers_mod.resolve_backend("luna")
+        ledger = spend_mod.SpendLedger(
+            rate=resolved.get("rate_usd_per_mtok") or {},
+            rate_status=resolved.get("rate_status") or "",
+            ceiling_usd=float("inf"))
+    except Exception:
+        return 0.0
+    try:
+        ledger.restore_sink(run_dir / "spend_luna.jsonl")
+    except Exception:
+        return 0.0
+    try:
+        record = ledger.to_record()
+    except Exception:
+        return 0.0
+    total = 0.0
+    for row in record.get("request_ledger", []):
+        if isinstance(row, dict):
+            try:
+                total += float(row.get("priced_cost_usd") or 0.0)
+            except (TypeError, ValueError):
+                pass
+    return total
+
+
+def _run_created_ts(run_dir: Path) -> float:
+    """Run start time from run.json, or -1 when unreadable."""
+    try:
+        data = json.loads((run_dir / "run.json").read_text(
+            encoding="utf-8"))
+        created = str(data.get("created_at") or "")
+        if created.endswith("Z"):
+            created = created[:-1] + "+00:00"
+        import datetime as _dt
+        return _dt.datetime.fromisoformat(created).timestamp()
+    except Exception:
+        return -1.0
+
+
+def _find_run_dir(state_dir: Path, delivery_id: str, *,
+                  after_ts: float = 0.0,
+                  exclude: set[str] | None = None) -> Path | None:
+    """Locate the run dir bound to a delivery ID.
+
+    run.json is written when the run starts (before paid inference),
+    so mid-inference kills are locatable. When one delivery drove
+    several runs (kills and re-drives), the earliest run created after
+    the holder's claim wins; run dirs already consumed by a closed
+    recovery never match again.
+    """
+    if not delivery_id:
+        return None
+    excluded = exclude or set()
+    try:
+        runs_root = Path(state_dir) / "runs"
+        if not runs_root.is_dir():
+            return None
+        best: Path | None = None
+        best_ts = float("inf")
+        for ident in runs_root.rglob("run.json"):
+            try:
+                data = json.loads(ident.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            if data.get("delivery_id") != delivery_id:
+                continue
+            if str(ident.parent) in excluded:
+                continue
+            ts = _run_created_ts(ident.parent)
+            if ts < 0 or ts < after_ts - 60.0:
+                continue
+            if ts < best_ts:
+                best, best_ts = ident.parent, ts
+        return best
+    except Exception:
+        return None
+    return None
+
+
+def recover_reservations(cfg: EventConfig, store: store_mod.Store,
+                         now: float | None = None) -> list[str]:
+    """Settle or release orphaned reservations, idempotently.
+
+    For each open reservation whose claim can no longer settle (no live
+    worker owns its token): settle priced usage proven by the run dir;
+    when the run started, preserve the unproven remainder as an
+    explicit unknown hold; when it never started, release the hold.
+    Each holder closes in the same transaction as its spend update, so
+    a repeated recovery is a no-op and settled spend is never
+    rewritten or double-counted. A live worker's hold is never
+    touched. Per-holder failures are recorded, never raised.
+
+    Concurrency precondition (single worker): the deployed cron
+    serializes ticks under flock (inference holds the lock), so no
+    second tick can start while a worker runs — a stale holder cannot
+    belong to a live worker here. The holder token doubles as an
+    atomic fence: a settle arriving after its holder closed fails
+    loudly instead of double-spending, and a live checkpoint match
+    skips the holder first on every pass. Manual concurrent runs
+    outside the flock are operator territory.
+    """
+    ts = time.time() if now is None else now
+    done: list[str] = []
+    try:
+        holders = store.reservations_open()
+    except Exception:
+        return done
+    try:
+        consumed = store.reservations_consumed_run_dirs()
+    except Exception:
+        consumed = set()
+    for h in holders:
+        holder = str(h.get("holder") or "")
+        if not holder:
+            continue
+        try:
+            if _holder_owned_by_live_worker(store, h, ts,
+                                            cfg.stale_after_s):
+                continue
+            try:
+                created = float(h.get("created_ts") or 0.0)
+            except (TypeError, ValueError):
+                created = 0.0
+            run_dir = _find_run_dir(
+                cfg.state_dir, str(h.get("delivery_id") or ""),
+                after_ts=created, exclude=consumed)
+            proven, started = _proven_spend(run_dir)
+            out = store.reservation_recover(
+                holder, proven_usd=proven, started=started,
+                run_dir="" if run_dir is None else str(run_dir))
+            if out.get("recovered"):
+                if run_dir is not None:
+                    consumed.add(str(run_dir))
+                done.append(
+                    f"{h.get('repo')}#{h.get('pr')} {holder[:8]}"
+                    f" proven=${proven:.4f}"
+                    f"{' started' if started else ' never-started'}")
+        except Exception as exc:  # noqa: BLE001 - one bad holder
+            done.append(f"{holder[:8]} error: {type(exc).__name__}")
+    return done
+
+
+def _holder_owned_by_live_worker(store: store_mod.Store, h: dict,
+                                 now: float, stale_after_s: float) -> bool:
+    """True when a live worker may still own this reservation."""
+    try:
+        cp = store.checkpoint_get(str(h.get("repo") or ""),
+                                  int(h.get("pr") or 0))
+    except Exception:
+        return False
+    if not isinstance(cp, dict):
+        return False
+    if cp.get("status") != "in_progress":
+        return False
+    if (cp.get("in_progress_run") or "") != str(h.get("holder") or ""):
+        return False
+    try:
+        age = now - float(cp.get("updated_ts") or 0)
+    except (TypeError, ValueError):
+        return False
+    return age < float(stale_after_s)
 
 
 def reset_spend(*, store: store_mod.Store) -> dict:
     """Zero the env spend ledger. Skipped/queued rows are untouched:
-    nothing auto-processes after a reset."""
+    nothing auto-processes after a reset.
+
+    Refused while any reservation is open: zeroing reserved_usd under
+    an open holder would orphan its accounting (a later recovery would
+    see reserved < held and fail every tick). Settle or recover first.
+    """
+    open_holders = store.reservations_open()
+    if open_holders:
+        raise store_mod.StoreError(
+            f"reset refused: {len(open_holders)} reservation(s) open "
+            f"(e.g. {open_holders[0].get('holder', '?')[:8]}); "
+            "settle or recover them first")
     before = store.spend_totals()
     store.spend_set("settled_usd", 0.0)
     store.spend_set("reserved_usd", 0.0)

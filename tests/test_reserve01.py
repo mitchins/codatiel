@@ -1,0 +1,429 @@
+"""RESERVE-RECOVERY-01: ownership-safe reservation recovery.
+
+Each review reservation is attributed to its claim/run (generation
+token) and settled or conservatively retained exactly once. No paid
+inference, no network: fabricated run dirs, tmp stores, scripted
+models only.
+
+Crash matrix: before reservation, after reservation, during inference,
+after inference but before settlement; repeated recovery; an old worker
+racing a replacement claim; a live worker left untouched.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from codatiel_i2 import event_pipeline as P
+from codatiel_i2 import event_store as S
+
+REPO = "o/r"
+PR = 7
+HEAD = "c" * 40
+
+
+def _env(monkeypatch, tmp_path, root=None, cap="20.0"):
+    monkeypatch.setenv("CODATIEL_ENV", "test")
+    monkeypatch.setenv("CODATIEL_TEST_STATE", str(tmp_path / "estate"))
+    monkeypatch.setenv("CODATIEL_TEST_REPOS", REPO)
+    monkeypatch.setenv("CODATIEL_TEST_SPEND_CAP_USD", cap)
+    monkeypatch.setenv("CODATIEL_TEST_TO", "test-ops@example.com")
+    monkeypatch.setenv("CODATIEL_TEST_SENDER", "codatiel-test@example.com")
+    if root is not None:
+        monkeypatch.setenv("CODATIEL_TEST_REPO_PATHS", f"{REPO}={root}")
+    monkeypatch.setenv("REVIEW_PIPELINE", "terra_only")
+    monkeypatch.setenv("CODATIEL_EVENTS_TRANSPORT", "fixture")
+    monkeypatch.delenv("CODATIEL_WEBHOOK_SECRET", raising=False)
+
+
+def _cfg_store(tmp_path, monkeypatch, root=None):
+    _env(monkeypatch, tmp_path, root)
+    cfg = P.config_from_env()
+    cfg.state_dir.mkdir(parents=True, exist_ok=True)
+    cfg.clock = lambda: 10000.0
+    store = S.Store(cfg.state_dir / "events.sqlite")
+    P.enable(cfg=cfg, store=store, discover=lambda r: ([], ""))
+    return cfg, store
+
+
+def _run_dir(state_dir: Path, run_id: str, *, priced=0.0,
+             semdup=None, delivery_id="d1", created_at=None) -> Path:
+    d = state_dir / "runs" / "scan" / run_id
+    d.mkdir(parents=True, exist_ok=True)
+    if created_at is None:
+        import datetime as _dt
+        created_at = _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+    (d / "run.json").write_text(json.dumps(
+        {"run_id": run_id, "head_sha": HEAD,
+         "delivery_id": delivery_id,
+         "created_at": created_at}), encoding="utf-8")
+    (d / "identity.json").write_text(json.dumps(
+        {"run_id": run_id, "delivery_id": delivery_id,
+         "head_sha": HEAD, "repo_slug": REPO}), encoding="utf-8")
+    ledger = [{"priced_cost_usd": priced, "usage_known": True}] \
+        if priced else []
+    (d / "metrics.json").write_text(json.dumps(
+        {"spend": {"request_ledger": ledger}}), encoding="utf-8")
+    if semdup is not None:
+        (d / "semdup.json").write_text(
+            json.dumps({"spend_usd": semdup}), encoding="utf-8")
+    return d
+
+
+def _claim(store, head=HEAD, did="d1", token="tok-1", now=1000.0):
+    store.delivery_record(delivery_id=did, event_type="pull_request",
+                          action="synchronize", repo=REPO, pr=PR,
+                          head_sha=head, decision="in_progress",
+                          reason="claimed", cost_usd=None, detail={},
+                          now=now)
+    store.checkpoint_upsert({"repo": REPO, "pr": PR, "status": "in_progress",
+                             "in_progress_head": head,
+                             "in_progress_run": token}, now=now)
+    return token
+
+
+# -- holder lifecycle --------------------------------------------------------
+
+def test_reserve_settle_happy_path(tmp_path):
+    st = S.Store(tmp_path / "e.sqlite")
+    st.reserve(1.0, holder="tok-1", repo=REPO, pr=PR, head_sha=HEAD,
+               delivery_id="d1")
+    assert st.spend_totals()["reserved_usd"] == 1.0
+    out = st.settle(1.0, 0.11, holder="tok-1")
+    assert out["reserved_usd"] == 0.0
+    assert out["settled_usd"] == pytest.approx(0.11)
+    assert st.reservations_open() == []
+    st.close()
+
+
+def test_double_settle_refused_and_totals_unchanged(tmp_path):
+    st = S.Store(tmp_path / "e.sqlite")
+    st.reserve(1.0, holder="tok-1", repo=REPO, pr=PR, head_sha=HEAD,
+               delivery_id="d1")
+    st.settle(1.0, 0.11, holder="tok-1")
+    before = st.spend_totals()
+    with pytest.raises(S.StoreError):
+        st.settle(1.0, 0.11, holder="tok-1")
+    assert st.spend_totals() == before
+    st.close()
+
+
+def test_duplicate_reserve_refused(tmp_path):
+    st = S.Store(tmp_path / "e.sqlite")
+    st.reserve(1.0, holder="tok-1", repo=REPO, pr=PR, head_sha=HEAD,
+               delivery_id="d1")
+    with pytest.raises(S.StoreError):
+        st.reserve(1.0, holder="tok-1", repo=REPO, pr=PR, head_sha=HEAD,
+                   delivery_id="d1")
+    st.close()
+
+
+# -- crash matrix ------------------------------------------------------------
+
+def test_recover_before_inference_releases_without_hold(tmp_path,
+                                                        monkeypatch):
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    token = _claim(store, token="tok-1", now=1000.0)
+    store.reserve(1.0, holder=token, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1")
+    out = P.recover(cfg=cfg, store=store)
+    assert store.spend_totals()["reserved_usd"] == 0.0
+    assert store.spend_totals()["settled_usd"] == 0.0
+    assert store.spend_totals()["unknown_holds"] == 0.0
+    assert store.reservations_open() == []
+    assert store.checkpoint_get(REPO, PR)["status"] == "interrupted"
+    assert any("tok-1" in m for m in out["reservations_recovered"])
+    store.close()
+
+
+def test_recover_during_inference_settles_proven_and_holds_rest(
+        tmp_path, monkeypatch):
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    token = _claim(store, token="tok-1", now=1000.0)
+    store.reserve(1.0, holder=token, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1")
+    _run_dir(cfg.state_dir, "run-1", priced=0.05, delivery_id="d1")
+    P.recover(cfg=cfg, store=store)
+    totals = store.spend_totals()
+    assert totals["reserved_usd"] == 0.0
+    assert totals["settled_usd"] == pytest.approx(1.0)  # 0.05 + 0.95 hold
+    assert totals["unknown_holds"] == 1.0
+    assert store.reservations_open() == []
+    store.close()
+
+
+def test_recover_zero_priced_started_run_holds_all(tmp_path, monkeypatch):
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    token = _claim(store, token="tok-1", now=1000.0)
+    store.reserve(1.0, holder=token, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1")
+    _run_dir(cfg.state_dir, "run-1", delivery_id="d1")  # started, $0 priced
+    P.recover(cfg=cfg, store=store)
+    totals = store.spend_totals()
+    assert totals["settled_usd"] == pytest.approx(1.0)
+    assert totals["unknown_holds"] == 1.0
+    store.close()
+
+
+def test_recover_is_idempotent(tmp_path, monkeypatch):
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    token = _claim(store, token="tok-1", now=1000.0)
+    store.reserve(1.0, holder=token, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1")
+    _run_dir(cfg.state_dir, "run-1", priced=0.05, delivery_id="d1")
+    P.recover(cfg=cfg, store=store)
+    before = store.spend_totals()
+    out = P.recover(cfg=cfg, store=store)
+    assert store.spend_totals() == before
+    assert out["reservations_recovered"] == []
+    store.close()
+
+
+def test_recover_skips_live_worker(tmp_path, monkeypatch):
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    cfg.clock = lambda: 1100.0  # fresh heartbeat: worker may be alive
+    token = _claim(store, token="tok-1", now=1000.0)
+    store.reserve(1.0, holder=token, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1")
+    P.recover(cfg=cfg, store=store)
+    assert store.spend_totals()["reserved_usd"] == 1.0
+    assert store.checkpoint_get(REPO, PR)["status"] == "in_progress"
+    assert len(store.reservations_open()) == 1
+    store.close()
+
+
+def test_recover_releases_superseded_holder_keeps_replacement(
+        tmp_path, monkeypatch):
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    old = _claim(store, token="tok-old", now=1000.0)
+    store.reserve(1.0, holder=old, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1")
+    _run_dir(cfg.state_dir, "run-old", priced=0.02, delivery_id="d1")
+    # Replacement claim takes over with a fresh token and reserve.
+    store.checkpoint_upsert({"repo": REPO, "pr": PR,
+                             "status": "in_progress",
+                             "in_progress_head": HEAD,
+                             "in_progress_run": "tok-new"}, now=9000.0)
+    store.reserve(1.0, holder="tok-new", repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d2")
+    P.recover(cfg=cfg, store=store)
+    totals = store.spend_totals()
+    assert totals["reserved_usd"] == 1.0  # only the live claim's hold
+    assert totals["settled_usd"] == pytest.approx(1.0)  # 0.02 + 0.98 hold
+    cp = store.checkpoint_get(REPO, PR)
+    assert cp["status"] == "in_progress"
+    assert cp["in_progress_run"] == "tok-new"
+    assert [r["holder"] for r in store.reservations_open()] == ["tok-new"]
+    store.close()
+
+
+# -- accounting --------------------------------------------------------------
+
+def test_settled_never_rewritten_or_double_counted(tmp_path):
+    st = S.Store(tmp_path / "e.sqlite")
+    st.reserve(1.0, holder="a", repo=REPO, pr=PR, head_sha=HEAD,
+               delivery_id="d1")
+    st.settle(1.0, 0.4, holder="a")
+    st.reserve(1.0, holder="b", repo=REPO, pr=PR, head_sha=HEAD,
+               delivery_id="d2")
+    st.settle(1.0, 0.6, holder="b")
+    assert st.spend_totals()["settled_usd"] == pytest.approx(1.0)
+    assert st.spend_totals()["unknown_holds"] == 0.0
+    st.close()
+
+
+def test_admission_ledger_untouched_by_recovery(tmp_path, monkeypatch):
+    from codatiel_i2 import operator_config as opcfg
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    token = _claim(store, token="tok-1", now=1000.0)
+    store.reserve(1.0, holder=token, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1")
+    before = opcfg.spend_on_day(store, "1970-01-01")
+    P.recover(cfg=cfg, store=store)
+    assert opcfg.spend_on_day(store, "1970-01-01") == before
+    store.close()
+
+
+def test_full_review_closes_its_holder(tmp_path, monkeypatch):
+    import subprocess
+    from codatiel_i2 import runtime_sdk
+    root = tmp_path / "repo"
+    root.mkdir()
+    for a in (["init", "-b", "main"], ["config", "user.email", "t@t"],
+              ["config", "user.name", "t"]):
+        subprocess.run(["git", "-C", str(root), *a], check=True,
+                       capture_output=True, timeout=60)
+    (root / "app.py").write_text("LIMIT = 100\n")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True,
+                   capture_output=True, timeout=60)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "A"],
+                   check=True, capture_output=True, timeout=60)
+    a = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                       check=True, capture_output=True, text=True,
+                       timeout=60).stdout.strip()
+    (root / "app.py").write_text("LIMIT = 5\n")
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "B"],
+                   check=True, capture_output=True, timeout=60)
+    b = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                       check=True, capture_output=True, text=True,
+                       timeout=60).stdout.strip()
+    cfg, store = _cfg_store(tmp_path, monkeypatch, root)
+    real_run = P.run_review_for_range
+
+    def _spy(*args, **kwargs):
+        text = '{"status": "silence", "summary": "ok", "findings": []}'
+        script = [runtime_sdk.scripted_tool_call(
+            call_id="t1", name="read_file",
+            arguments={"path": "app.py", "revision": "head",
+                       "start_line": 1, "end_line": 0}, response_id="r1"),
+            runtime_sdk.scripted_final(text, response_id="f1")]
+
+        def _mk(role: str):
+            return runtime_sdk.ScriptedModel(script), "scripted:t"
+        kwargs["model_factory"] = _mk
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(P, "run_review_for_range", _spy)
+    raw = {"action": "synchronize", "repository": {"full_name": REPO},
+           "pull_request": {"number": PR, "state": "open", "draft": False,
+                            "merged": False,
+                            "created_at": "9999-01-01T00:00:00Z",
+                            "base": {"sha": a},
+                            "head": {"sha": b, "ref": "f"}}}
+    ev, err = P.normalize_event(raw, "did-1")
+    assert err == ""
+    out = P.process_event(cfg=cfg, store=store, ev=ev)
+    assert out["decision"] == "completed"
+    assert store.reservations_open() == []
+    assert store.spend_totals()["reserved_usd"] == 0.0
+    # The run dir is bound to the delivery that drove it.
+    found = P._find_run_dir(cfg.state_dir, "did-1")
+    assert found is not None
+    run = json.loads((found / "run.json").read_text(encoding="utf-8"))
+    assert run.get("delivery_id") == "did-1"
+    store.close()
+
+
+# -- review follow-ups: delivery binding, luna sink, reset guard --------
+
+def test_recover_finds_run_by_bound_delivery_id(tmp_path, monkeypatch):
+    """A run dir bound to the reservation's delivery ID is found even
+    when other same-head runs exist (exact match, no heuristics)."""
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    token = _claim(store, token="tok-1", now=1000.0, did="d1")
+    store.reserve(1.0, holder=token, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1")
+    _run_dir(cfg.state_dir, "run-old", priced=0.99, delivery_id="dx")
+    _run_dir(cfg.state_dir, "run-1", priced=0.05, delivery_id="d1")
+    P.recover(cfg=cfg, store=store)
+    totals = store.spend_totals()
+    assert totals["settled_usd"] == pytest.approx(1.0)  # 0.05 + 0.95 hold
+    assert totals["unknown_holds"] == 1.0
+    store.close()
+
+
+def test_proven_includes_luna_sink(tmp_path, monkeypatch):
+    """Priced Luna sweep records persist to spend_luna.jsonl and count
+    as proven on recovery."""
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    token = _claim(store, token="tok-1", now=1000.0, did="d1")
+    store.reserve(1.0, holder=token, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1")
+    d = _run_dir(cfg.state_dir, "run-1", priced=0.05, delivery_id="d1")
+    (d / "spend_luna.jsonl").write_text(
+        '{"priced_cost_usd": 0.02, "usage_known": true}\n', encoding="utf-8")
+    P.recover(cfg=cfg, store=store)
+    totals = store.spend_totals()
+    assert totals["settled_usd"] == pytest.approx(1.0)  # 0.07 + 0.93 hold
+    store.close()
+
+
+def test_reset_spend_refused_with_open_reservations(tmp_path):
+    st = S.Store(tmp_path / "e.sqlite")
+    st.reserve(1.0, holder="tok-1", repo=REPO, pr=PR, head_sha=HEAD,
+               delivery_id="d1")
+    with pytest.raises(S.StoreError):
+        P.reset_spend(store=st)
+    assert st.spend_totals()["reserved_usd"] == 1.0
+    st.close()
+
+
+# -- review follow-ups: unique explicit IDs, priced luna, disambiguation -
+
+def test_explicit_delivery_id_unique_per_claim(tmp_path, monkeypatch):
+    from codatiel_i2 import event_pipeline as P2
+    a = P2.explicit_delivery_id(REPO, PR, HEAD, "tok-1")
+    b = P2.explicit_delivery_id(REPO, PR, HEAD, "tok-1")
+    c = P2.explicit_delivery_id(REPO, PR, HEAD, "tok-2")
+    assert a == b
+    assert a != c
+    assert HEAD in a and "tok-1" in a
+
+
+def test_recover_disambiguates_runs_by_claim_window(tmp_path, monkeypatch):
+    """Two runs, same delivery ID (auto-path re-drive): each holder
+    recovers from the run created after its own claim."""
+    import datetime as _dt
+    import time as _t
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    t0 = _t.time()
+    cfg.clock = lambda: t0 + 100000.0  # both claims stale: recoverable
+    old = _claim(store, token="tok-old", now=t0, did="d1")
+    store.reserve(1.0, holder=old, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1", now=t0)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    base = _dt.datetime.fromtimestamp(t0, _dt.timezone.utc)
+    _run_dir(cfg.state_dir, "run-old", priced=0.02, delivery_id="d1",
+             created_at=(base + _dt.timedelta(seconds=5)).strftime(fmt))
+    store.checkpoint_upsert({"repo": REPO, "pr": PR,
+                             "status": "in_progress",
+                             "in_progress_head": HEAD,
+                             "in_progress_run": "tok-new"}, now=t0 + 10)
+    store.reserve(1.0, holder="tok-new", repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1", now=t0 + 10)
+    _run_dir(cfg.state_dir, "run-new", priced=0.04, delivery_id="d1",
+             created_at=(base + _dt.timedelta(seconds=20)).strftime(fmt))
+    P.recover(cfg=cfg, store=store)
+    totals = store.spend_totals()
+    # 0.02 + 0.98 hold, then 0.04 + 0.96 hold; both holders closed.
+    assert totals["settled_usd"] == pytest.approx(2.0)
+    assert totals["reserved_usd"] == pytest.approx(0.0)
+    assert totals["unknown_holds"] == 2.0
+    assert store.reservations_open() == []
+    store.close()
+
+
+def test_proven_prices_luna_sink_with_corrections(tmp_path, monkeypatch):
+    """Luna sink rows restore through a ledger (corrections applied in
+    order): priced usage counts as proven; a later correction removes
+    it. Pricing uses the static configured rate card (no network)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    d = cfg.state_dir / "runs" / "scan" / "run-1"
+    d.mkdir(parents=True)
+    (d / "run.json").write_text('{"run_id": "run-1"}', encoding="utf-8")
+    rows = ('{"response_id": "r1", "requests": 1, "usage_known": true,'
+            ' "input_tokens": 1000000, "output_tokens": 1000,'
+            ' "cached_input_tokens": 100000,'
+            ' "cache_write_input_tokens": 50000,'
+            ' "cache_in_input": true}\n'
+            '{"response_id": "r2", "requests": 1, "usage_known": true,'
+            ' "input_tokens": 1000000, "output_tokens": 1000,'
+            ' "cached_input_tokens": 100000,'
+            ' "cache_write_input_tokens": 50000,'
+            ' "cache_in_input": true}\n')
+    (d / "spend_luna.jsonl").write_text(rows, encoding="utf-8")
+    proven_both, started = P._proven_spend(d)
+    assert started is True
+    assert proven_both > 0, "raw luna usage must price to proven spend"
+    with open(d / "spend_luna.jsonl", "a", encoding="utf-8") as fh:
+        fh.write('{"response_id": "r1",'
+                 ' "usage_known_correction": true}\n')
+    proven_corrected, _ = P._proven_spend(d)
+    assert 0 <= proven_corrected < proven_both, \
+        "correction row must win in order"
+    store.close()

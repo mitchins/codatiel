@@ -274,7 +274,8 @@ def run_additive(*, mode: str, target: dict[str, Any],
                  runs_root: Path, work_root: Path,
                  sub_role: str = "luna",
                  sub_ceiling_usd: float = 0.25,
-                 primary_ceiling_usd: float | None = 5.0) -> dict[str, Any]:
+                 primary_ceiling_usd: float | None = 5.0,
+                 delivery_id: str | None = None) -> dict[str, Any]:
     """Run Terra canonical first (sealed), then the blind subagent, merge.
 
     ``mode``/``target`` mirror the D01 runner ({mode: local|pr, ...}).
@@ -299,7 +300,7 @@ def run_additive(*, mode: str, target: dict[str, Any],
               max_usd_per_review=(5.0 if primary_ceiling_usd is None
                                   else float(primary_ceiling_usd)),
               inventory_strategy="bundle-0.1", enable_final=True,
-              delegation=None)
+              delegation=None, delivery_id=delivery_id)
     if target["mode"] == "local":
         out = service_mod.review_local(
             target["root"], target["base"], target["head"], **kw)
@@ -334,6 +335,14 @@ def run_additive(*, mode: str, target: dict[str, Any],
         recorded = runtime_sdk.UsageRecordingModel(sub_model, sub_ledger)
         inv = json.loads((terra_run_dir / "prompt_provenance.json")
                          .read_text())["inventory"]
+        # RESERVE-RECOVERY-01: persist the subagent's priced spend to the
+        # run dir as it accrues (crash-durable JSONL sink), so a killed
+        # review's proven Luna cost survives for recovery accounting.
+        # Best-effort: a sink failure must never break the review.
+        try:
+            sub_ledger.attach_sink(terra_run_dir / "spend_luna.jsonl")
+        except Exception:
+            pass
         # Reuse Terra's materialized snapshot dirs for anchor checks.
         ws_state = json.loads((terra_run_dir / "run.json").read_text())
         _ws = ws_state.get("workspace", {}) if isinstance(ws_state,

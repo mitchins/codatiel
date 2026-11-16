@@ -81,7 +81,8 @@ def write_run(*, run_dir: Path, scan_key: str, run_id: str, repo: str,
               tool_calls: list[dict] | None = None,
               model_calls: list[dict] | None = None,
               pr_number: int | None = None,
-              pr_url: str | None = None) -> Path:
+              pr_url: str | None = None,
+              delivery_id: str | None = None) -> Path:
     from codatiel_i2.dashboard import build as dashboard_mod
 
     run_dir = Path(run_dir)
@@ -109,6 +110,7 @@ def write_run(*, run_dir: Path, scan_key: str, run_id: str, repo: str,
         "head_sha": head_sha,
         "pr_number": pr_number,
         "pr_url": pr_url,
+        "delivery_id": delivery_id,
         "created_at": utc_now_iso(),
         "workspace": workspace,
     })
