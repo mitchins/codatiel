@@ -135,6 +135,10 @@ class StoreError(RuntimeError):
     """Any persistence problem: caller must refuse/stop, never default."""
 
 
+_DELIVERY_KEYS = ("delivery_id", "received_ts", "event_type", "action",
+                  "repo", "pr", "head_sha", "decision", "reason",
+                  "cost_usd", "detail")
+
 _DELIVERY_COLS = ("SELECT delivery_id, received_ts, event_type,"
                   " action, repo, pr, head_sha, decision, reason,"
                   " cost_usd, detail")
