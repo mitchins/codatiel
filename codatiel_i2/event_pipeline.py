@@ -1785,24 +1785,24 @@ def gate_ack(*, store: store_mod.Store, ev: dict, row: dict | None,
              gate: dict, ack_gh: Any = None) -> dict:
     """Ack for an operator-gate refusal. Never raises.
 
-    The gate refused, but the stored row may already carry a terminal
-    outcome for this head (e.g. a completed review re-ingested while
-    the ceiling holds) — possibly under a different delivery ID, or
-    wrapped in a skipped:replay row. The truthful stored state wins
-    over a blind deferred request, so a published review is never
-    relabeled as "no review has run". Otherwise the deferred request
-    goes through the usual checkpoint guard in request_ack.
+    The gate refused, but a completed outcome for this head may exist
+    (same delivery, another delivery ID, or replay-wrapped): the
+    truthful completed state always wins first, so a published review
+    is never relabeled as "no review has run". Otherwise the stored
+    row's own terminal outcome reconciles, and only then does the
+    deferred request go through the usual checkpoint guard in
+    request_ack.
     """
     try:
-        hit = _reconcile_stored_row(store, ev, row, gate, ack_gh=ack_gh)
-        if hit is not None:
-            return hit
         if _reconcile_cross_delivery(store, ev, ack_gh=ack_gh):
             return {"outcome": "reconciled-stored",
                     "decision": "completed",
                     "repo": ev.get("repo") or "",
                     "pr": ev.get("pr_number"),
                     "head_sha": ev.get("head_sha") or ""}
+        hit = _reconcile_stored_row(store, ev, row, gate, ack_gh=ack_gh)
+        if hit is not None:
+            return hit
         if ev.get("pr_number"):
             return request_ack(
                 store=store, repo=ev.get("repo") or "",

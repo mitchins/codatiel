@@ -247,10 +247,14 @@ class Store:
 
         Supports acknowledgement repair when the completed outcome
         lives under a different delivery ID than the gated event.
+        Replay-wrapped completions count: delivery_mark_replay keeps
+        the original decision and detail (run_id) on the row.
         """
         return _delivery_select(
             self.cx, "repo=? AND pr=? AND head_sha=?"
-            " AND decision='completed' ORDER BY rowid DESC LIMIT 1",
+            " AND (decision='completed' OR (decision='skipped:replay'"
+            " AND json_extract(detail, '$.original_decision')"
+            "='completed')) ORDER BY rowid DESC LIMIT 1",
             (repo, int(pr), head_sha),
             "completed delivery read failed")
 

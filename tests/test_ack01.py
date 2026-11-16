@@ -673,3 +673,63 @@ def test_gate_unwraps_replay_to_completed(tmp_path, monkeypatch):
     assert "reviewed" in body
     assert "#issuecomment-4242" in body
     store.close()
+
+
+def test_gate_checks_completed_before_stored_refusal(tmp_path, monkeypatch):
+    """Stored row is skipped:ceiling, current gate is skipped:paused,
+    another delivery completed the head: completed must win."""
+    monkeypatch.setenv(C.SWITCH_ENV, "on")
+    store = _armed_store(tmp_path)
+    store.delivery_record(delivery_id="dx", event_type="pull_request",
+                          action="synchronize", repo=REPO, pr=PR,
+                          head_sha=C40, decision="skipped:ceiling",
+                          reason="daily budget exhausted", cost_usd=0.0,
+                          detail={"operator_gate": True})
+    _completed_row(store, did="dy")
+    gh = FakeGH(head=C40, base=A40)
+    ev = {"delivery_id": "dx", "repo": REPO, "pr_number": PR,
+          "head_sha": C40}
+    out = P.gate_ack(store=store, ev=ev,
+                     row=store.delivery_get("dx"),
+                     gate={"decision": "skipped:paused",
+                           "reason": "operator pause is set"},
+                     ack_gh=gh)
+    assert out["outcome"] == "reconciled-stored"
+    assert out["decision"] == "completed"
+    body = gh.comments[0]["body"]
+    assert "reviewed" in body
+    assert "#issuecomment-4242" in body
+    store.close()
+
+
+def test_gate_finds_replay_wrapped_completion(tmp_path, monkeypatch):
+    """A completed delivery later marked skipped:replay must still be
+    found by the cross-delivery lookup, detail intact."""
+    monkeypatch.setenv(C.SWITCH_ENV, "on")
+    store = _armed_store(tmp_path)
+    _completed_row(store, did="dy")
+    row = store.delivery_get("dy")
+    store.delivery_mark_replay("dy", row)
+    stored = store.delivery_get("dy")
+    assert stored["decision"] == "skipped:replay"
+    found = store.delivery_get_completed(REPO, PR, C40)
+    assert found is not None
+    assert found["delivery_id"] == "dy"
+    gh = FakeGH(head=C40, base=A40)
+    ev = {"delivery_id": "dx", "repo": REPO, "pr_number": PR,
+          "head_sha": C40}
+    store.delivery_record(delivery_id="dx", event_type="pull_request",
+                          action="synchronize", repo=REPO, pr=PR,
+                          head_sha=C40, decision="skipped:ceiling",
+                          reason="daily budget exhausted", cost_usd=0.0,
+                          detail={"operator_gate": True})
+    out = P.gate_ack(store=store, ev=ev,
+                     row=store.delivery_get("dx"),
+                     gate={"decision": "skipped:ceiling",
+                           "reason": "daily budget exhausted"},
+                     ack_gh=gh)
+    assert out["outcome"] == "reconciled-stored"
+    body = gh.comments[0]["body"]
+    assert "reviewed" in body
+    assert "#issuecomment-4242" in body
+    store.close()
