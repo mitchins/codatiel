@@ -606,3 +606,45 @@ def test_gate_prefers_stored_completed_over_deferred(tmp_path, monkeypatch):
     assert "reviewed" in body and "#issuecomment-4242" in body
     assert "No review has run" not in body
     store.close()
+
+
+# -- ACK-01-F: correct a misleading deferred comment --------------------
+# Production case (needletail#10): a completed review exists, the live
+# comment wrongly says deferred/"No review has run", then the budget
+# gate fires again. The next reconciliation must PATCH the comment to
+# completed WITH its findings link — suppressing another deferred write
+# is not sufficient.
+
+def test_gate_corrects_misleading_deferred_to_completed(tmp_path,
+                                                        monkeypatch):
+    monkeypatch.setenv(C.SWITCH_ENV, "on")
+    store = _armed_store(tmp_path)
+    store.delivery_record(delivery_id="d1", event_type="pull_request",
+                          action="synchronize", repo=REPO, pr=PR,
+                          head_sha=C40, decision="completed",
+                          reason="full review complete",
+                          cost_usd=0.5,
+                          detail={"run_id": "run-1",
+                                  "provenance_version": "cost01b-v1"})
+    store.publication_record(repo=REPO, pr=PR, head_sha=C40,
+                             run_id="run-1", comment_id="4242",
+                             outcome="posted", reason="t")
+    gh = FakeGH(head=C40, base=A40)
+    # The misleading comment as posted by the pre-fix gate path.
+    seed = A.render_ack(repo=REPO, pr=PR, head=C40, state="deferred",
+                        detail=("daily budget exhausted \u2014 automatic "
+                                "bounded retry when budget frees."))
+    gh.comments.append({"id": 4242 - 1, "body": seed})
+    ev = {"delivery_id": "d1", "repo": REPO, "pr_number": PR,
+          "head_sha": C40}
+    out = P.gate_ack(store=store, ev=ev,
+                     row=store.delivery_get("d1"),
+                     gate={"decision": "skipped:ceiling",
+                           "reason": "daily budget exhausted"},
+                     ack_gh=gh)
+    assert out["outcome"] == "reconciled-stored"
+    assert len(gh.posts) == 0 and len(gh.patches) == 1
+    body = gh.comments[0]["body"]
+    assert "reviewed" in body and "#issuecomment-4242" in body
+    assert "No review has run" not in body
+    store.close()
