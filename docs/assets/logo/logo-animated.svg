@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256" role="img" aria-labelledby="t">
+  <title id="t">Codatiel</title>
+  <!-- One mid-tone ink and one orange, no colour-scheme switching: both hold 3:1 or better on white and on dark surfaces. -->
+  <style>
+    /* The drawn logo is the resting state, so it is complete wherever animation doesn't run. */
+    .head  { stroke-dasharray: 1; animation: draw .7s cubic-bezier(.6,0,.2,1) .1s backwards; }
+    .beak  { animation: beak .35s ease-out .7s backwards; }
+    .cheek { transform-box: fill-box; transform-origin: center;
+             animation: pop .3s cubic-bezier(.3,1.6,.6,1) 1s backwards, blink .18s steps(1) 4.2s 1; }
+    .crest { transform-box: fill-box; transform-origin: 0% 100%; }
+    .c1    { animation: rise .35s ease-out 1.25s backwards, perk .72s ease-in-out 3s 1; }
+    .c2    { animation: rise .35s ease-out 1.40s backwards, perk .72s ease-in-out 3.08s 1; }
+
+    @keyframes draw  { from { stroke-dashoffset: 1; } }
+    @keyframes beak  { from { opacity: 0; transform: translateX(-5px); } }
+    @keyframes pop   { from { transform: scale(0); } }
+    @keyframes rise  { from { opacity: 0; transform: scaleY(.2); } }
+    @keyframes perk  { 0%, 100% { transform: none; } 33% { transform: rotate(-14deg); } 67% { transform: rotate(5deg); } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .head, .beak, .cheek, .crest { animation: none !important; }
+    }
+  </style>
+  <g fill="none" stroke="#77808c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path class="crest c1" d="M23 24 L27.5 11"/>
+    <path class="crest c2" d="M31 23 L36.5 7"/>
+    <path class="head" pathLength="1" d="M39 31.3 A14 14 0 1 0 39 52.7"/>
+    <path class="beak" d="M43 37.5 L51 42 L43 46.5"/>
+  </g>
+  <circle class="cheek" cx="27" cy="45" r="3.5" fill="#e36209"/>
+</svg>

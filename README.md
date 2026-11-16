@@ -1,3 +1,5 @@
+<p><img src="docs/assets/logo/logo-wordmark.svg" alt="" height="56"></p>
+
 # Codatiel I2
 
 Codatiel I2 is an experimental, agentic, repository-aware code reviewer.

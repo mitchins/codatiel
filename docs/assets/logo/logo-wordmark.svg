@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 231 64" width="462" height="128" role="img" aria-labelledby="t">
+  <title id="t">Codatiel</title>
+  <!-- One mid-tone ink and one orange, no colour-scheme switching: both hold 3:1 or better on white and on dark surfaces. -->
+  <g fill="none" stroke="#77808c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path class="crest c1" d="M23 24 L27.5 11"/>
+    <path class="crest c2" d="M31 23 L36.5 7"/>
+    <path class="head" pathLength="1" d="M39 31.3 A14 14 0 1 0 39 52.7"/>
+    <path class="beak" d="M43 37.5 L51 42 L43 46.5"/>
+  </g>
+  <circle class="cheek" cx="27" cy="45" r="3.5" fill="#e36209"/>
+  <g fill="none" stroke="#77808c" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M87.66 38.34 A8 8 0 1 0 87.66 49.66 M114 44 A8 8 0 1 0 98 44 A8 8 0 1 0 114 44 M138 44 A8 8 0 1 0 122 44 A8 8 0 1 0 138 44 M138 28 V52 M162 44 A8 8 0 1 0 146 44 A8 8 0 1 0 162 44 M162 36 V52 M175 28 V52 M170 36 H181 M189 36 V52 M197 44 H213 A8 8 0 1 0 210.66 49.66 M221 28 V52"/>
+  </g>
+  <circle cx="189" cy="28.5" r="2.2" fill="#77808c"/>
+</svg>
