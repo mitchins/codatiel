@@ -351,16 +351,17 @@ def test_mirror_seed_keys_only_published():
 
 
 def test_record_mirror_savings_unknown_and_empty():
-    out = {"mirror_skipped": 2, "pairs": [{"assess_ran": True}]}
-    ES._record_mirror_savings(out, None, None, __import__("time").monotonic())
+    out = {"mirror_skipped": 2, "scaffold_skipped": 0,
+           "pairs": [{"assess_ran": True}]}
+    ES._record_preskip_savings(out, None, None, __import__("time").monotonic())
     assert out["mirror_saved_usd_est"] is None
     assert out["mirror_saved_wall_s_est"] is not None
-    out = {"mirror_skipped": 1, "pairs": []}
-    ES._record_mirror_savings(out, 1.0, 1.0, __import__("time").monotonic())
+    out = {"mirror_skipped": 1, "scaffold_skipped": 0, "pairs": []}
+    ES._record_preskip_savings(out, 1.0, 1.0, __import__("time").monotonic())
     assert out["mirror_saved_usd_est"] is None
     assert out["mirror_saved_wall_s_est"] is None
-    out = {"mirror_skipped": 0, "pairs": []}
-    ES._record_mirror_savings(out, None, None, __import__("time").monotonic())
+    out = {"mirror_skipped": 0, "scaffold_skipped": 0, "pairs": []}
+    ES._record_preskip_savings(out, None, None, __import__("time").monotonic())
     assert out["mirror_saved_usd_est"] == 0.0
 
 
