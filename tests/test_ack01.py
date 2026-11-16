@@ -581,75 +581,27 @@ def test_deferred_suppressed_when_head_in_flight(tmp_path, monkeypatch):
     store.close()
 
 
-def test_gate_prefers_stored_completed_over_deferred(tmp_path, monkeypatch):
+@pytest.mark.parametrize("seed_misleading,exp_posts,exp_patches",
+                         [(False, 1, 0), (True, 0, 1)])
+def test_gate_reconciles_stored_completed(tmp_path, monkeypatch,
+                                          seed_misleading, exp_posts,
+                                          exp_patches):
+    """Ceiling-gated delivery with a stored completed outcome for the
+    same head reconciles to completed with its findings link — whether
+    or not a misleading deferred comment already exists."""
     monkeypatch.setenv(C.SWITCH_ENV, "on")
     store = _armed_store(tmp_path)
-    store.delivery_record(delivery_id="d1", event_type="pull_request",
-                          action="synchronize", repo=REPO, pr=PR,
-                          head_sha=C40, decision="completed",
-                          reason="full review complete",
-                          cost_usd=0.5,
-                          detail={"run_id": "run-1",
-                                  "provenance_version": "cost01b-v1"})
-    store.publication_record(repo=REPO, pr=PR, head_sha=C40,
-                             run_id="run-1", comment_id="4242",
-                             outcome="posted", reason="t")
-    gh = FakeGH()
-    ev = {"delivery_id": "d1", "repo": REPO, "pr_number": PR,
-          "head_sha": C40}
-    out = P.gate_ack(store=store, ev=ev,
-                     row=store.delivery_get("d1"),
-                     gate={"decision": "skipped:ceiling",
-                           "reason": "daily budget exhausted"},
-                     ack_gh=gh)
-    assert out["outcome"] == "reconciled-stored"
-    assert len(gh.posts) == 1
-    assert gh.patches == []
-    body = gh.comments[0]["body"]
-    assert "reviewed" in body
-    assert "#issuecomment-4242" in body
-    assert "No review has run" not in body
-    store.close()
-
-
-# -- ACK-01-F: correct a misleading deferred comment --------------------
-# Production case (needletail#10): a completed review exists, the live
-# comment wrongly says deferred/"No review has run", then the budget
-# gate fires again. The next reconciliation must PATCH the comment to
-# completed WITH its findings link — suppressing another deferred write
-# is not sufficient.
-
-def test_gate_corrects_misleading_deferred_to_completed(tmp_path,
-                                                        monkeypatch):
-    monkeypatch.setenv(C.SWITCH_ENV, "on")
-    store = _armed_store(tmp_path)
-    store.delivery_record(delivery_id="d1", event_type="pull_request",
-                          action="synchronize", repo=REPO, pr=PR,
-                          head_sha=C40, decision="completed",
-                          reason="full review complete",
-                          cost_usd=0.5,
-                          detail={"run_id": "run-1",
-                                  "provenance_version": "cost01b-v1"})
-    store.publication_record(repo=REPO, pr=PR, head_sha=C40,
-                             run_id="run-1", comment_id="4242",
-                             outcome="posted", reason="t")
+    _completed_row(store, did="d1", run="run-1", cid="4242")
     gh = FakeGH(head=C40, base=A40)
-    # The misleading comment as posted by the pre-fix gate path.
-    seed = A.render_ack(repo=REPO, pr=PR, head=C40, state="deferred",
-                        detail=("daily budget exhausted \u2014 automatic "
-                                "bounded retry when budget frees."))
-    gh.comments.append({"id": 4242 - 1, "body": seed})
-    ev = {"delivery_id": "d1", "repo": REPO, "pr_number": PR,
-          "head_sha": C40}
-    out = P.gate_ack(store=store, ev=ev,
-                     row=store.delivery_get("d1"),
-                     gate={"decision": "skipped:ceiling",
-                           "reason": "daily budget exhausted"},
-                     ack_gh=gh)
+    if seed_misleading:
+        seed = A.render_ack(repo=REPO, pr=PR, head=C40, state="deferred",
+                            detail=("daily budget exhausted \u2014 automatic "
+                                    "bounded retry when budget frees."))
+        gh.comments.append({"id": 4242 - 1, "body": seed})
+    out, body = _gate_completed(store, gh, "d1")
     assert out["outcome"] == "reconciled-stored"
-    assert len(gh.posts) == 0
-    assert len(gh.patches) == 1
-    body = gh.comments[0]["body"]
+    assert len(gh.posts) == exp_posts
+    assert len(gh.patches) == exp_patches
     assert "reviewed" in body
     assert "#issuecomment-4242" in body
     assert "No review has run" not in body
@@ -676,6 +628,21 @@ def _completed_row(store, did="dy", head=C40, run="run-9", cid="4242"):
                              outcome="posted", reason="t")
 
 
+_CEILING_GATE = {"decision": "skipped:ceiling",
+                 "reason": "daily budget exhausted"}
+
+
+def _gate_completed(store, gh, did, head=C40):
+    """Call gate_ack for a ceiling-gated delivery; return (out, body)."""
+    ev = {"delivery_id": did, "repo": REPO, "pr_number": PR,
+          "head_sha": head}
+    out = P.gate_ack(store=store, ev=ev,
+                     row=store.delivery_get(did),
+                     gate=dict(_CEILING_GATE), ack_gh=gh)
+    bodies = [c.get("body") or "" for c in gh.comments]
+    return out, (bodies[0] if bodies else "")
+
+
 def test_gate_finds_completed_across_delivery_ids(tmp_path, monkeypatch):
     monkeypatch.setenv(C.SWITCH_ENV, "on")
     store = _armed_store(tmp_path)
@@ -686,15 +653,8 @@ def test_gate_finds_completed_across_delivery_ids(tmp_path, monkeypatch):
                           detail={"operator_gate": True})
     _completed_row(store, did="dy")
     gh = FakeGH(head=C40, base=A40)
-    ev = {"delivery_id": "dx", "repo": REPO, "pr_number": PR,
-          "head_sha": C40}
-    out = P.gate_ack(store=store, ev=ev,
-                     row=store.delivery_get("dx"),
-                     gate={"decision": "skipped:ceiling",
-                           "reason": "daily budget exhausted"},
-                     ack_gh=gh)
+    out, body = _gate_completed(store, gh, "dx")
     assert out["outcome"] == "reconciled-stored"
-    body = gh.comments[0]["body"]
     assert "reviewed" in body
     assert "#issuecomment-4242" in body
     assert "No review has run" not in body
@@ -708,15 +668,8 @@ def test_gate_unwraps_replay_to_completed(tmp_path, monkeypatch):
     row = store.delivery_get("dy")
     store.delivery_mark_replay("dy", row)
     gh = FakeGH(head=C40, base=A40)
-    ev = {"delivery_id": "dy", "repo": REPO, "pr_number": PR,
-          "head_sha": C40}
-    out = P.gate_ack(store=store, ev=ev,
-                     row=store.delivery_get("dy"),
-                     gate={"decision": "skipped:ceiling",
-                           "reason": "daily budget exhausted"},
-                     ack_gh=gh)
+    out, body = _gate_completed(store, gh, "dy")
     assert out["outcome"] == "reconciled-stored"
-    body = gh.comments[0]["body"]
     assert "reviewed" in body
     assert "#issuecomment-4242" in body
     store.close()

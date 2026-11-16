@@ -135,9 +135,9 @@ class StoreError(RuntimeError):
     """Any persistence problem: caller must refuse/stop, never default."""
 
 
-_DELIVERY_KEYS = ("delivery_id", "received_ts", "event_type", "action",
-                  "repo", "pr", "head_sha", "decision", "reason",
-                  "cost_usd", "detail")
+_DELIVERY_COLS = ("SELECT delivery_id, received_ts, event_type,"
+                  " action, repo, pr, head_sha, decision, reason,"
+                  " cost_usd, detail")
 
 
 def _delivery_row(row: Any) -> dict | None:
@@ -145,6 +145,17 @@ def _delivery_row(row: Any) -> dict | None:
     if not row:
         return None
     return dict(zip(_DELIVERY_KEYS, row))
+
+
+def _delivery_select(cx: Any, where: str, params: tuple,
+                     err: str) -> dict | None:
+    """One delivery row by filter; None when absent. Raises StoreError."""
+    try:
+        row = cx.execute(_DELIVERY_COLS + " FROM deliveries WHERE "
+                         + where, params).fetchone()
+    except Exception as exc:
+        raise StoreError(f"{err}: {exc}")
+    return _delivery_row(row)
 
 
 class Store:
@@ -222,15 +233,9 @@ class Store:
 
     # -- deliveries (replay detection) ----------------------------------
     def delivery_get(self, delivery_id: str) -> dict | None:
-        try:
-            row = self.cx.execute(
-                "SELECT delivery_id, received_ts, event_type, action, repo,"
-                " pr, head_sha, decision, reason, cost_usd, detail"
-                " FROM deliveries WHERE delivery_id=?",
-                (delivery_id,)).fetchone()
-        except Exception as exc:
-            raise StoreError(f"delivery read failed: {exc}")
-        return _delivery_row(row)
+        return _delivery_select(
+            self.cx, "delivery_id=?", (delivery_id,),
+            "delivery read failed")
 
     def delivery_get_completed(self, repo: str, pr: int,
                                head_sha: str) -> dict | None:
@@ -239,17 +244,11 @@ class Store:
         Supports acknowledgement repair when the completed outcome
         lives under a different delivery ID than the gated event.
         """
-        try:
-            row = self.cx.execute(
-                "SELECT delivery_id, received_ts, event_type, action,"
-                " repo, pr, head_sha, decision, reason, cost_usd, detail"
-                " FROM deliveries WHERE repo=? AND pr=?"
-                " AND head_sha=? AND decision='completed'"
-                " ORDER BY rowid DESC LIMIT 1",
-                (repo, int(pr), head_sha)).fetchone()
-        except Exception as exc:
-            raise StoreError(f"completed delivery read failed: {exc}")
-        return _delivery_row(row)
+        return _delivery_select(
+            self.cx, "repo=? AND pr=? AND head_sha=?"
+            " AND decision='completed' ORDER BY rowid DESC LIMIT 1",
+            (repo, int(pr), head_sha),
+            "completed delivery read failed")
 
     def delivery_record(self, *, delivery_id: str, event_type: str,
                         action: str, repo: str, pr: int, head_sha: str,
