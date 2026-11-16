@@ -1902,9 +1902,21 @@ def _original_outcome(row: dict | None) -> tuple[str, str, dict]:
     return decision, reason, detail
 
 
+def explicit_delivery_id(repo: str, number: int, head: str,
+                          run_token: str) -> str:
+    """Unique delivery ID for an explicit (operator-driven) review.
+
+    Bound to the claim's generation token, not just (repo, PR, head):
+    repeated explicit re-drives of one head must not share a delivery
+    ID, or recovery could match the wrong run dir and double-count
+    proven spend against a new reservation.
+    """
+    return f"explicit:{repo}:{int(number)}:{head}:{run_token}"
+
+
 def _reconcile_ack_on_replay(store: store_mod.Store, ev: dict,
-                               prior: dict | None,
-                               ack_gh: Any = None) -> None:
+                             prior: dict | None,
+                             ack_gh: Any = None) -> None:
     """Retry a terminal acknowledgement from the stored delivery row.
 
     Replays carry no inference and change no review state; they only
@@ -2185,16 +2197,20 @@ def _proven_spend(run_dir: Path | str | None) -> tuple[float, bool]:
     """Priced spend proven by a run dir, and whether it ever started.
 
     Proven = priced Terra ledger lines + priced semdup stage total +
-    priced Luna sweep lines (all written only for executed, priced
-    work). Started = run.json present (written when the run begins).
-    Anything unpriced stays uncertain and is handled by the caller as
-    an unknown hold, never as $0.
+    priced Luna sweep lines. Luna sink rows are raw usage records, so
+    they restore through a ledger (corrections applied in order, last
+    row per response wins) and price at the current verified Luna
+    rates — the same semantics as a live ledger; if rates are
+    unavailable the rows stay unproven (conservative). Started = the
+    run dir exists (created before paid inference). Anything unpriced
+    stays uncertain and is handled by the caller as an unknown hold,
+    never as $0.
     """
     if not run_dir:
         return 0.0, False
     root = Path(run_dir)
     try:
-        if not (root / "run.json").is_file():
+        if not root.is_dir():
             return 0.0, False
     except Exception:
         return 0.0, False
@@ -2213,42 +2229,91 @@ def _proven_spend(run_dir: Path | str | None) -> tuple[float, bool]:
         proven += float(semdup.get("spend_usd") or 0.0)
     except Exception:
         pass
-    try:
-        for line in (root / "spend_luna.jsonl").read_text(
-                encoding="utf-8").splitlines():
-            try:
-                row = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(row, dict):
-                proven += float(row.get("priced_cost_usd") or 0.0)
-    except Exception:
-        pass
+    proven += _proven_luna_sink(root)
     return round(proven, 6), True
 
 
-def _find_run_dir(state_dir: Path, delivery_id: str) -> Path | None:
-    """Locate a run dir by its bound delivery ID (exact match).
+def _proven_luna_sink(run_dir: Path) -> float:
+    """Price restored Luna sink rows at current verified Luna rates."""
+    try:
+        from codatiel_i2 import providers as providers_mod
+        from codatiel_i2.core import spend as spend_mod
+        resolved = providers_mod.resolve_backend("luna")
+        ledger = spend_mod.SpendLedger(
+            rate=resolved.get("rate_usd_per_mtok") or {},
+            rate_status=resolved.get("rate_status") or "",
+            ceiling_usd=float("inf"))
+    except Exception:
+        return 0.0
+    try:
+        ledger.restore_sink(run_dir / "spend_luna.jsonl")
+    except Exception:
+        return 0.0
+    try:
+        record = ledger.to_record()
+    except Exception:
+        return 0.0
+    total = 0.0
+    for row in record.get("request_ledger", []):
+        if isinstance(row, dict):
+            try:
+                total += float(row.get("priced_cost_usd") or 0.0)
+            except (TypeError, ValueError):
+                pass
+    return total
+
+
+def _run_created_ts(run_dir: Path) -> float:
+    """Run start time from run.json, or -1 when unreadable."""
+    try:
+        data = json.loads((run_dir / "run.json").read_text(
+            encoding="utf-8"))
+        created = str(data.get("created_at") or "")
+        if created.endswith("Z"):
+            created = created[:-1] + "+00:00"
+        import datetime as _dt
+        return _dt.datetime.fromisoformat(created).timestamp()
+    except Exception:
+        return -1.0
+
+
+def _find_run_dir(state_dir: Path, delivery_id: str, *,
+                  after_ts: float = 0.0,
+                  exclude: set[str] | None = None) -> Path | None:
+    """Locate the run dir bound to a delivery ID.
 
     run.json is written when the run starts (before paid inference),
-    so mid-inference kills are locatable; identity.json is a fallback
-    for runs bound after completion.
+    so mid-inference kills are locatable. When one delivery drove
+    several runs (kills and re-drives), the earliest run created after
+    the holder's claim wins; run dirs already consumed by a closed
+    recovery never match again.
     """
     if not delivery_id:
         return None
+    excluded = exclude or set()
     try:
         runs_root = Path(state_dir) / "runs"
         if not runs_root.is_dir():
             return None
-        for name in ("run.json", "identity.json"):
-            for ident in runs_root.rglob(name):
-                try:
-                    data = json.loads(ident.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                if isinstance(data, dict) and \
-                        data.get("delivery_id") == delivery_id:
-                    return ident.parent
+        best: Path | None = None
+        best_ts = float("inf")
+        for ident in runs_root.rglob("run.json"):
+            try:
+                data = json.loads(ident.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            if data.get("delivery_id") != delivery_id:
+                continue
+            if str(ident.parent) in excluded:
+                continue
+            ts = _run_created_ts(ident.parent)
+            if ts < 0 or ts < after_ts - 60.0:
+                continue
+            if ts < best_ts:
+                best, best_ts = ident.parent, ts
+        return best
     except Exception:
         return None
     return None
@@ -2282,6 +2347,10 @@ def recover_reservations(cfg: EventConfig, store: store_mod.Store,
         holders = store.reservations_open()
     except Exception:
         return done
+    try:
+        consumed = store.reservations_consumed_run_dirs()
+    except Exception:
+        consumed = set()
     for h in holders:
         holder = str(h.get("holder") or "")
         if not holder:
@@ -2290,12 +2359,20 @@ def recover_reservations(cfg: EventConfig, store: store_mod.Store,
             if _holder_owned_by_live_worker(store, h, ts,
                                             cfg.stale_after_s):
                 continue
-            run_dir = _find_run_dir(cfg.state_dir,
-                                    str(h.get("delivery_id") or ""))
+            try:
+                created = float(h.get("created_ts") or 0.0)
+            except (TypeError, ValueError):
+                created = 0.0
+            run_dir = _find_run_dir(
+                cfg.state_dir, str(h.get("delivery_id") or ""),
+                after_ts=created, exclude=consumed)
             proven, started = _proven_spend(run_dir)
             out = store.reservation_recover(
-                holder, proven_usd=proven, started=started)
+                holder, proven_usd=proven, started=started,
+                run_dir="" if run_dir is None else str(run_dir))
             if out.get("recovered"):
+                if run_dir is not None:
+                    consumed.add(str(run_dir))
                 done.append(
                     f"{h.get('repo')}#{h.get('pr')} {holder[:8]}"
                     f" proven=${proven:.4f}"

@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS reservations (
     head_sha TEXT NOT NULL DEFAULT '',
     delivery_id TEXT NOT NULL DEFAULT '',
     run_id TEXT NOT NULL DEFAULT '',
+    run_dir TEXT NOT NULL DEFAULT '',
     amount_usd REAL NOT NULL DEFAULT 0,
     proven_usd REAL,
     held_unknown_usd REAL,
@@ -1088,7 +1089,7 @@ class Store:
                 "unknown_holds": u}
 
     def reservations_open(self) -> list[dict]:
-        """All open (unsettled, unreleased) reservations."""
+        """All unsettled, unreleased reservations, oldest first."""
         try:
             rows = self.cx.execute(
                 "SELECT holder, repo, pr, head_sha, delivery_id, run_id,"
@@ -1100,16 +1101,29 @@ class Store:
                 "run_id", "amount_usd", "created_ts")
         return [dict(zip(keys, r)) for r in rows]
 
+    def reservations_consumed_run_dirs(self) -> set[str]:
+        """Run dirs already attributed by closed recoveries."""
+        try:
+            rows = self.cx.execute(
+                "SELECT run_dir FROM reservations WHERE state='recovered'"
+                " AND run_dir <> ''").fetchall()
+        except Exception as exc:
+            raise StoreError(f"reservations list failed: {exc}")
+        return {str(r[0]) for r in rows if r and r[0]}
+
     def reservation_recover(self, holder: str, *, proven_usd: float,
-                            started: bool) -> dict:
+                            started: bool,
+                            run_dir: str = "") -> dict:
         """Settle proven usage for an orphaned reservation, idempotently.
 
         Proven spend settles exactly; when the run started, the
         unproven remainder is preserved as an explicit unknown hold
-        (never silently recorded as zero). When the run never started,
-        the full hold is released. The holder closes in the same
-        transaction, so a repeated recovery is a no-op. Never raises
-        for a missing/closed holder (returns recovered=False).
+        (never silently recorded as $0). When it never started the
+        full hold releases with no hold. The holder closes in the same
+        transaction as its spend update, so a repeated recovery is a
+        no-op and settled spend is never rewritten or double-counted.
+        The attributing run dir is recorded, so a later recovery for
+        another holder never re-attributes the same run.
         """
         try:
             self.cx.execute(_BEGIN)
@@ -1156,9 +1170,9 @@ class Store:
                 (u,))
             self.cx.execute(
                 "UPDATE reservations SET state='recovered',"
-                " proven_usd=?, held_unknown_usd=?, closed_ts=?"
-                " WHERE holder=? AND state='open'",
-                (proven, held, time.time(), holder))
+                " proven_usd=?, held_unknown_usd=?, run_dir=?,"
+                " closed_ts=? WHERE holder=? AND state='open'",
+                (proven, held, run_dir, time.time(), holder))
             self.cx.execute(_COMMIT)
         except Exception as exc:
             try:

@@ -50,12 +50,17 @@ def _cfg_store(tmp_path, monkeypatch, root=None):
 
 
 def _run_dir(state_dir: Path, run_id: str, *, priced=0.0,
-             semdup=None, delivery_id="d1") -> Path:
+             semdup=None, delivery_id="d1", created_at=None) -> Path:
     d = state_dir / "runs" / "scan" / run_id
     d.mkdir(parents=True, exist_ok=True)
+    if created_at is None:
+        import datetime as _dt
+        created_at = _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
     (d / "run.json").write_text(json.dumps(
         {"run_id": run_id, "head_sha": HEAD,
-         "delivery_id": delivery_id}), encoding="utf-8")
+         "delivery_id": delivery_id,
+         "created_at": created_at}), encoding="utf-8")
     (d / "identity.json").write_text(json.dumps(
         {"run_id": run_id, "delivery_id": delivery_id,
          "head_sha": HEAD, "repo_slug": REPO}), encoding="utf-8")
@@ -345,3 +350,80 @@ def test_reset_spend_refused_with_open_reservations(tmp_path):
         P.reset_spend(store=st)
     assert st.spend_totals()["reserved_usd"] == 1.0
     st.close()
+
+
+# -- review follow-ups: unique explicit IDs, priced luna, disambiguation -
+
+def test_explicit_delivery_id_unique_per_claim(tmp_path, monkeypatch):
+    from codatiel_i2 import event_pipeline as P2
+    a = P2.explicit_delivery_id(REPO, PR, HEAD, "tok-1")
+    b = P2.explicit_delivery_id(REPO, PR, HEAD, "tok-1")
+    c = P2.explicit_delivery_id(REPO, PR, HEAD, "tok-2")
+    assert a == b
+    assert a != c
+    assert HEAD in a and "tok-1" in a
+
+
+def test_recover_disambiguates_runs_by_claim_window(tmp_path, monkeypatch):
+    """Two runs, same delivery ID (auto-path re-drive): each holder
+    recovers from the run created after its own claim."""
+    import datetime as _dt
+    import time as _t
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    t0 = _t.time()
+    cfg.clock = lambda: t0 + 100000.0  # both claims stale: recoverable
+    old = _claim(store, token="tok-old", now=t0, did="d1")
+    store.reserve(1.0, holder=old, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1", now=t0)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    base = _dt.datetime.fromtimestamp(t0, _dt.timezone.utc)
+    _run_dir(cfg.state_dir, "run-old", priced=0.02, delivery_id="d1",
+             created_at=(base + _dt.timedelta(seconds=5)).strftime(fmt))
+    store.checkpoint_upsert({"repo": REPO, "pr": PR,
+                             "status": "in_progress",
+                             "in_progress_head": HEAD,
+                             "in_progress_run": "tok-new"}, now=t0 + 10)
+    store.reserve(1.0, holder="tok-new", repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1", now=t0 + 10)
+    _run_dir(cfg.state_dir, "run-new", priced=0.04, delivery_id="d1",
+             created_at=(base + _dt.timedelta(seconds=20)).strftime(fmt))
+    P.recover(cfg=cfg, store=store)
+    totals = store.spend_totals()
+    # 0.02 + 0.98 hold, then 0.04 + 0.96 hold; both holders closed.
+    assert totals["settled_usd"] == pytest.approx(2.0)
+    assert totals["reserved_usd"] == pytest.approx(0.0)
+    assert totals["unknown_holds"] == 2.0
+    assert store.reservations_open() == []
+    store.close()
+
+
+def test_proven_prices_luna_sink_with_corrections(tmp_path, monkeypatch):
+    """Luna sink rows restore through a ledger (corrections applied in
+    order): priced usage counts as proven; a later correction removes
+    it. Pricing uses the static configured rate card (no network)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    d = cfg.state_dir / "runs" / "scan" / "run-1"
+    d.mkdir(parents=True)
+    (d / "run.json").write_text('{"run_id": "run-1"}', encoding="utf-8")
+    rows = ('{"response_id": "r1", "requests": 1, "usage_known": true,'
+            ' "input_tokens": 1000000, "output_tokens": 1000,'
+            ' "cached_input_tokens": 100000,'
+            ' "cache_write_input_tokens": 50000,'
+            ' "cache_in_input": true}\n'
+            '{"response_id": "r2", "requests": 1, "usage_known": true,'
+            ' "input_tokens": 1000000, "output_tokens": 1000,'
+            ' "cached_input_tokens": 100000,'
+            ' "cache_write_input_tokens": 50000,'
+            ' "cache_in_input": true}\n')
+    (d / "spend_luna.jsonl").write_text(rows, encoding="utf-8")
+    proven_both, started = P._proven_spend(d)
+    assert started is True
+    assert proven_both > 0, "raw luna usage must price to proven spend"
+    with open(d / "spend_luna.jsonl", "a", encoding="utf-8") as fh:
+        fh.write('{"response_id": "r1",'
+                 ' "usage_known_correction": true}\n')
+    proven_corrected, _ = P._proven_spend(d)
+    assert 0 <= proven_corrected < proven_both, \
+        "correction row must win in order"
+    store.close()

@@ -1278,9 +1278,11 @@ def cmd_events(args) -> dict:
                             "reason": f"claim returned {claim}"}
                 _claimed_cp = store.checkpoint_get(repo, number)
                 _claimed_run = (_claimed_cp or {}).get("in_progress_run") or ""
+                _explicit_did = _pm.explicit_delivery_id(
+                    repo, number, head, _claimed_run)
                 store.reserve(cfg.reserve_usd, holder=_claimed_run,
                               repo=repo, pr=number, head_sha=head,
-                              delivery_id=f"explicit:{repo}:{number}:{head}")
+                              delivery_id=_explicit_did)
                 transport = os.environ.get(
                     "CODATIEL_EVENTS_TRANSPORT", "fixture")
                 result = _pm.run_review_for_range(
@@ -1290,7 +1292,7 @@ def cmd_events(args) -> dict:
                     repo_path=access.path,
                     runs_root=cfg.state_dir / "runs",
                     work_root=cfg.state_dir / "work",
-                    delivery_id=f"explicit:{repo}:{number}:{head}")
+                    delivery_id=_explicit_did)
                 cost = result.get("cost_usd")
                 unknown = bool(result.get("cost_unknown")) or cost is None
                 store.settle(cfg.reserve_usd,
