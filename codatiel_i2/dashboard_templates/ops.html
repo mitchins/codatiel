@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block body %}
+{% if not d.get("available") %}
+<p class="err">Operations store unavailable: {{ d.get("reason", "no readable events.sqlite") }} — database-backed sections are hidden, not empty.</p>
+{% endif %}
+<h2>Poller</h2>
+{% set p = d.get("poller", {}) %}
+{% if p.get("state") == "running" %}<p class="ok"><strong>running</strong> — {{ p.get("note") }}</p>
+{% elif p.get("state") == "idle" %}<p><strong>idle</strong> — {{ p.get("note") }}.</p>
+{% elif p.get("state") == "stale" %}<p class="warn"><strong>stale</strong> — {{ p.get("note") }}</p>
+{% else %}<p class="err"><strong>{{ p.get("state", "unknown") }}</strong> — {{ p.get("note") }}</p>{% endif %}
+{% if (d.get("poll") or {}).get("log_tail") %}
+<h3>Poll log (tail)</h3><pre>{{ (d["poll"]["log_tail"] or []) | join("\n") }}</pre>
+{% endif %}
+<form method="get" action="/ops"><label>Filter by state
+<select name="state"><option value="">all</option>
+{% for s in states %}<option value="{{ s }}"{% if s == state_filter %} selected{% endif %}>{{ s }}</option>{% endfor %}
+</select></label> <input type="submit" value="Filter"></form>
+{% if d.get("available") %}
+<h2>Recent ingestions ({{ d.get("deliveries", []) | length }})</h2>
+{% if d.get("deliveries") %}
+<table><tr><th>PR</th><th>Decision</th><th>Reason</th><th>Cost</th></tr>
+{% for x in d["deliveries"] %}<tr><td><a href="/pr/{{ x["repo"] }}/{{ x["pr"] }}">{{ x["repo"] }}#{{ x["pr"] }}</a></td>
+<td><span class="chip {{ x["state"] }}">{{ x["decision"] }}</span></td>
+<td>{{ (x["reason"] or "")[:160] }}</td><td>{{ x["cost_usd"] if x["cost_usd"] is not none else "—" }}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">No deliveries recorded.</p>{% endif %}
+<h2>Budget refusals (latest)</h2>
+{% if d.get("budget_refusals") %}
+<table><tr><th>PR</th><th>Decision</th><th>Reason</th></tr>
+{% for x in d["budget_refusals"] %}<tr><td><a href="/pr/{{ x["repo"] }}/{{ x["pr"] }}">{{ x["repo"] }}#{{ x["pr"] }}</a></td>
+<td><span class="chip budget_blocked">{{ x["decision"] }}</span></td><td>{{ (x["reason"] or "")[:160] }}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">None.</p>{% endif %}
+{% if d.get("budget_retries") %}
+<h3>Bounded budget retries</h3>
+<table><tr><th>PR</th><th>Decision</th><th>Attempts</th><th>Retried from</th></tr>
+{% for x in d["budget_retries"] %}<tr><td><a href="/pr/{{ x["repo"] }}/{{ x["pr"] }}">{{ x["repo"] }}#{{ x["pr"] }}</a></td>
+<td>{{ x["decision"] }}</td><td>{{ x["attempts"] }}</td><td>{{ x["from"] }}</td></tr>{% endfor %}</table>
+{% endif %}
+<h2>Review failures</h2>
+{% if d.get("failures") %}
+<table><tr><th>PR</th><th>Pipeline</th><th>Status</th><th>Cost</th></tr>
+{% for r in d["failures"] %}<tr><td><a href="/pr/{{ r["repo"] }}/{{ r["pr"] }}">{{ r["repo"] }}#{{ r["pr"] }}</a></td>
+<td>{{ r["pipeline"] }}</td><td><span class="chip failed">{{ r["status"] }}</span></td>
+<td>{{ r["cost_usd"] if r["cost_usd"] is not none else "unknown" }}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">None.</p>{% endif %}
+<h2>Publication failures</h2>
+{% if d.get("publication_failures") %}
+<table><tr><th>PR</th><th>Outcome</th><th>Reason</th></tr>
+{% for x in d["publication_failures"] %}<tr><td>{{ x["repo"] }}#{{ x["pr"] }}</td>
+<td><span class="chip failed">{{ x["outcome"] }}</span></td><td>{{ (x["reason"] or "")[:160] }}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">None ({{ d.get("publications_posted", 0) }} posted).</p>{% endif %}
+{% else %}
+<p class="note">Delivery, failure and publication history hidden while the operations store is unavailable.</p>
+{% endif %}
+<h2>Configuration changes (audit)</h2>
+{% if d.get("audit") %}
+<table><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr>
+{% for a in d["audit"][:20] %}<tr><td>{{ a.get("ts") }}</td><td>{{ a.get("actor") }}</td>
+<td>{{ a.get("action") }}</td><td><pre>{{ a.get("changes", a.get("errors", "")) | tojson }}</pre></td></tr>{% endfor %}</table>
+{% else %}<p class="note">No audit entries yet.</p>{% endif %}
+{% endblock %}

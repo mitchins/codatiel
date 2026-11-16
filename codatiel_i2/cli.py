@@ -1082,7 +1082,7 @@ def cmd_dashboard(args: Any) -> int:
     refused before any socket opens.
     """
     from codatiel_i2 import operator_config as opcfg_mod
-    from codatiel_i2 import operator_dashboard as dash_mod
+    from codatiel_i2 import dashboard_app as dash_mod
 
     state_dir = opcfg_mod.state_dir_from_env(
         (getattr(args, "state_dir", "") or "").strip() or None)
@@ -1093,26 +1093,17 @@ def cmd_dashboard(args: Any) -> int:
                          ensure_ascii=False, sort_keys=True))
         return 1
     try:
-        server = dash_mod.build_server(
-            state_dir,
-            getattr(args, "host", "127.0.0.1") or "127.0.0.1",
-            int(getattr(args, "port", 8487)))
+        host = dash_mod.ensure_loopback(
+            getattr(args, "host", "127.0.0.1") or "127.0.0.1")
     except opcfg_mod.OperatorConfigError as exc:
         print(json.dumps({"status": "failed", "stage": "config",
                           "error": str(exc)},
                          ensure_ascii=False, sort_keys=True))
         return 1
-    host, port = server.server_address[0], server.server_address[1]
-    print(json.dumps({"status": "ok",
-                      "url": f"http://{host}:{port}/",
-                      "state_dir": str(state_dir)},
-                     ensure_ascii=False, sort_keys=True), flush=True)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    port = int(getattr(args, "port", 8487))
+    # serve() binds first, then reports the allocated port (so
+    # --port 0 prints the real ephemeral port, not 0).
+    dash_mod.serve(state_dir, host, port)
     return 0
 
 

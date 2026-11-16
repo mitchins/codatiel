@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block body %}
+{% if not d.get("available") %}<p class="warn">{{ d.get("reason", "store unavailable") }}</p>{% endif %}
+<p>Effective repos: {{ (d.get("effective_repos") or []) | join(", ") or "—" }}</p>
+<form method="get" action="/repos"><label>Filter by state
+<select name="state"><option value="">all</option>
+{% for s in states %}<option value="{{ s }}"{% if s == state_filter %} selected{% endif %}>{{ s }}</option>{% endfor %}
+</select></label> <input type="submit" value="Filter"></form>
+{% for r in d.get("repos", []) %}
+<h2><a href="{{ r["github_repo_url"] }}">{{ r["repo"] }}</a>
+{% if not r["enabled"] %}<span class="chip">disabled</span>{% endif %}</h2>
+<table>
+<tr><th>Tracked PRs</th><td>{% for p in r["prs"] %}<a href="/pr/{{ r["repo"] }}/{{ p["pr"] }}">{{ r["repo"] }}#{{ p["pr"] }}</a> ({{ p["status"] or "?" }}){% if not loop.last %}, {% endif %}{% endfor %}{% if not r["prs"] %}none{% endif %}</td></tr>
+<tr><th>Known spend (reviews)</th><td>{{ r["spend_known_usd"] if r["spend_known_usd"] is not none else "Unavailable" }}</td></tr>
+<tr><th>Latest decision</th><td>{{ r["latest_decision"] or "—" }}</td></tr>
+<tr><th>Latest reason</th><td>{{ (r["latest_reason"] or "")[:200] }}</td></tr>
+</table>
+{% if r.get("queue_by_state") %}
+<table><tr><th>Queue state</th><th>Count</th></tr>
+{% for k, v in (r["queue_by_state"] | dictsort) %}<tr><td><span class="chip {{ k }}">{{ k }}</span></td><td>{{ v }}</td></tr>{% endfor %}</table>
+{% endif %}
+{% endfor %}
+{% if not d.get("repos") %}<p>No repositories configured or tracked.</p>{% endif %}
+{% endblock %}

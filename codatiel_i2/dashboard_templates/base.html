@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>{{ title }} — Codatiel operator</title>
+{% if refresh %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
+<style>
+body{font-family:system-ui,sans-serif;max-width:76rem;margin:2rem auto;
+padding:0 1rem;color:#111}
+nav a{margin-right:1rem}table{border-collapse:collapse;margin:1rem 0}
+th,td{border:1px solid #999;padding:.3rem .6rem;text-align:left}
+.warn{background:#fff3cd;padding:.5rem} .err{background:#f8d7da;padding:.5rem}
+.ok{background:#d4edda;padding:.5rem} pre{background:#f4f4f4;padding:.5rem;
+overflow:auto} .note{color:#555;font-size:.9em} form label{display:block;
+margin:.4rem 0} input[type=text]{width:30rem;max-width:100%}
+textarea{width:30rem;max-width:100%} footer{margin-top:2rem;color:#555;
+font-size:.85em} .chip{display:inline-block;padding:.1em .5em;
+border-radius:.6em;font-size:.85em;background:#eee}
+.chip.completed{background:#d4edda} .chip.budget_blocked{background:#fff3cd}
+.chip.failed{background:#f8d7da} .chip.stale_superseded{background:#e2e3e5}
+.chip.running{background:#cce5ff} .chip.pending{background:#fff3cd}
+</style></head><body>
+<nav>{% for label, href in nav %}<a href="{{ href }}">{{ label }}</a>{% endfor %}</nav>
+<h1>{{ title }}</h1>
+{% block body %}{% endblock %}
+<footer>Codatiel operator dashboard — loopback only. Spend figures are
+{{ ledger_label }}</footer>
+</body></html>

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% macro kv(rows) %}
+<table>{% for k, v in rows %}<tr><th>{{ k }}</th><td>{{ v if v is not none else "—" }}</td></tr>{% endfor %}</table>
+{% endmacro %}
+{% block body %}
+{% if d.get("reason") %}<p class="warn">{{ d["reason"] }}</p>{% endif %}
+<h2>Poller status</h2>
+{% if d.get("config_error") %}<p class="err">Operator configuration invalid: {{ d["config_error"] }} — settings updates are disabled until the file is fixed. Diagnostics below are unaffected.</p>{% endif %}
+{% set p = d.get("poller", {}) %}
+{% if p.get("state") == "running" %}<p class="ok"><strong>running</strong> — {{ p.get("note") }}</p>
+{% elif p.get("state") == "idle" %}<p><strong>idle</strong> — {{ p.get("note") }}. An idle poller is not broken: zero open PRs is a healthy idle tick.</p>
+{% elif p.get("state") == "stale" %}<p class="warn"><strong>stale</strong> — {{ p.get("note") }}</p>
+{% else %}<p class="err"><strong>{{ p.get("state", "unknown") }}</strong> — {{ p.get("note") }}</p>{% endif %}
+{{ kv([("State dir", d.get("state_dir")), ("Worker enabled", "yes" if d.get("enabled") else "no"),
+("Enabled at", d.get("enabled_at")), ("Pipeline", d.get("pipeline")),
+("Operator settings", d.get("operator_source")),
+("Last successful poll", (d.get("poll") or {}).get("last_successful_poll")),
+("Last poll cycle", (d.get("poll") or {}).get("last_end_line"))]) }}
+{% if (d.get("poll") or {}).get("log_tail") %}
+<h3>Poll log (tail)</h3><pre>{{ (d["poll"]["log_tail"] or []) | join("\n") }}</pre>
+{% endif %}
+<h2>Spend vs Codatiel limits</h2>
+<p class="note">{{ d.get("spend_label") }}</p>
+{% set eff = d.get("effective", {}) %}
+{% set ledger = d.get("ledger") or {} %}
+{% set rem = d.get("budget_remaining") or {} %}
+{% if eff.get("available") %}
+{{ kv([("Monthly cap (effective)", eff.get("monthly_effective_usd")),
+("Daily budget (effective)", eff.get("daily_effective_usd")),
+("Per-PR breaker (effective)", eff.get("per_pr_effective_usd")),
+("Ledger settled USD", ledger.get("settled_usd") if ledger.get("settled_usd") is not none else "Unavailable"),
+("Ledger reserved USD", ledger.get("reserved_usd") if ledger.get("reserved_usd") is not none else "Unavailable"),
+("Unknown-cost holds", ledger.get("unknown_holds") if ledger.get("unknown_holds") is not none else "Unavailable"),
+("Monthly remaining USD", rem.get("monthly_remaining_usd") if rem.get("monthly_remaining_usd") is not none else "Unavailable"),
+("Daily remaining USD (" + (rem.get("daily_day") or "?") + ")", rem.get("daily_remaining_usd") if rem.get("daily_remaining_usd") is not none else "Unavailable")]) }}
+{% if ledger.get("reason") %}<p class="warn">{{ ledger.get("reason") }}</p>{% endif %}
+{% if rem.get("monthly_note") %}<p class="note">{{ rem.get("monthly_note") }}</p>{% endif %}
+{% if rem.get("daily_note") %}<p class="note">{{ rem.get("daily_note") }}</p>{% endif %}
+{% else %}
+{{ kv([("Ledger settled USD", ledger.get("settled_usd") if ledger.get("settled_usd") is not none else "Unavailable"),
+("Ledger reserved USD", ledger.get("reserved_usd") if ledger.get("reserved_usd") is not none else "Unavailable"),
+("Unknown-cost holds", ledger.get("unknown_holds") if ledger.get("unknown_holds") is not none else "Unavailable"),
+("Effective caps", eff.get("note", "unavailable"))]) }}
+{% if ledger.get("reason") %}<p class="warn">{{ ledger.get("reason") }}</p>{% endif %}
+{% endif %}
+<p>Upstream OpenAI project limit (operator-entered, DISPLAY ONLY — never fetched, never enforced):
+<strong>{{ (d.get("settings") or {}).get("openai_project_limit_usd") }}</strong> USD —
+<a href="{{ (d.get("settings") or {}).get("openai_billing_url") }}">billing/limits</a></p>
+<h2>Review queue</h2>
+{% set rev = d.get("reviews", {}) %}
+{{ kv([("PRs reviewed", rev.get("prs_reviewed")), ("Reviews completed", rev.get("completed")),
+("Reviews failed", rev.get("failed"))]) }}
+{% for label, items in [("Budget blocked", d.get("budget_blocked") or []), ("Stale / superseded", d.get("stale") or []), ("Failed / needs attention", d.get("failed") or [])] %}
+<h3>{{ label }} ({{ items | length }})</h3>
+{% if items %}
+<table><tr><th>PR</th><th>Decision</th><th>Reason</th></tr>
+{% for x in items %}<tr><td><a href="{{ x["github_url"] }}">{{ x["repo"] }}#{{ x["pr"] }}</a></td>
+<td><span class="chip {{ "budget_blocked" if label.startswith("Budget") else ("stale_superseded" if label.startswith("Stale") else "failed") }}">{{ x["decision"] }}</span></td>
+<td>{{ (x["reason"] or "")[:160] }}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">None.</p>{% endif %}
+{% endfor %}
+<h2>Recent activity</h2>
+{% set recent = d.get("recent") or {} %}
+{% if recent.get("reviews") %}
+<table><tr><th>PR</th><th>Status</th><th>Kind</th><th>Cost USD</th></tr>
+{% for r in recent["reviews"] %}<tr><td><a href="{{ r["github_url"] }}">{{ r["repo"] }}#{{ r["pr"] }}</a></td>
+<td>{{ r["status"] }}</td><td>{{ r["kind"] }}</td>
+<td>{{ r["cost_usd"] if r["cost_usd"] is not none else ("unknown" if r["cost_unknown"] else "—") }}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">No reviews recorded.</p>{% endif %}
+<h2>Decisions by reason</h2>{% if d.get("decisions") %}
+<table><tr><th>Decision</th><th>Count</th></tr>
+{% for k, v in (d["decisions"] | dictsort) %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}</table>
+{% else %}<p>No delivery decisions recorded.</p>{% endif %}
+<h2>Publications (GitHub comments)</h2>
+{% set pubs = d.get("publications") or {} %}
+{{ kv([("Posted", pubs.get("posted")), ("Refused", pubs.get("refused"))]) }}
+{% if pubs.get("by_outcome") %}
+<table><tr><th>Outcome</th><th>Count</th></tr>
+{% for k, v in (pubs["by_outcome"] | dictsort) %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}</table>
+{% endif %}
+<p class="note">{{ pubs.get("note") }}</p>
+<h2>Spend by model (Codatiel ledger)</h2>
+{% if d.get("by_model") %}
+<table><tr><th>Model</th><th>Reviews</th><th>Ledger USD</th><th>Unknown-cost</th></tr>
+{% for m in d["by_model"] %}<tr><td>{{ m["model"] }}</td><td>{{ m["reviews"] }}</td>
+<td>{{ m["codatiel_ledger_usd"] }}</td><td>{{ m["unknown_cost_reviews"] }}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">No reviews recorded.</p>{% endif %}
+<h2>Digest email outcomes</h2>
+{% set em = d.get("email") or {} %}
+<p class="note">{{ em.get("note") }}</p>
+<table>{% for k, v in ((em.get("by_outcome") or {}) | dictsort) %}<tr><th>{{ k }}</th><td>{{ v }}</td></tr>{% endfor %}</table>
+<h2>Efficiency (measured)</h2>
+{% set e = d.get("efficiency") or {} %}
+{% if e.get("available") %}
+{{ kv([("Pairs examined", e.get("pairs_examined")), ("Pairs reused", e.get("pairs_reused")),
+("Cache hits", e.get("pairs_cache_hits")), ("Cache hit %", e.get("cache_hit_pct")),
+("Stale reviews prevented", e.get("stale_prevented")),
+("Findings delivered (posted receipts)", e.get("findings_delivered")),
+("Estimated avoided spend", "Unavailable — " + (e.get("avoided_note") or ""))]) }}
+{% else %}<p class="note">Efficiency {{ e.get("reason", "unavailable") }}.</p>{% endif %}
+{% endblock %}

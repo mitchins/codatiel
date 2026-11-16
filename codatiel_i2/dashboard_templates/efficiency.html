@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block body %}
+{% if not d.get("available") %}<p class="warn">{{ d.get("reason", "store unavailable") }}</p>{% endif %}
+<p class="note">{{ d.get("method") }} Estimated avoided spend is shown as Unavailable
+rather than invented.</p>
+<table>
+<tr><th>Pairs examined</th><td>{{ d.get("pairs_examined") if d.get("pairs_examined") is not none else "Unavailable" }}</td></tr>
+<tr><th>Pairs reused (cache)</th><td>{{ d.get("pairs_reused") if d.get("pairs_reused") is not none else "Unavailable" }}</td></tr>
+<tr><th>Embedding cache hits</th><td>{{ d.get("pairs_cache_hits") if d.get("pairs_cache_hits") is not none else "Unavailable" }}</td></tr>
+<tr><th>Cache hit %</th><td>{{ d.get("cache_hit_pct") if d.get("cache_hit_pct") is not none else "Unavailable" }}</td></tr>
+<tr><th>Stale reviews prevented</th><td>{{ d.get("stale_prevented") }}</td></tr>
+<tr><th>Findings delivered (posted receipts)</th><td>{{ d.get("findings_delivered") if d.get("findings_delivered") is not none else "Unavailable" }}</td></tr>
+<tr><th>Estimated avoided spend</th><td>Unavailable — {{ d.get("avoided_note") }}</td></tr>
+</table>
+{% endblock %}

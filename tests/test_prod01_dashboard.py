@@ -20,7 +20,8 @@ import pytest
 
 from codatiel_i2 import event_store as S
 from codatiel_i2 import operator_config as OC
-from codatiel_i2 import operator_dashboard as OD
+from codatiel_i2 import dashboard_app as DA
+from codatiel_i2 import dashboard_data as DD
 
 REPO_A = "o/r"
 REPO_B = "o/s"
@@ -286,16 +287,20 @@ def test_ingest_gate_pause_allowlist_daily(tmp_path):
 def test_spend_query_accuracy(tmp_path):
     state = tmp_path / "estate"
     _fixture_db(state)
-    data = OD.collect_overview(state)
+    data = DD.collect_overview(state)
     assert data["store_present"] and data["enabled"]
     assert data["poll"]["last_successful_poll"] == "2026-11-13T04:45:05Z"
     assert data["poll"]["last_end_ok"] is True
-    today = data["period"]["today"]
-    assert today["codatiel_ledger_usd"] == pytest.approx(4.0)
-    assert today["reviews"] == 4 and today["unknown_cost_reviews"] == 1
-    by_repo = {r["repo"]: r for r in data["period"]["by_repo"]}
-    assert by_repo[REPO_A]["codatiel_ledger_usd"] == pytest.approx(2.0)
-    assert by_repo[REPO_B]["codatiel_ledger_usd"] == pytest.approx(2.0)
+    today = data["poll"]["last_successful_poll"]
+    assert today == "2026-11-13T04:45:05Z"
+    spend = DD.collect_spend(state, days=3650)
+    assert spend["available"]
+    known_total = sum(r["codatiel_ledger_usd"] for r in spend["daily"]
+                      if "codatiel_ledger_usd" in r)
+    assert known_total == pytest.approx(4.0)
+    by_repo = {r["repo"]: r for r in spend["by_repo"]}
+    assert by_repo[REPO_A]["known_usd"] == pytest.approx(2.0)
+    assert by_repo[REPO_B]["known_usd"] == pytest.approx(2.0)
     by_model = {m["model"]: m for m in data["by_model"]}
     assert by_model["terra:gpt-6.1-terra"]["codatiel_ledger_usd"] == \
         pytest.approx(2.0)
@@ -312,47 +317,83 @@ def test_spend_query_accuracy(tmp_path):
     assert email["delivered"] == 2  # two review rows share rd1
     assert email["no-delivery-record"] == 2, email  # both rd2 rows
     pubs = data["publications"]
-    assert pubs["configured"] is False and pubs["published_total"] == 0
-    urls = [r["github_url"] for r in data["recent"]["reviews"]]
-    assert "https://github.com/o/r/pull/1" in urls
+    assert pubs["posted"] == 0 and pubs["refused"] == 0
+    assert pubs["file_store"]["configured"] is False
     assert data["ledger"]["settled_usd"] == 0.0  # untouched fixture ledger
 
 
 def test_overview_tolerates_absence(tmp_path):
-    data = OD.collect_overview(tmp_path / "empty")
+    data = DD.collect_overview(tmp_path / "empty")
     assert data["store_present"] is False
-    assert data["publications"]["configured"] is False
+    assert data["available"] is False
+    assert data["poller"]["state"] == "idle"
     assert data["poll"]["last_successful_poll"] is None
-    assert "error" in data
+    for name in ("repos", "spend", "efficiency", "ops"):
+        out = getattr(DD, f"collect_{name}")(tmp_path / "empty")
+        assert out.get("available") is False and "reason" in out, name
 
 
 def test_secrets_never_rendered(monkeypatch, tmp_path):
+    import re
+    import urllib.request
     monkeypatch.setenv("OPENAI_API_KEY", "sk-super-secret-value")
     monkeypatch.setenv("SMTP2GO_API_KEY", "smtp2go-secret-value")
     state = tmp_path / "estate"
     _fixture_db(state)
-    body = OD.render_overview(OD.collect_overview(state))
-    settings_body = OD.render_settings(OD.collect_overview(state))
-    assert "sk-super-secret-value" not in body
-    assert "smtp2go-secret-value" not in body
-    assert "sk-super-secret-value" not in settings_body
-    assert "set" in settings_body  # presence marker shown instead
+    server, thread = _serve_in_thread(state)
+    try:
+        host, port = "127.0.0.1", server.server_address[1]
+        assert server.server_address[0] == "127.0.0.1"
+        bodies = []
+        for path in ("/", "/repos", "/spend", "/efficiency",
+                      "/ops", "/settings", "/api/overview"):
+            with urllib.request.urlopen(
+                    f"http://{host}:{port}{path}",
+                    timeout=10) as resp:
+                bodies.append(resp.read().decode())
+        for body in bodies:
+            assert "sk-super-secret-value" not in body
+            assert "smtp2go-secret-value" not in body
+        assert "set" in bodies[5]  # presence marker shown instead
+        assert re.search(r'name="csrf_token" value="[^"]+"',
+                         bodies[5])
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
 
 
 # -- HTTP + binding ---------------------------------------------------------------
 
 
 def _serve_in_thread(state: Path):
-    server = OD.build_server(state, "127.0.0.1", 0)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    import uvicorn
+    server = uvicorn.Server(uvicorn.Config(
+        DA.create_app(state), host="127.0.0.1", port=0,
+        log_level="error"))
+    thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    return server
+    for _ in range(100):
+        time.sleep(0.05)
+        sockets = getattr(server, "servers", [])
+        if sockets and server.started:
+            break
+    port = server.servers[0].sockets[0].getsockname()[1]
+    server.server_address = ("127.0.0.1", port)
+    return server, thread
+
+
+def _csrf_token(settings_body: str) -> str:
+    import re
+    match = re.search(r'name="csrf_token" value="([^"]+)"',
+                      settings_body)
+    assert match, "settings form carries a CSRF token"
+    return match.group(1)
 
 
 def test_localhost_binding_and_views(tmp_path):
     state = tmp_path / "estate"
     _fixture_db(state)
-    server = _serve_in_thread(state)
+    server, thread = _serve_in_thread(state)
     try:
         host, port = server.server_address[0], server.server_address[1]
         assert host == "127.0.0.1"
@@ -367,10 +408,12 @@ def test_localhost_binding_and_views(tmp_path):
             settings_body = resp.read().decode()
         assert "monthly_budget_usd" in settings_body
         assert "model_profile" in settings_body
+        token = _csrf_token(settings_body)
         # Valid POST saves + redirects.
         conn = http.client.HTTPConnection(host, port, timeout=10)
         payload = urllib.parse.urlencode(
-            {"monthly_budget_usd": "6.0", "warn_frac": "0.7",
+            {"csrf_token": token,
+             "monthly_budget_usd": "6.0", "warn_frac": "0.7",
              "critical_frac": "0.9", "repos": "o/r\no/s=off",
              "openai_billing_url": "https://example.com/limits",
              "actor": "test-http"}).encode()
@@ -380,13 +423,30 @@ def test_localhost_binding_and_views(tmp_path):
         resp = conn.getresponse()
         assert resp.status == 303, resp.status
         assert resp.getheader("Location") == "/settings?saved=1"
+        resp.read()
         settings, _ = OC.load(state)
         assert settings.monthly_budget_usd == 6.0
         assert settings.repos == {"o/r": True, "o/s": False}
-        # Invalid POST is a 400 with the explained error, no write.
+        # Missing token is a 403 with no write.
         conn.request("POST", "/settings",
                      body=urllib.parse.urlencode(
-                         {"monthly_budget_usd": "-3",
+                         {"monthly_budget_usd": "9.0",
+                          "actor": "test-http"}).encode(),
+                     headers={"Content-Type":
+                              "application/x-www-form-urlencoded"})
+        resp = conn.getresponse()
+        assert resp.status == 403, resp.status
+        resp.read()
+        settings, _ = OC.load(state)
+        assert settings.monthly_budget_usd == 6.0
+        # Invalid POST is a 400 with the explained error, no write.
+        with urllib.request.urlopen(
+                f"http://{host}:{port}/settings", timeout=10) as resp2:
+            token2 = _csrf_token(resp2.read().decode())
+        conn.request("POST", "/settings",
+                     body=urllib.parse.urlencode(
+                         {"csrf_token": token2,
+                          "monthly_budget_usd": "-3",
                           "actor": "test-http"}).encode(),
                      headers={"Content-Type":
                               "application/x-www-form-urlencoded"})
@@ -396,15 +456,15 @@ def test_localhost_binding_and_views(tmp_path):
         settings, _ = OC.load(state)
         assert settings.monthly_budget_usd == 6.0
     finally:
-        server.shutdown()
-        server.server_close()
+        server.should_exit = True
+        thread.join(timeout=10)
 
 
 def test_non_loopback_bind_refused(tmp_path):
     with pytest.raises(OC.OperatorConfigError, match="loopback"):
-        OD.build_server(tmp_path, "0.0.0.0", 8487)
+        DA.ensure_loopback("0.0.0.0")
     with pytest.raises(OC.OperatorConfigError, match="loopback"):
-        OD.ensure_loopback("8.8.8.8")
+        DA.ensure_loopback("8.8.8.8")
 
 
 # -- CLI ---------------------------------------------------------------------------

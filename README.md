@@ -12,19 +12,43 @@ advisory only — Codatiel never posts automatic public PR comments, and
 nothing here is production-ready. An 80% real-material-useful bar for
 public comments is a goal, not a claim.
 
-## Operator dashboard (PROD-01 Track B)
+## Operator dashboard (DASH-01)
 
-A minimal, local-only operator dashboard for the event-pipeline worker
-(TEST/DEV). Stdlib HTTP only — no framework, no new dependencies, no new
-analytics DB, no telemetry. Server-rendered HTML, two views:
+A self-hosted, read-only-first operator dashboard for the event-pipeline
+worker (TEST/DEV). FastAPI + Uvicorn + Jinja2, server-rendered HTML, no
+frontend build pipeline. Views:
 
-- `/` — service status + last successful poll, spend vs Codatiel limits
+- `/` — poller status (running/idle/stale/error with the rule shown),
+  last successful poll, spend vs Codatiel limits and remaining budgets
   (Codatiel ledger ONLY — never presented as total OpenAI spend),
-  daily/monthly spend, spend by model and by repo, PRs reviewed, digest
-  email outcomes, deferred/skipped/failed grouped by reason, and recent
-  activity with GitHub links.
+  review queue grouped by reason (budget-blocked is never shown as
+  completed), decisions by reason, measured cache/stale efficiency,
+  publications, spend by model, digest email outcomes, recent activity
+  with GitHub links.
+- `/repos` — per-repo queue: enabled flag, tracked PRs, latest activity
+  and reason, spend; click through to PRs.
+- `/pr/{repo}/{pr}` — chronological review history: checkpoint, findings
+  generated vs posted vs suppressed-as-previously-delivered, delivery
+  decisions with skip/failure reasons and cache-reuse data,
+  publications.
+- `/spend` — totals, daily ledger series, by repo, by PR, memo stage
+  breakdown (informational, never additive), superseded spend kept
+  separate, unknown cost counted never priced, applicable ceilings.
+- `/efficiency` — COST-01B benefits from measured records (pairs
+  examined/reused/cache hits, hit %, stale prevented, posted receipts);
+  estimated avoided spend is shown as Unavailable, never invented.
+- `/ops` — recent ingestions (filterable by state), budget refusals,
+  bounded budget retries, review failures, publication failures,
+  configuration changes. Auto-refreshes modestly.
 - `/settings` — every `operator.json` control with validation errors
-  shown and the audit trail visible.
+  shown and the audit trail visible; writes are validated,
+  CSRF-protected, and audit-logged.
+
+The dashboard opens `events.sqlite` read-only and never triggers
+inference, comments, or poller changes. A JSON API under `/api/*`
+exposes the same collectors. See `docs/dash-01/deployment.md` for
+installation, loopback/SSH access, and an authenticated reverse-proxy
+example.
 
 Settings live in `[state_dir]/operator.json` (beside `events.sqlite`),
 written atomically and audit-logged to
