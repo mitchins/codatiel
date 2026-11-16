@@ -56,8 +56,8 @@ def mirror_skip_decision(target: dict, counterpart: dict,
                          published_keys) -> bool:
     """True when the opposite direction already has an established
     published verdict: the unordered pair key is present in the
-    published set (earlier in this run, or a same-content
-    continuation/cache hit). Never true on rejection alone — only
+    published set (earlier in this run, or a same-revision
+    continuation seed). Never true on rejection alone — only
     published verdicts are recorded in the set."""
     try:
         return unordered_mirror_key(target, counterpart) in published_keys
@@ -726,9 +726,9 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
     edit = edit_fn or ED.edit_pair
     judged_preflight = _preflight_usd(pairs, merged_db, terra_res,
                                        luna_res)
-    # MIRROR-01: first-published-wins. Seeds are same-content published
-    # verdicts (continuation/cache hits); the loop adds each published
-    # twin. Skips fire only on published verdicts, never on rejection.
+    # MIRROR-01: first-published-wins. Seeds are same-revision
+    # continuation verdicts; the loop adds each published twin. Skips
+    # fire only on published verdicts, never on rejection.
     try:
         seeds = dict(known_published_keys or {})
     except (TypeError, ValueError):
