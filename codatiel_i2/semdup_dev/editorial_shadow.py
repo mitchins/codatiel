@@ -519,27 +519,23 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
     else:
         outcome["spend_usd"] = round(spent_t + spent_l, 6)
     outcome["spend_unknown"] = spent_t is None or spent_l is None
-    _record_mirror_savings(outcome, spent_t, spent_l, t0)
-    _record_scaffold_savings(outcome, spent_t, spent_l, t0)
+    _record_preskip_savings(outcome, spent_t, spent_l, t0)
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     return outcome
 
 
-def _record_mirror_savings(outcome: dict, spent_t, spent_l, t0) -> None:
-    _record_skip_savings(outcome, spent_t, spent_l, t0, "mirror_skipped",
-                         "mirror_saved_usd_est", "mirror_saved_wall_s_est")
-
-
-def _record_scaffold_savings(outcome: dict, spent_t, spent_l, t0) -> None:
+def _record_preskip_savings(outcome: dict, spent_t, spent_l, t0) -> None:
+    """Record estimated savings for both pre-examination skip kinds."""
     # Scaffold skips land inside _review_inner (no loop counter), so
     # count suppressed scaffold_setup rows at finalize time.
     outcome["scaffold_skipped"] = sum(
         1 for r in outcome.get("pairs", [])
         if isinstance(r, dict) and r.get("reason") == "scaffold_setup")
-    _record_skip_savings(outcome, spent_t, spent_l, t0,
-                         "scaffold_skipped", "scaffold_saved_usd_est",
-                         "scaffold_saved_wall_s_est")
+    for prefix in ("mirror", "scaffold"):
+        _record_skip_savings(
+            outcome, spent_t, spent_l, t0, f"{prefix}_skipped",
+            f"{prefix}_saved_usd_est", f"{prefix}_saved_wall_s_est")
 
 
 def _record_skip_savings(outcome: dict, spent_t, spent_l, t0, count_key: str,
@@ -1012,8 +1008,7 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
         outcome["spend_usd"] = round(spent_t + spent_l, 6)
     outcome["spend_unknown"] = spent_t is None or spent_l is None
     outcome["preflight_usd"] = judged_preflight
-    _record_mirror_savings(outcome, spent_t, spent_l, t0)
-    _record_scaffold_savings(outcome, spent_t, spent_l, t0)
+    _record_preskip_savings(outcome, spent_t, spent_l, t0)
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     return outcome

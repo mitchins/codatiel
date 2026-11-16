@@ -463,16 +463,13 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     outcome["spend_terra_unknown"] = judged.get("spend_terra_unknown", False)
     outcome["spend_luna_unknown"] = judged.get("spend_luna_unknown", False)
     outcome["preflight_usd"] = judged.get("preflight_usd")
-    # MIRROR-01 savings (estimates labeled _est; None when unknown).
-    outcome["mirror_skipped"] = judged.get("mirror_skipped", 0)
-    outcome["mirror_saved_usd_est"] = judged.get("mirror_saved_usd_est")
-    outcome["mirror_saved_wall_s_est"] = judged.get(
-        "mirror_saved_wall_s_est")
-    outcome["scaffold_skipped"] = judged.get("scaffold_skipped", 0)
-    outcome["scaffold_saved_usd_est"] = judged.get(
-        "scaffold_saved_usd_est")
-    outcome["scaffold_saved_wall_s_est"] = judged.get(
-        "scaffold_saved_wall_s_est")
+    # MIRROR-01 / SCAFFOLD-01 savings (estimates labeled _est).
+    for prefix in ("mirror", "scaffold"):
+        outcome[f"{prefix}_skipped"] = judged.get(f"{prefix}_skipped", 0)
+        outcome[f"{prefix}_saved_usd_est"] = judged.get(
+            f"{prefix}_saved_usd_est")
+        outcome[f"{prefix}_saved_wall_s_est"] = judged.get(
+            f"{prefix}_saved_wall_s_est")
     outcome["skipped"].extend(judged.get("skipped", []))
     if not judged.get("ok") or judged.get("stage") in (
             "backends_unavailable",):
