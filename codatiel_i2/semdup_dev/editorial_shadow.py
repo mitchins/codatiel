@@ -240,6 +240,8 @@ def run_editorial(*, cfg, repo_path: Path, merged_db: Path,
         "head_rev": head_rev, "base_rev": base_rev,
         "pairs": [], "published": [], "suppressed": [],
         "skipped": [], "spend_usd": 0.0, "wall_s": 0.0,
+        "mirror_skipped": 0, "mirror_saved_usd_est": None,
+        "mirror_saved_wall_s_est": None,
     }
     try:
         return _run(cfg=cfg, repo_path=repo_path, merged_db=merged_db,
@@ -322,7 +324,8 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
     for pair in pairs:
         mkey = unordered_mirror_key(pair.get("target"),
                                     pair.get("counterpart"))
-        if mkey in published_keys:
+        if mirror_skip_decision(pair.get("target"),
+                                pair.get("counterpart"), published_keys):
             row = mirror_preskip_row(pair, head_rev=head_rev,
                                      base_rev=base_rev,
                                      kept=published_keys[mkey])
@@ -369,8 +372,12 @@ def _record_mirror_savings(outcome: dict, spent_t, spent_l, t0) -> None:
     """Estimated dollars/latency saved by pre-examination mirror skips.
 
     Estimates only (labeled _est): skipped examinations are valued at
-    the run's mean examined-pair cost and latency. None when the spend
-    is unknown.
+    the run's mean examined-pair cost and latency. The mean includes
+    cheap Terra-only rejections, so the dollar figure is a
+    conservative floor (a skipped mirror twin of a published pair
+    would have cost Terra+Luna). USD is None when the spend is
+    unknown or no examination baseline exists; latency needs only the
+    wall clock.
     """
     mirror_n = int(outcome.get("mirror_skipped") or 0)
     outcome["mirror_skipped"] = mirror_n
@@ -384,14 +391,9 @@ def _record_mirror_savings(outcome: dict, spent_t, spent_l, t0) -> None:
                    if isinstance(r, dict) and r.get("assess_ran"))
     if not examined:
         return
-    total = None
     if spent_t is not None and spent_l is not None:
-        total = spent_t + spent_l
-    elif spent_t is not None or spent_l is not None:
-        total = (spent_t or 0.0) + (spent_l or 0.0)
-    if total is not None:
         outcome["mirror_saved_usd_est"] = round(
-            mirror_n * total / examined, 6)
+            mirror_n * (spent_t + spent_l) / examined, 6)
     wall = round(time.monotonic() - t0, 1)
     outcome["mirror_saved_wall_s_est"] = round(mirror_n * wall / examined, 1)
 
@@ -653,7 +655,8 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
         "head_rev": head_rev, "base_rev": base_rev,
         "pairs": [], "published": [], "suppressed": [],
         "skipped": [], "spend_usd": 0.0, "wall_s": 0.0,
-        "preflight_usd": None,
+        "preflight_usd": None, "mirror_skipped": 0,
+        "mirror_saved_usd_est": None, "mirror_saved_wall_s_est": None,
     }
     try:
         from codatiel_i2 import providers as P
@@ -763,7 +766,8 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
                 pass
         mkey = unordered_mirror_key(pair.get("target"),
                                     pair.get("counterpart"))
-        if mkey in published_keys:
+        if mirror_skip_decision(pair.get("target"),
+                                pair.get("counterpart"), published_keys):
             row = mirror_preskip_row(pair, head_rev=head_rev,
                                      base_rev=base_rev,
                                      kept=published_keys[mkey])

@@ -427,23 +427,16 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             except Exception:
                 pass
 
-        # MIRROR-01 seeds: same-content published verdicts (same-revision
-        # continuation, rebound cache hits). Reverse pairs matching these
-        # keys skip before examination; rejections never seed a skip.
-        known_published: dict[str, str] = {}
-        try:
-            for r in list(continuation_reused) + cache_hits:
-                if not isinstance(r, dict) or r.get("path") != "published":
-                    continue
-                t = r.get("target") or {}
-                c = r.get("counterpart") or {}
-                if not t or not c:
-                    continue
-                known_published[ES.unordered_mirror_key(t, c)] = (
-                    f"{t.get('path')}::{t.get('symbol')} -> "
-                    f"{c.get('path')}::{c.get('symbol')}")
-        except Exception:
-            known_published = {}
+        # MIRROR-01 seeds: same-revision published verdicts from the
+        # continuation record only. Cross-revision cache hits are
+        # deliberately NOT seeds: a cached twin may already be
+        # delivered, and delivery dedup is direction-sensitive, so
+        # preempting a fresh reverse pair with a delivered twin would
+        # suppress the only deliverable direction. Reused cache hits
+        # still collapse against fresh publications in the post-hoc
+        # _dedup_mirrors below, preserving the old delivery behavior.
+        # Rejections never seed a skip.
+        known_published = mirror_seed_keys(continuation_reused)
         judged = ES.review_candidate_pairs(
             new_pairs, repo=repo, repo_path=repo_path,
             merged_db=Path(merged["db"]), base_rev=base_rev,
@@ -537,6 +530,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             "pairs_total": len(pairs),
             "pairs_examined": examined_pairs,
             "pairs_reused": len(reused_rows),
+            "pairs_mirror_skipped": int(outcome.get("mirror_skipped") or 0),
             "skipped": list(outcome["skipped"]),
         },
         "editorial": {"published": len(published),
@@ -598,6 +592,38 @@ def _ensure_base(IX, repo_path, repo, rev, state_dir,
     except Exception as exc:  # noqa: BLE001
         return {"present": False,
                 "reason": f"{type(exc).__name__}: {str(exc)[:200]}"}
+
+
+def mirror_seed_keys(reused_rows) -> dict[str, str]:
+    """Unordered keys of established published verdicts for MIRROR-01.
+
+    Only rows with path == "published" seed a pre-examination skip;
+    rejections, drops, budget stops and stale rows never do. Never
+    raises: garbage in, empty set out.
+    """
+    known: dict[str, str] = {}
+    try:
+        items = list(reused_rows or [])
+    except Exception:
+        return known
+    try:
+        from codatiel_i2.semdup_dev import editorial_shadow as _ES
+    except Exception:
+        return known
+    for r in items:
+        try:
+            if not isinstance(r, dict) or r.get("path") != "published":
+                continue
+            t = r.get("target") or {}
+            c = r.get("counterpart") or {}
+            if not t or not c:
+                continue
+            known[_ES.unordered_mirror_key(t, c)] = (
+                f"{t.get('path')}::{t.get('symbol')} -> "
+                f"{c.get('path')}::{c.get('symbol')}")
+        except Exception:
+            continue
+    return known
 
 
 def _dedup_mirrors(published: list) -> tuple[list, list]:

@@ -131,9 +131,42 @@ def test_unordered_mirror_key_matches_dedup():
     k2 = ES.unordered_mirror_key({"path": "b.py", "symbol": "g"},
                                  {"path": "a.py", "symbol": "f"})
     assert k1 == k2
-    # Same format the post-hoc dedup uses: sorted path::symbol pair.
+    # Same format the post-hoc mirror consolidation uses: sorted
+    # path::symbol pair.
     assert k1 == "~~".join(sorted(("a.py::f", "b.py::g")))
-    assert ST._dedup_mirrors  # uses the same key via ES
+    # _dedup_mirrors routes through the shared key: break the key and
+    # the dedup breaks too.
+    import codatiel_i2.semdup_dev.editorial_shadow as ESmod
+    real = ESmod.unordered_mirror_key
+    try:
+        ESmod.unordered_mirror_key = lambda *a: (_ for _ in ()).throw(
+            AssertionError("key fn must be used"))
+        with pytest.raises(AssertionError):
+            ST._dedup_mirrors([{"target": {"path": "a.py", "symbol": "f"},
+                                "counterpart": {"path": "b.py",
+                                                "symbol": "g"}}])
+    finally:
+        ESmod.unordered_mirror_key = real
+    # And unchanged behavior: twins collapse, first kept.
+    kept, mirrors = ST._dedup_mirrors(
+        [{"target": {"path": "a.py", "symbol": "f"},
+          "counterpart": {"path": "b.py", "symbol": "g"}},
+         {"target": {"path": "b.py", "symbol": "g"},
+          "counterpart": {"path": "a.py", "symbol": "f"}}])
+    assert len(kept) == 1 and len(mirrors) == 1
+    assert mirrors[0]["reason"] == "mirror_of_published"
+
+
+def test_mirror_key_is_symbol_granular_by_design():
+    # Same path::symbol at different lines shares one key — matching
+    # the post-hoc dedup, which would collapse the twin even after a
+    # paid examination. The pre-skip saves that examination; no
+    # publication is lost versus the old behavior.
+    k1 = ES.unordered_mirror_key({"path": "a.py", "symbol": "f"},
+                                 {"path": "b.py", "symbol": "g"})
+    assert ES.mirror_skip_decision({"path": "b.py", "symbol": "g"},
+                                   {"path": "a.py", "symbol": "f"},
+                                   {k1}) is True
 
 
 def test_reverse_skipped_after_twin_publishes(tmp_path, monkeypatch):
@@ -223,6 +256,7 @@ def test_known_published_keys_skip_without_examination(tmp_path,
 
 
 def test_skipped_rows_never_cached_or_revisited(tmp_path, monkeypatch):
+    from codatiel_i2.semdup_dev import cache as CACHE
     seen = []
 
     def assess(**kw):
@@ -251,6 +285,10 @@ def test_skipped_rows_never_cached_or_revisited(tmp_path, monkeypatch):
     assert row.get("completed") is False
     assert row.get("budget_refused") is False
     assert not row.get("assess_ran")
+    # Pin the persistence contract: the gates that keep verdicts out
+    # of the cache/continuation must keep rejecting preskip rows.
+    assert CACHE.is_completed_row(row) is False
+    assert CACHE.is_budget_stop_row(row) is False
 
 
 def test_run_editorial_mirror_skip(tmp_path, monkeypatch):
@@ -287,7 +325,43 @@ def test_run_editorial_mirror_skip(tmp_path, monkeypatch):
 
 MIRROR_CASES = json.loads(
     (Path(__file__).parent / "fixtures" / "mirror01_replay.json")
-    .read_text())
+    .read_text())["cases"]
+
+
+def test_mirror_seed_keys_only_published():
+    from codatiel_i2.semdup_dev import stage as ST
+    twin = {"target": {"path": "a.py", "symbol": "f"},
+            "counterpart": {"path": "b.py", "symbol": "g"}}
+    rows = [
+        dict(twin, path="published"),
+        dict(twin, path="suppressed", reason="terra_no_lead"),
+        dict(twin, path="suppressed", reason="deterministic_drop"),
+        dict(twin, path="suppressed", reason="budget_stop",
+             budget_refused=True, completed=False),
+        dict(twin, path="suppressed", reason="stale_superseded"),
+        {"target": {"path": "a.py", "symbol": "f"}, "path": "published"},
+        "garbage",
+        None,
+    ]
+    seeds = ST.mirror_seed_keys(rows)
+    assert list(seeds) == [ES.unordered_mirror_key(
+        twin["target"], twin["counterpart"])]
+    assert ST.mirror_seed_keys([]) == {}
+    assert ST.mirror_seed_keys(None) == {}
+
+
+def test_record_mirror_savings_unknown_and_empty():
+    out = {"mirror_skipped": 2, "pairs": [{"assess_ran": True}]}
+    ES._record_mirror_savings(out, None, None, __import__("time").monotonic())
+    assert out["mirror_saved_usd_est"] is None
+    assert out["mirror_saved_wall_s_est"] is not None
+    out = {"mirror_skipped": 1, "pairs": []}
+    ES._record_mirror_savings(out, 1.0, 1.0, __import__("time").monotonic())
+    assert out["mirror_saved_usd_est"] is None
+    assert out["mirror_saved_wall_s_est"] is None
+    out = {"mirror_skipped": 0, "pairs": []}
+    ES._record_mirror_savings(out, None, None, __import__("time").monotonic())
+    assert out["mirror_saved_usd_est"] == 0.0
 
 
 @pytest.mark.parametrize("case", MIRROR_CASES,
