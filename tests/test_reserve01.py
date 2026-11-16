@@ -54,7 +54,8 @@ def _run_dir(state_dir: Path, run_id: str, *, priced=0.0,
     d = state_dir / "runs" / "scan" / run_id
     d.mkdir(parents=True, exist_ok=True)
     (d / "run.json").write_text(json.dumps(
-        {"run_id": run_id, "head_sha": HEAD}), encoding="utf-8")
+        {"run_id": run_id, "head_sha": HEAD,
+         "delivery_id": delivery_id}), encoding="utf-8")
     (d / "identity.json").write_text(json.dumps(
         {"run_id": run_id, "delivery_id": delivery_id,
          "head_sha": HEAD, "repo_slug": REPO}), encoding="utf-8")
@@ -294,4 +295,53 @@ def test_full_review_closes_its_holder(tmp_path, monkeypatch):
     assert out["decision"] == "completed"
     assert store.reservations_open() == []
     assert store.spend_totals()["reserved_usd"] == 0.0
+    # The run dir is bound to the delivery that drove it.
+    found = P._find_run_dir(cfg.state_dir, "did-1")
+    assert found is not None
+    run = json.loads((found / "run.json").read_text(encoding="utf-8"))
+    assert run.get("delivery_id") == "did-1"
     store.close()
+
+
+# -- review follow-ups: delivery binding, luna sink, reset guard --------
+
+def test_recover_finds_run_by_bound_delivery_id(tmp_path, monkeypatch):
+    """A run dir bound to the reservation's delivery ID is found even
+    when other same-head runs exist (exact match, no heuristics)."""
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    token = _claim(store, token="tok-1", now=1000.0, did="d1")
+    store.reserve(1.0, holder=token, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1")
+    _run_dir(cfg.state_dir, "run-old", priced=0.99, delivery_id="dx")
+    _run_dir(cfg.state_dir, "run-1", priced=0.05, delivery_id="d1")
+    P.recover(cfg=cfg, store=store)
+    totals = store.spend_totals()
+    assert totals["settled_usd"] == pytest.approx(1.0)  # 0.05 + 0.95 hold
+    assert totals["unknown_holds"] == 1.0
+    store.close()
+
+
+def test_proven_includes_luna_sink(tmp_path, monkeypatch):
+    """Priced Luna sweep records persist to spend_luna.jsonl and count
+    as proven on recovery."""
+    cfg, store = _cfg_store(tmp_path, monkeypatch)
+    token = _claim(store, token="tok-1", now=1000.0, did="d1")
+    store.reserve(1.0, holder=token, repo=REPO, pr=PR, head_sha=HEAD,
+                  delivery_id="d1")
+    d = _run_dir(cfg.state_dir, "run-1", priced=0.05, delivery_id="d1")
+    (d / "spend_luna.jsonl").write_text(
+        '{"priced_cost_usd": 0.02, "usage_known": true}\n', encoding="utf-8")
+    P.recover(cfg=cfg, store=store)
+    totals = store.spend_totals()
+    assert totals["settled_usd"] == pytest.approx(1.0)  # 0.07 + 0.93 hold
+    store.close()
+
+
+def test_reset_spend_refused_with_open_reservations(tmp_path):
+    st = S.Store(tmp_path / "e.sqlite")
+    st.reserve(1.0, holder="tok-1", repo=REPO, pr=PR, head_sha=HEAD,
+               delivery_id="d1")
+    with pytest.raises(S.StoreError):
+        P.reset_spend(store=st)
+    assert st.spend_totals()["reserved_usd"] == 1.0
+    st.close()

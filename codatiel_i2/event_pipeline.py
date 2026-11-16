@@ -548,7 +548,8 @@ def _read_spend_usd(run_dir: str | None) -> float | None:
 
 
 def _bind_review_identity(repo: str, pr: int, base: str, head: str,
-                          run_dir: str) -> dict:
+                          run_dir: str,
+                          delivery_id: str | None = None) -> dict:
     """Bind the (repo, PR, SHAs, run) identity at review creation.
 
     Called with the same event arguments that drive the review, so the
@@ -568,7 +569,8 @@ def _bind_review_identity(repo: str, pr: int, base: str, head: str,
     return identity_mod.bind_run(
         run_dir, repo_slug=repo, pr_number=pr, base_sha=base,
         head_sha=head, run_id=artifact_run_id or Path(run_dir).name,
-        binder="pipeline:run_review_for_range")
+        binder="pipeline:run_review_for_range",
+        delivery_id=delivery_id)
 
 
 def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
@@ -692,7 +694,8 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
                          repo_path: Path,
                          runs_root: Path, work_root: Path,
                          model_factory: Any = None,
-                         is_stale: Callable[[], bool] | None = None) -> dict:
+                         is_stale: Callable[[], bool] | None = None,
+                         delivery_id: str | None = None) -> dict:
     """Execute one review for base..head via the configured pipeline.
 
     Terra's canonical review runs first and unchanged; additive mode seals
@@ -722,7 +725,8 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
             runs_root=runs_root, work_root=work_root,
             rate=rate, rate_status=rate_status,
             max_usd_per_review=primary_cap,
-            inventory_strategy="bundle-0.1", enable_final=True)
+            inventory_strategy="bundle-0.1", enable_final=True,
+            delivery_id=delivery_id)
         if out.get("status") not in ("complete", "inconclusive") or \
                 not out.get("run_dir"):
             return {"status": out.get("status", "failed"),
@@ -740,7 +744,8 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
                 "terra_spend_usd": cost,
                 "luna_spend_usd": 0.0}
         try:
-            _bind_review_identity(repo, pr, base, head, out["run_dir"])
+            _bind_review_identity(repo, pr, base, head, out["run_dir"],
+                                    delivery_id=delivery_id)
         except Exception as exc:
             return {"status": "failed", "stage": "identity",
                     "error": f"identity binding refused: {exc}",
@@ -765,7 +770,8 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
         target={"mode": "local", "case": f"{repo}#{pr}",
                 "root": str(repo_path), "base": base, "head": head},
         runs_root=runs_root, work_root=work_root,
-        primary_ceiling_usd=primary_cap, sub_ceiling_usd=sub_cap)
+        primary_ceiling_usd=primary_cap, sub_ceiling_usd=sub_cap,
+        delivery_id=delivery_id)
     if out.get("status") not in ("complete", "inconclusive") or \
             not out.get("run_dir"):
         return {"status": out.get("status", "failed"),
@@ -784,7 +790,8 @@ def run_review_for_range(*, cfg: EventConfig, repo: str, pr: int,
             "terra_spend_usd": round(parent, 4),
             "luna_spend_usd": round(sub, 4)}
     try:
-        _bind_review_identity(repo, pr, base, head, out["run_dir"])
+        _bind_review_identity(repo, pr, base, head, out["run_dir"],
+                              delivery_id=delivery_id)
     except Exception as exc:
         return {"status": "failed", "stage": "identity",
                 "error": f"identity binding refused: {exc}",
@@ -1408,7 +1415,8 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         cfg=cfg, repo=ev["repo"], pr=pr, base=from_sha, head=to_sha,
         kind=kind, repo_path=access.path,
         runs_root=cfg.state_dir / "runs", work_root=cfg.state_dir / "work",
-        model_factory=model_factory, is_stale=_is_stale)
+        model_factory=model_factory, is_stale=_is_stale,
+        delivery_id=ev.get("delivery_id"))
     cost = result.get("cost_usd")
     unknown = bool(result.get("cost_unknown")) or cost is None
     store.settle(cfg.reserve_usd, None if unknown else float(cost or 0.0),
@@ -2176,10 +2184,11 @@ def recover(*, cfg: EventConfig, store: store_mod.Store) -> dict:
 def _proven_spend(run_dir: Path | str | None) -> tuple[float, bool]:
     """Priced spend proven by a run dir, and whether it ever started.
 
-    Proven = priced Terra ledger lines + priced semdup stage total (both
-    written only for executed, priced work). Started = run.json present
-    (written when the run begins). Anything unpriced stays uncertain
-    and is handled by the caller as an unknown hold, never as $0.
+    Proven = priced Terra ledger lines + priced semdup stage total +
+    priced Luna sweep lines (all written only for executed, priced
+    work). Started = run.json present (written when the run begins).
+    Anything unpriced stays uncertain and is handled by the caller as
+    an unknown hold, never as $0.
     """
     if not run_dir:
         return 0.0, False
@@ -2193,7 +2202,7 @@ def _proven_spend(run_dir: Path | str | None) -> tuple[float, bool]:
     try:
         metrics = json.loads(
             (root / "metrics.json").read_text(encoding="utf-8"))
-        for row in (metrics.get("spend") or {}).get("request_ledger", []):
+        for row in metrics.get("spend", {}).get("request_ledger", []):
             if isinstance(row, dict):
                 proven += float(row.get("priced_cost_usd") or 0.0)
     except Exception:
@@ -2204,24 +2213,42 @@ def _proven_spend(run_dir: Path | str | None) -> tuple[float, bool]:
         proven += float(semdup.get("spend_usd") or 0.0)
     except Exception:
         pass
+    try:
+        for line in (root / "spend_luna.jsonl").read_text(
+                encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                proven += float(row.get("priced_cost_usd") or 0.0)
+    except Exception:
+        pass
     return round(proven, 6), True
 
 
 def _find_run_dir(state_dir: Path, delivery_id: str) -> Path | None:
-    """Locate a run dir by its bound delivery ID (exact match)."""
+    """Locate a run dir by its bound delivery ID (exact match).
+
+    run.json is written when the run starts (before paid inference),
+    so mid-inference kills are locatable; identity.json is a fallback
+    for runs bound after completion.
+    """
     if not delivery_id:
         return None
     try:
         runs_root = Path(state_dir) / "runs"
         if not runs_root.is_dir():
             return None
-        for ident in runs_root.rglob("identity.json"):
-            try:
-                data = json.loads(ident.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            if data.get("delivery_id") == delivery_id:
-                return ident.parent
+        for name in ("run.json", "identity.json"):
+            for ident in runs_root.rglob(name):
+                try:
+                    data = json.loads(ident.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if isinstance(data, dict) and \
+                        data.get("delivery_id") == delivery_id:
+                    return ident.parent
     except Exception:
         return None
     return None
@@ -2239,6 +2266,15 @@ def recover_reservations(cfg: EventConfig, store: store_mod.Store,
     a repeated recovery is a no-op and settled spend is never
     rewritten or double-counted. A live worker's hold is never
     touched. Per-holder failures are recorded, never raised.
+
+    Concurrency precondition (single worker): the deployed cron
+    serializes ticks under flock (inference holds the lock), so no
+    second tick can start while a worker runs — a stale holder cannot
+    belong to a live worker here. The holder token doubles as an
+    atomic fence: a settle arriving after its holder closed fails
+    loudly instead of double-spending, and a live checkpoint match
+    skips the holder first on every pass. Manual concurrent runs
+    outside the flock are operator territory.
     """
     ts = time.time() if now is None else now
     done: list[str] = []
@@ -2292,7 +2328,18 @@ def _holder_owned_by_live_worker(store: store_mod.Store, h: dict,
 
 def reset_spend(*, store: store_mod.Store) -> dict:
     """Zero the env spend ledger. Skipped/queued rows are untouched:
-    nothing auto-processes after a reset."""
+    nothing auto-processes after a reset.
+
+    Refused while any reservation is open: zeroing reserved_usd under
+    an open holder would orphan its accounting (a later recovery would
+    see reserved < held and fail every tick). Settle or recover first.
+    """
+    open_holders = store.reservations_open()
+    if open_holders:
+        raise store_mod.StoreError(
+            f"reset refused: {len(open_holders)} reservation(s) open "
+            f"(e.g. {open_holders[0].get('holder', '?')[:8]}); "
+            "settle or recover them first")
     before = store.spend_totals()
     store.spend_set("settled_usd", 0.0)
     store.spend_set("reserved_usd", 0.0)

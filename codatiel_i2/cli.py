@@ -1289,7 +1289,8 @@ def cmd_events(args) -> dict:
                     kind=("incremental" if anchor else "full"),
                     repo_path=access.path,
                     runs_root=cfg.state_dir / "runs",
-                    work_root=cfg.state_dir / "work")
+                    work_root=cfg.state_dir / "work",
+                    delivery_id=f"explicit:{repo}:{number}:{head}")
                 cost = result.get("cost_usd")
                 unknown = bool(result.get("cost_unknown")) or cost is None
                 store.settle(cfg.reserve_usd,
