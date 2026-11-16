@@ -537,3 +537,72 @@ def test_stale_head_never_replaces_live_status(store):
     assert C40[:12] in body.split("### Previous heads")[1], \
         "obsolete head recorded in history"
     assert out["outcome"] == "updated"
+
+
+# -- ACK-01 production follow-up: gate must not regress stored truth ----
+# Observed on the merged code (needletail#10): a ceiling-gate tick posted
+# "deferred / No review has run" for an already-completed head. The gate
+# must prefer the stored terminal outcome, and a deferred request must
+# never fire for a head the checkpoint shows as reviewed or in flight.
+
+def _armed_store(tmp_path):
+    st = S.Store(tmp_path / "g.sqlite")
+    st.meta_set(C.ARMED_META_KEY, "1.0")
+    return st
+
+
+def test_deferred_suppressed_when_head_already_reviewed(tmp_path,
+                                                        monkeypatch):
+    monkeypatch.setenv(C.SWITCH_ENV, "on")
+    store = _armed_store(tmp_path)
+    store.checkpoint_upsert({"repo": REPO, "pr": PR, "status": "reviewed",
+                             "last_reviewed_head": C40})
+    gh = FakeGH()
+    out = P.request_ack(store=store, repo=REPO, pr=PR, head=C40,
+                        state="deferred", detail="budget.", ack_gh=gh)
+    assert out["outcome"] == "already-current"
+    assert gh.posts == [] and gh.patches == []
+    store.close()
+
+
+def test_deferred_suppressed_when_head_in_flight(tmp_path, monkeypatch):
+    monkeypatch.setenv(C.SWITCH_ENV, "on")
+    store = _armed_store(tmp_path)
+    store.checkpoint_upsert({"repo": REPO, "pr": PR, "status": "in_progress",
+                             "in_progress_head": C40,
+                             "in_progress_run": "r1"})
+    gh = FakeGH()
+    out = P.request_ack(store=store, repo=REPO, pr=PR, head=C40,
+                        state="deferred", detail="budget.", ack_gh=gh)
+    assert out["outcome"] == "already-current"
+    assert gh.posts == [] and gh.patches == []
+    store.close()
+
+
+def test_gate_prefers_stored_completed_over_deferred(tmp_path, monkeypatch):
+    monkeypatch.setenv(C.SWITCH_ENV, "on")
+    store = _armed_store(tmp_path)
+    store.delivery_record(delivery_id="d1", event_type="pull_request",
+                          action="synchronize", repo=REPO, pr=PR,
+                          head_sha=C40, decision="completed",
+                          reason="full review complete",
+                          cost_usd=0.5,
+                          detail={"run_id": "run-1",
+                                  "provenance_version": "cost01b-v1"})
+    store.publication_record(repo=REPO, pr=PR, head_sha=C40,
+                             run_id="run-1", comment_id="4242",
+                             outcome="posted", reason="t")
+    gh = FakeGH()
+    ev = {"delivery_id": "d1", "repo": REPO, "pr_number": PR,
+          "head_sha": C40}
+    out = P.gate_ack(store=store, ev=ev,
+                     row=store.delivery_get("d1"),
+                     gate={"decision": "skipped:ceiling",
+                           "reason": "daily budget exhausted"},
+                     ack_gh=gh)
+    assert out["outcome"] == "reconciled-stored"
+    assert len(gh.posts) == 1 and gh.patches == []
+    body = gh.comments[0]["body"]
+    assert "reviewed" in body and "#issuecomment-4242" in body
+    assert "No review has run" not in body
+    store.close()

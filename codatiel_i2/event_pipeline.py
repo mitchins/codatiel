@@ -1747,9 +1747,20 @@ def request_ack(*, store: store_mod.Store, repo: str, pr: int,
                 live_head: str = "",
                 ack_gh: Any = None) -> dict:
     """Best-effort ack comment sync. Returns the outcome dict, never
-    raises, never affects review, spend, email, or publication paths."""
+    raises, never affects review, spend, email, or publication paths.
+
+    A deferred request never fires for a head the checkpoint already
+    shows as reviewed or in flight (same-head no-regression rule at
+    the source, before any GitHub traffic).
+    """
     from codatiel_i2.github import ack as ack_mod
     try:
+        if state == "deferred" and _head_has_review(store, repo, pr,
+                                                    head):
+            return {"outcome": "already-current",
+                    "reason": ("head already reviewed or under review; "
+                               "deferred ack suppressed"),
+                    "repo": repo, "pr": pr, "head_sha": head}
         return ack_mod.sync_ack(
             repo=repo, pr=pr, head=head, state=state, detail=detail,
             findings_comment_id=findings_comment_id,
@@ -1758,6 +1769,57 @@ def request_ack(*, store: store_mod.Store, repo: str, pr: int,
         return {"outcome": "error",
                 "reason": f"{type(exc).__name__}: {exc}"[:300],
                 "repo": repo, "pr": pr, "head_sha": head}
+
+
+def _head_has_review(store: store_mod.Store, repo: str, pr: int,
+                     head: str) -> bool:
+    """True when the checkpoint shows this head reviewed or in flight."""
+    try:
+        cp = store.checkpoint_get(repo, int(pr))
+    except Exception:
+        return False
+    if not isinstance(cp, dict):
+        return False
+    if (cp.get("last_reviewed_head") or "") == (head or "") and head:
+        return True
+    return bool(cp.get("status") == "in_progress"
+                and (cp.get("in_progress_head") or "") == (head or "")
+                and head)
+
+
+def gate_ack(*, store: store_mod.Store, ev: dict, row: dict | None,
+             gate: dict, ack_gh: Any = None) -> dict:
+    """Ack for an operator-gate refusal. Never raises.
+
+    The gate refused, but the stored row may already carry a terminal
+    outcome for this head (e.g. a completed review re-ingested while
+    the ceiling holds): the truthful stored state wins over a blind
+    deferred request, so a published review is never relabeled as
+    "no review has run". Otherwise the deferred request goes through
+    the usual checkpoint guard in request_ack.
+    """
+    try:
+        stored = str((row or {}).get("decision") or "")
+        if stored in ACK_DECISION_STATE and stored != gate.get("decision"):
+            _reconcile_ack_on_replay(store, ev, row, ack_gh=ack_gh)
+            return {"outcome": "reconciled-stored", "decision": stored,
+                    "repo": ev.get("repo") or "", "pr": ev.get("pr_number"),
+                    "head_sha": ev.get("head_sha") or ""}
+        if ev.get("pr_number"):
+            return request_ack(
+                store=store, repo=ev.get("repo") or "",
+                pr=int(ev.get("pr_number") or 0),
+                head=ev.get("head_sha") or "", state="deferred",
+                detail=stable_ack_detail(
+                    gate.get("decision") or "",
+                    gate.get("reason") or ""),
+                ack_gh=ack_gh)
+        return {"outcome": "refused", "reason": "no PR",
+                "repo": ev.get("repo") or ""}
+    except Exception as exc:  # noqa: BLE001 - ack never blocks ingest
+        return {"outcome": "error",
+                "reason": f"{type(exc).__name__}: {exc}"[:300],
+                "repo": ev.get("repo") or ""}
 
 
 def _reconcile_ack_on_replay(store: store_mod.Store, ev: dict,
