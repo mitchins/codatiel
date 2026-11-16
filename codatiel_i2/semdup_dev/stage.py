@@ -427,13 +427,31 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             except Exception:
                 pass
 
+        # MIRROR-01 seeds: same-content published verdicts (same-revision
+        # continuation, rebound cache hits). Reverse pairs matching these
+        # keys skip before examination; rejections never seed a skip.
+        known_published: dict[str, str] = {}
+        try:
+            for r in list(continuation_reused) + cache_hits:
+                if not isinstance(r, dict) or r.get("path") != "published":
+                    continue
+                t = r.get("target") or {}
+                c = r.get("counterpart") or {}
+                if not t or not c:
+                    continue
+                known_published[ES.unordered_mirror_key(t, c)] = (
+                    f"{t.get('path')}::{t.get('symbol')} -> "
+                    f"{c.get('path')}::{c.get('symbol')}")
+        except Exception:
+            known_published = {}
         judged = ES.review_candidate_pairs(
             new_pairs, repo=repo, repo_path=repo_path,
             merged_db=Path(merged["db"]), base_rev=base_rev,
             head_rev=head_rev, head_tree=head_tree, base_tree=base_tree,
             run_dir=run_dir, ceiling_usd=ceiling_usd,
             assess_fn=assess_fn, edit_fn=edit_fn,
-            on_pair=_on_pair, is_stale=is_stale)
+            on_pair=_on_pair, is_stale=is_stale,
+            known_published_keys=known_published)
         if cont_buf:
             _merge_continuation(state_dir, repo, pr, base_rev, head_rev,
                                 cont_buf)
@@ -452,6 +470,11 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     outcome["spend_terra_unknown"] = judged.get("spend_terra_unknown", False)
     outcome["spend_luna_unknown"] = judged.get("spend_luna_unknown", False)
     outcome["preflight_usd"] = judged.get("preflight_usd")
+    # MIRROR-01 savings (estimates labeled _est; None when unknown).
+    outcome["mirror_skipped"] = judged.get("mirror_skipped", 0)
+    outcome["mirror_saved_usd_est"] = judged.get("mirror_saved_usd_est")
+    outcome["mirror_saved_wall_s_est"] = judged.get(
+        "mirror_saved_wall_s_est")
     outcome["skipped"].extend(judged.get("skipped", []))
     if not judged.get("ok") or judged.get("stage") in (
             "backends_unavailable",):
@@ -529,6 +552,9 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                   "budget guard" if guard_stops else "")
     reused_note = (f" (+{len(reused_rows)} reused prior verdicts)"
                    if reused_rows else "")
+    mirror_n = int(outcome.get("mirror_skipped") or 0)
+    mirror_note = (f"; {mirror_n} mirror(s) skipped pre-examination"
+                   if mirror_n else "")
     # Any retrieval failure means the delta was only partially examined:
     # degraded, never a clean-looking zero.
     if retrieval_failures:
@@ -539,7 +565,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                              f"{len(published)} approved; "
                              f"{retrieval_failures} target(s) failed "
                              "retrieval and were not examined"
-                             f"{skip_summary}")
+                             f"{skip_summary}{mirror_note}")
     else:
         outcome["status"] = "ok"
         outcome["coverage"] = ("partial"
@@ -547,7 +573,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         outcome["reason"] = (f"examined {examined_targets} targets, "
                              f"{examined_pairs} pairs{reused_note}; "
                              f"{len(published)} approved"
-                             f"{skip_summary}{guard_note}")
+                             f"{skip_summary}{guard_note}{mirror_note}")
     # Dedup against the ordinary review's advisory anchors.
     published, dups = _dedup(run_dir, published)
     suppressed.extend(dups)
@@ -579,15 +605,15 @@ def _dedup_mirrors(published: list) -> tuple[list, list]:
 
     Both directions describe the same shared code; emailing both is
     noise. Returns (kept, mirrors) where mirrors carry the kept
-    direction for traceability.
+    direction for traceability. Key definition is shared with the
+    pre-examination skip (MIRROR-01).
     """
+    from codatiel_i2.semdup_dev import editorial_shadow as _ES
     seen: set[str] = set()
     kept, mirrors = [], []
     for row in published:
         t, c = row.get("target") or {}, row.get("counterpart") or {}
-        a = f"{t.get('path')}::{t.get('symbol')}"
-        b = f"{c.get('path')}::{c.get('symbol')}"
-        key = "~~".join(sorted((a, b)))
+        key = _ES.unordered_mirror_key(t, c)
         if key in seen:
             mirrors.append({**row, "path": "suppressed",
                             "reason": "mirror_of_published",

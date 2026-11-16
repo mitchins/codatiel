@@ -1,0 +1,853 @@
+[
+ {
+  "key": "tests/test_platform_progression.py::test_force_push_reviews_full_accumulated_range~~tests/test_platform_progression.py::test_many_commits_coalesce_to_one_accumulated_job",
+  "kept_target": {
+   "path": "tests/test_platform_progression.py",
+   "symbol": "test_force_push_reviews_full_accumulated_range",
+   "start_line": 143
+  },
+  "kept_counterpart": {
+   "path": "tests/test_platform_progression.py",
+   "symbol": "test_many_commits_coalesce_to_one_accumulated_job",
+   "start_line": 71
+  },
+  "mirror_target": {
+   "path": "tests/test_platform_progression.py",
+   "symbol": "test_many_commits_coalesce_to_one_accumulated_job",
+   "start_line": 71
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_platform_progression.py",
+   "symbol": "test_force_push_reviews_full_accumulated_range",
+   "start_line": 143
+  }
+ },
+ {
+  "key": "Tests/NeedletailTerminalTests/ChatWidthTests.swift::cjkCountsOneUnit~~Tests/NeedletailTerminalTests/ChatWidthTests.swift::cjkEdgeNeverSplits",
+  "kept_target": {
+   "path": "Tests/NeedletailTerminalTests/ChatWidthTests.swift",
+   "symbol": "cjkCountsOneUnit",
+   "start_line": 29
+  },
+  "kept_counterpart": {
+   "path": "Tests/NeedletailTerminalTests/ChatWidthTests.swift",
+   "symbol": "cjkEdgeNeverSplits",
+   "start_line": 42
+  },
+  "mirror_target": {
+   "path": "Tests/NeedletailTerminalTests/ChatWidthTests.swift",
+   "symbol": "cjkEdgeNeverSplits",
+   "start_line": 42
+  },
+  "mirror_counterpart": {
+   "path": "Tests/NeedletailTerminalTests/ChatWidthTests.swift",
+   "symbol": "cjkCountsOneUnit",
+   "start_line": 29
+  }
+ },
+ {
+  "key": "Tests/NeedletailTerminalTests/ChatWidthTests.swift::flagsWrapWhole~~Tests/NeedletailTerminalTests/ChatWidthTests.swift::mixedScriptExactWrap",
+  "kept_target": {
+   "path": "Tests/NeedletailTerminalTests/ChatWidthTests.swift",
+   "symbol": "flagsWrapWhole",
+   "start_line": 77
+  },
+  "kept_counterpart": {
+   "path": "Tests/NeedletailTerminalTests/ChatWidthTests.swift",
+   "symbol": "mixedScriptExactWrap",
+   "start_line": 92
+  },
+  "mirror_target": {
+   "path": "Tests/NeedletailTerminalTests/ChatWidthTests.swift",
+   "symbol": "mixedScriptExactWrap",
+   "start_line": 92
+  },
+  "mirror_counterpart": {
+   "path": "Tests/NeedletailTerminalTests/ChatWidthTests.swift",
+   "symbol": "flagsWrapWhole",
+   "start_line": 77
+  }
+ },
+ {
+  "key": "Tests/NeedletailPresentationTests/MentionGrammarTests.swift::<closure>@254~~Tests/NeedletailPresentationTests/MentionGrammarTests.swift::<closure>@285",
+  "kept_target": {
+   "path": "Tests/NeedletailPresentationTests/MentionGrammarTests.swift",
+   "symbol": "<closure>@254",
+   "start_line": 254
+  },
+  "kept_counterpart": {
+   "path": "Tests/NeedletailPresentationTests/MentionGrammarTests.swift",
+   "symbol": "<closure>@285",
+   "start_line": 285
+  },
+  "mirror_target": {
+   "path": "Tests/NeedletailPresentationTests/MentionGrammarTests.swift",
+   "symbol": "<closure>@285",
+   "start_line": 285
+  },
+  "mirror_counterpart": {
+   "path": "Tests/NeedletailPresentationTests/MentionGrammarTests.swift",
+   "symbol": "<closure>@254",
+   "start_line": 254
+  }
+ },
+ {
+  "key": "Tests/NeedletailPrimitiveTests/B2ClosureTests.swift::<closure>@189~~Tests/NeedletailPrimitiveTests/B2ClosureTests.swift::<closure>@676",
+  "kept_target": {
+   "path": "Tests/NeedletailPrimitiveTests/B2ClosureTests.swift",
+   "symbol": "<closure>@189",
+   "start_line": 189
+  },
+  "kept_counterpart": {
+   "path": "Tests/NeedletailPrimitiveTests/B2ClosureTests.swift",
+   "symbol": "<closure>@676",
+   "start_line": 676
+  },
+  "mirror_target": {
+   "path": "Tests/NeedletailPrimitiveTests/B2ClosureTests.swift",
+   "symbol": "<closure>@676",
+   "start_line": 676
+  },
+  "mirror_counterpart": {
+   "path": "Tests/NeedletailPrimitiveTests/B2ClosureTests.swift",
+   "symbol": "<closure>@189",
+   "start_line": 189
+  }
+ },
+ {
+  "key": "tests/test_platform_seams.py::test_migration_draft_queued_waits_for_readiness~~tests/test_platform_seams.py::test_migration_interrupted_queued_needs_release",
+  "kept_target": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_migration_draft_queued_waits_for_readiness",
+   "start_line": 673
+  },
+  "kept_counterpart": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_migration_interrupted_queued_needs_release",
+   "start_line": 720
+  },
+  "mirror_target": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_migration_interrupted_queued_needs_release",
+   "start_line": 720
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_migration_draft_queued_waits_for_readiness",
+   "start_line": 673
+  }
+ },
+ {
+  "key": "tests/test_watcher_corrections.py::test_spend_on_day_includes_superseded_once~~tests/test_watcher_corrections.py::test_spend_on_day_unknown_holds_preserved",
+  "kept_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_spend_on_day_includes_superseded_once",
+   "start_line": 46
+  },
+  "kept_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_spend_on_day_unknown_holds_preserved",
+   "start_line": 70
+  },
+  "mirror_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_spend_on_day_unknown_holds_preserved",
+   "start_line": 70
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_spend_on_day_includes_superseded_once",
+   "start_line": 46
+  }
+ },
+ {
+  "key": "tests/test_cost01b.py::test_cache_stale_reference_no_publish~~tests/test_cost01b.py::test_provider_failure_not_cached",
+  "kept_target": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_cache_stale_reference_no_publish",
+   "start_line": 394
+  },
+  "kept_counterpart": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_provider_failure_not_cached",
+   "start_line": 438
+  },
+  "mirror_target": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_provider_failure_not_cached",
+   "start_line": 438
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_cache_stale_reference_no_publish",
+   "start_line": 394
+  }
+ },
+ {
+  "key": "tests/test_cost01b.py::test_provider_failure_not_cached~~tests/test_cost01b.py::test_tool_dependent_not_reused",
+  "kept_target": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_tool_dependent_not_reused",
+   "start_line": 461
+  },
+  "kept_counterpart": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_provider_failure_not_cached",
+   "start_line": 438
+  },
+  "mirror_target": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_provider_failure_not_cached",
+   "start_line": 438
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_tool_dependent_not_reused",
+   "start_line": 461
+  }
+ },
+ {
+  "key": "codatiel_i2/semdup_dev/cache.py::lookup~~codatiel_i2/semdup_dev/cache.py::store",
+  "kept_target": {
+   "path": "codatiel_i2/semdup_dev/cache.py",
+   "start_line": 192,
+   "symbol": "lookup"
+  },
+  "kept_counterpart": {
+   "path": "codatiel_i2/semdup_dev/cache.py",
+   "start_line": 217,
+   "symbol": "store"
+  },
+  "mirror_target": {
+   "path": "codatiel_i2/semdup_dev/cache.py",
+   "start_line": 217,
+   "symbol": "store"
+  },
+  "mirror_counterpart": {
+   "path": "codatiel_i2/semdup_dev/cache.py",
+   "start_line": 192,
+   "symbol": "lookup"
+  }
+ },
+ {
+  "key": "PresentationTests/WorkspaceModelTests.swift::testCancelledReplacementPreservesLoadedWindowAndItsCursor~~PresentationTests/WorkspaceModelTests.swift::testRevisionDuringReplacementFirstPageKeepsItsOwnershipAndFreshContinuation",
+  "kept_target": {
+   "path": "PresentationTests/WorkspaceModelTests.swift",
+   "symbol": "testCancelledReplacementPreservesLoadedWindowAndItsCursor",
+   "start_line": 1865
+  },
+  "kept_counterpart": {
+   "path": "PresentationTests/WorkspaceModelTests.swift",
+   "symbol": "testRevisionDuringReplacementFirstPageKeepsItsOwnershipAndFreshContinuation",
+   "start_line": 1800
+  },
+  "mirror_target": {
+   "path": "PresentationTests/WorkspaceModelTests.swift",
+   "symbol": "testRevisionDuringReplacementFirstPageKeepsItsOwnershipAndFreshContinuation",
+   "start_line": 1800
+  },
+  "mirror_counterpart": {
+   "path": "PresentationTests/WorkspaceModelTests.swift",
+   "symbol": "testCancelledReplacementPreservesLoadedWindowAndItsCursor",
+   "start_line": 1865
+  }
+ },
+ {
+  "key": "Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@126~~Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@140",
+  "kept_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@126",
+   "start_line": 126
+  },
+  "kept_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@140",
+   "start_line": 140
+  },
+  "mirror_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@140",
+   "start_line": 140
+  },
+  "mirror_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@126",
+   "start_line": 126
+  }
+ },
+ {
+  "key": "Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@140~~Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@195",
+  "kept_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@140",
+   "start_line": 140
+  },
+  "kept_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@195",
+   "start_line": 195
+  },
+  "mirror_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@195",
+   "start_line": 195
+  },
+  "mirror_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@140",
+   "start_line": 140
+  }
+ },
+ {
+  "key": "Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@273~~Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@289",
+  "kept_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@273",
+   "start_line": 273
+  },
+  "kept_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@289",
+   "start_line": 289
+  },
+  "mirror_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@289",
+   "start_line": 289
+  },
+  "mirror_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@273",
+   "start_line": 273
+  }
+ },
+ {
+  "key": "tests/test_watcher_corrections.py::test_explicit_review_base_mismatch_never_seals~~tests/test_watcher_corrections.py::test_explicit_review_seals_when_fresh",
+  "kept_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_base_mismatch_never_seals",
+   "start_line": 463
+  },
+  "kept_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_seals_when_fresh",
+   "start_line": 240
+  },
+  "mirror_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_seals_when_fresh",
+   "start_line": 240
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_base_mismatch_never_seals",
+   "start_line": 463
+  }
+ },
+ {
+  "key": "tests/test_watcher_corrections.py::test_explicit_review_seals_when_fresh~~tests/test_watcher_corrections.py::test_explicit_review_uppercase_head_matches_live",
+  "kept_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_seals_when_fresh",
+   "start_line": 240
+  },
+  "kept_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_uppercase_head_matches_live",
+   "start_line": 334
+  },
+  "mirror_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_uppercase_head_matches_live",
+   "start_line": 334
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_seals_when_fresh",
+   "start_line": 240
+  }
+ },
+ {
+  "key": "Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@193~~Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@210",
+  "kept_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@193",
+   "start_line": 193
+  },
+  "kept_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@210",
+   "start_line": 210
+  },
+  "mirror_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@210",
+   "start_line": 210
+  },
+  "mirror_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@193",
+   "start_line": 193
+  }
+ },
+ {
+  "key": "Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@302~~Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@318",
+  "kept_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@302",
+   "start_line": 302
+  },
+  "kept_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@318",
+   "start_line": 318
+  },
+  "mirror_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@318",
+   "start_line": 318
+  },
+  "mirror_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "symbol": "<closure>@302",
+   "start_line": 302
+  }
+ },
+ {
+  "key": "Sources/NeedletailTerminal/ChatLoop.swift::<closure>@411~~Sources/NeedletailTerminal/ChatLoop.swift::<closure>@418",
+  "kept_target": {
+   "path": "Sources/NeedletailTerminal/ChatLoop.swift",
+   "symbol": "<closure>@411",
+   "start_line": 411
+  },
+  "kept_counterpart": {
+   "path": "Sources/NeedletailTerminal/ChatLoop.swift",
+   "symbol": "<closure>@418",
+   "start_line": 418
+  },
+  "mirror_target": {
+   "path": "Sources/NeedletailTerminal/ChatLoop.swift",
+   "symbol": "<closure>@418",
+   "start_line": 418
+  },
+  "mirror_counterpart": {
+   "path": "Sources/NeedletailTerminal/ChatLoop.swift",
+   "symbol": "<closure>@411",
+   "start_line": 411
+  }
+ },
+ {
+  "key": "Tests/NeedletailTerminalTests/ChatPTYTests.swift::<closure>@146~~Tests/NeedletailTerminalTests/ChatPTYTests.swift::<closure>@915",
+  "kept_target": {
+   "path": "Tests/NeedletailTerminalTests/ChatPTYTests.swift",
+   "symbol": "<closure>@146",
+   "start_line": 146
+  },
+  "kept_counterpart": {
+   "path": "Tests/NeedletailTerminalTests/ChatPTYTests.swift",
+   "symbol": "<closure>@915",
+   "start_line": 915
+  },
+  "mirror_target": {
+   "path": "Tests/NeedletailTerminalTests/ChatPTYTests.swift",
+   "symbol": "<closure>@915",
+   "start_line": 915
+  },
+  "mirror_counterpart": {
+   "path": "Tests/NeedletailTerminalTests/ChatPTYTests.swift",
+   "symbol": "<closure>@146",
+   "start_line": 146
+  }
+ },
+ {
+  "key": "Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@193~~Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@210",
+  "kept_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "start_line": 193,
+   "symbol": "<closure>@193"
+  },
+  "kept_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "start_line": 210,
+   "symbol": "<closure>@210"
+  },
+  "mirror_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "start_line": 210,
+   "symbol": "<closure>@210"
+  },
+  "mirror_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "start_line": 193,
+   "symbol": "<closure>@193"
+  }
+ },
+ {
+  "key": "Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@302~~Sources/NeedletailLineEditor/LineEditorSession.swift::<closure>@318",
+  "kept_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "start_line": 302,
+   "symbol": "<closure>@302"
+  },
+  "kept_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "start_line": 318,
+   "symbol": "<closure>@318"
+  },
+  "mirror_target": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "start_line": 318,
+   "symbol": "<closure>@318"
+  },
+  "mirror_counterpart": {
+   "path": "Sources/NeedletailLineEditor/LineEditorSession.swift",
+   "start_line": 302,
+   "symbol": "<closure>@302"
+  }
+ },
+ {
+  "key": "src/yt2wiki/factcheck/ddgs_provider.py::handle_endtag~~src/yt2wiki/factcheck/ddgs_provider.py::handle_starttag",
+  "kept_target": {
+   "path": "src/yt2wiki/factcheck/ddgs_provider.py",
+   "symbol": "handle_endtag",
+   "start_line": 85
+  },
+  "kept_counterpart": {
+   "path": "src/yt2wiki/factcheck/ddgs_provider.py",
+   "symbol": "handle_starttag",
+   "start_line": 71
+  },
+  "mirror_target": {
+   "path": "src/yt2wiki/factcheck/ddgs_provider.py",
+   "symbol": "handle_starttag",
+   "start_line": 71
+  },
+  "mirror_counterpart": {
+   "path": "src/yt2wiki/factcheck/ddgs_provider.py",
+   "symbol": "handle_endtag",
+   "start_line": 85
+  }
+ },
+ {
+  "key": "tests/test_watcher_corrections.py::test_explicit_review_seals_when_fresh~~tests/test_watcher_corrections.py::test_explicit_review_uppercase_head_matches_live",
+  "kept_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_seals_when_fresh",
+   "start_line": 240
+  },
+  "kept_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_uppercase_head_matches_live",
+   "start_line": 334
+  },
+  "mirror_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_uppercase_head_matches_live",
+   "start_line": 334
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_seals_when_fresh",
+   "start_line": 240
+  }
+ },
+ {
+  "key": "tests/test_watcher_corrections.py::test_explicit_review_refuses_stale_seal~~tests/test_watcher_corrections.py::test_explicit_stale_review_counts_in_daily_ledger",
+  "kept_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_refuses_stale_seal",
+   "start_line": 219
+  },
+  "kept_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_stale_review_counts_in_daily_ledger",
+   "start_line": 410
+  },
+  "mirror_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_stale_review_counts_in_daily_ledger",
+   "start_line": 410
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_refuses_stale_seal",
+   "start_line": 219
+  }
+ },
+ {
+  "key": "codatiel_i2/platform/artifacts.py::_fsync_dir~~codatiel_i2/platform/artifacts.py::_fsync_file",
+  "kept_target": {
+   "path": "codatiel_i2/platform/artifacts.py",
+   "symbol": "_fsync_dir",
+   "start_line": 36
+  },
+  "kept_counterpart": {
+   "path": "codatiel_i2/platform/artifacts.py",
+   "symbol": "_fsync_file",
+   "start_line": 28
+  },
+  "mirror_target": {
+   "path": "codatiel_i2/platform/artifacts.py",
+   "symbol": "_fsync_file",
+   "start_line": 28
+  },
+  "mirror_counterpart": {
+   "path": "codatiel_i2/platform/artifacts.py",
+   "symbol": "_fsync_dir",
+   "start_line": 36
+  }
+ },
+ {
+  "key": "codatiel_i2/platform/queue.py::deliver_effect~~codatiel_i2/platform/queue.py::reconcile_effect",
+  "kept_target": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "deliver_effect",
+   "start_line": 1246
+  },
+  "kept_counterpart": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "reconcile_effect",
+   "start_line": 1312
+  },
+  "mirror_target": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "reconcile_effect",
+   "start_line": 1312
+  },
+  "mirror_counterpart": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "deliver_effect",
+   "start_line": 1246
+  }
+ },
+ {
+  "key": "codatiel_i2/platform/queue.py::events_after~~codatiel_i2/platform/queue.py::snapshot",
+  "kept_target": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "events_after",
+   "start_line": 1343
+  },
+  "kept_counterpart": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "snapshot",
+   "start_line": 1350
+  },
+  "mirror_target": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "snapshot",
+   "start_line": 1350
+  },
+  "mirror_counterpart": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "events_after",
+   "start_line": 1343
+  }
+ },
+ {
+  "key": "codatiel_i2/platform/queue.py::snapshot~~codatiel_i2/platform/queue.py::snapshot_position",
+  "kept_target": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "snapshot",
+   "start_line": 1350
+  },
+  "kept_counterpart": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "snapshot_position",
+   "start_line": 1379
+  },
+  "mirror_target": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "snapshot_position",
+   "start_line": 1379
+  },
+  "mirror_counterpart": {
+   "path": "codatiel_i2/platform/queue.py",
+   "symbol": "snapshot",
+   "start_line": 1350
+  }
+ },
+ {
+  "key": "tests/test_platform_seams.py::test_base_retarget_reroots_full~~tests/test_platform_seams.py::test_retarget_receipt_waits_for_base_verification",
+  "kept_target": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_base_retarget_reroots_full",
+   "start_line": 82
+  },
+  "kept_counterpart": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_retarget_receipt_waits_for_base_verification",
+   "start_line": 370
+  },
+  "mirror_target": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_retarget_receipt_waits_for_base_verification",
+   "start_line": 370
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_base_retarget_reroots_full",
+   "start_line": 82
+  }
+ },
+ {
+  "key": "codatiel_i2/semdup_dev/cache.py::lookup~~codatiel_i2/semdup_dev/cache.py::store",
+  "kept_target": {
+   "path": "codatiel_i2/semdup_dev/cache.py",
+   "symbol": "lookup",
+   "start_line": 192
+  },
+  "kept_counterpart": {
+   "path": "codatiel_i2/semdup_dev/cache.py",
+   "symbol": "store",
+   "start_line": 217
+  },
+  "mirror_target": {
+   "path": "codatiel_i2/semdup_dev/cache.py",
+   "symbol": "store",
+   "start_line": 217
+  },
+  "mirror_counterpart": {
+   "path": "codatiel_i2/semdup_dev/cache.py",
+   "symbol": "lookup",
+   "start_line": 192
+  }
+ },
+ {
+  "key": "tests/test_cost01b.py::test_cache_body_change_reassess~~tests/test_cost01b.py::test_cache_context_change_reassess",
+  "kept_target": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_cache_body_change_reassess",
+   "start_line": 365
+  },
+  "kept_counterpart": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_cache_context_change_reassess",
+   "start_line": 345
+  },
+  "mirror_target": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_cache_context_change_reassess",
+   "start_line": 345
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_cost01b.py",
+   "symbol": "test_cache_body_change_reassess",
+   "start_line": 365
+  }
+ },
+ {
+  "key": "tests/test_watcher_corrections.py::test_explicit_review_base_mismatch_never_seals~~tests/test_watcher_corrections.py::test_explicit_review_seals_when_fresh",
+  "kept_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_base_mismatch_never_seals",
+   "start_line": 463
+  },
+  "kept_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_seals_when_fresh",
+   "start_line": 240
+  },
+  "mirror_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_seals_when_fresh",
+   "start_line": 240
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_base_mismatch_never_seals",
+   "start_line": 463
+  }
+ },
+ {
+  "key": "tests/test_watcher_corrections.py::test_explicit_review_seals_when_fresh~~tests/test_watcher_corrections.py::test_explicit_review_uppercase_head_matches_live",
+  "kept_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_seals_when_fresh",
+   "start_line": 240
+  },
+  "kept_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_uppercase_head_matches_live",
+   "start_line": 334
+  },
+  "mirror_target": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_uppercase_head_matches_live",
+   "start_line": 334
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_watcher_corrections.py",
+   "symbol": "test_explicit_review_seals_when_fresh",
+   "start_line": 240
+  }
+ },
+ {
+  "key": "codatiel_i2/event_store.py::delivery_record~~codatiel_i2/event_store.py::delivery_update_decision",
+  "kept_target": {
+   "path": "codatiel_i2/event_store.py",
+   "symbol": "delivery_update_decision",
+   "start_line": 251
+  },
+  "kept_counterpart": {
+   "path": "codatiel_i2/event_store.py",
+   "symbol": "delivery_record",
+   "start_line": 214
+  },
+  "mirror_target": {
+   "path": "codatiel_i2/event_store.py",
+   "symbol": "delivery_record",
+   "start_line": 214
+  },
+  "mirror_counterpart": {
+   "path": "codatiel_i2/event_store.py",
+   "symbol": "delivery_update_decision",
+   "start_line": 251
+  }
+ },
+ {
+  "key": "Tests/NeedletailTerminalTests/ChatPTYTests.swift::<closure>@146~~Tests/NeedletailTerminalTests/ChatPTYTests.swift::<closure>@855",
+  "kept_target": {
+   "path": "Tests/NeedletailTerminalTests/ChatPTYTests.swift",
+   "symbol": "<closure>@146",
+   "start_line": 146
+  },
+  "kept_counterpart": {
+   "path": "Tests/NeedletailTerminalTests/ChatPTYTests.swift",
+   "symbol": "<closure>@855",
+   "start_line": 855
+  },
+  "mirror_target": {
+   "path": "Tests/NeedletailTerminalTests/ChatPTYTests.swift",
+   "symbol": "<closure>@855",
+   "start_line": 855
+  },
+  "mirror_counterpart": {
+   "path": "Tests/NeedletailTerminalTests/ChatPTYTests.swift",
+   "symbol": "<closure>@146",
+   "start_line": 146
+  }
+ },
+ {
+  "key": "tests/test_platform_seams.py::test_unknown_hold_last_event_ignores_colliding_effect~~tests/test_platform_seams.py::test_unknown_hold_last_event_includes_adjudication",
+  "kept_target": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_unknown_hold_last_event_ignores_colliding_effect",
+   "start_line": 884
+  },
+  "kept_counterpart": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_unknown_hold_last_event_includes_adjudication",
+   "start_line": 952
+  },
+  "mirror_target": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_unknown_hold_last_event_includes_adjudication",
+   "start_line": 952
+  },
+  "mirror_counterpart": {
+   "path": "tests/test_platform_seams.py",
+   "symbol": "test_unknown_hold_last_event_ignores_colliding_effect",
+   "start_line": 884
+  }
+ }
+]

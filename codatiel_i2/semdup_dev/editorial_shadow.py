@@ -40,6 +40,53 @@ def _is_fragment(symbol: str) -> bool:
     return "#region" in (symbol or "")
 
 
+def unordered_mirror_key(target: dict, counterpart: dict) -> str:
+    """Unordered identity of a unit pair (direction-insensitive).
+
+    Same format as the post-hoc mirror consolidation: the sorted
+    ``path::symbol`` pair joined by ``~~``. The single definition
+    lives here; stage._dedup_mirrors reuses it.
+    """
+    a = f"{(target or {}).get('path')}::{(target or {}).get('symbol')}"
+    b = f"{(counterpart or {}).get('path')}::{(counterpart or {}).get('symbol')}"
+    return "~~".join(sorted((a, b)))
+
+
+def mirror_skip_decision(target: dict, counterpart: dict,
+                         published_keys) -> bool:
+    """True when the opposite direction already has an established
+    published verdict: the unordered pair key is present in the
+    published set (earlier in this run, or a same-content
+    continuation/cache hit). Never true on rejection alone — only
+    published verdicts are recorded in the set."""
+    try:
+        return unordered_mirror_key(target, counterpart) in published_keys
+    except Exception:
+        return False
+
+
+def mirror_preskip_row(pair: dict, *, head_rev: str, base_rev: str,
+                       kept: str = "") -> dict:
+    """Suppressed row for a pre-examination mirror skip ($0, no verdict).
+
+    Not a judgment: completed=False so it is never cached or continued
+    (the kept twin's own record re-establishes the skip on re-drive),
+    and assess never ran so it never counts as examined.
+    """
+    return {
+        "target": pair.get("target"), "counterpart": pair.get("counterpart"),
+        "record_status": pair.get("record_status"),
+        "classification": pair.get("classification"),
+        "head_rev": head_rev, "base_rev": base_rev,
+        "path": "suppressed", "reason": "mirror_of_published",
+        "detail": ("same unordered unit pair already published"
+                   + (f" ({kept})" if kept else "") +
+                   "; opposite direction skipped before examination"),
+        "assess_ran": False, "completed": False, "budget_refused": False,
+        "terra_completed": False, "luna_completed": None,
+    }
+
+
 def _split_unit(ref: str) -> tuple[str, str] | None:
     if "::" not in ref:
         return None
@@ -268,7 +315,21 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
     }
     assess = assess_fn or OD.assess_pair
     edit = edit_fn or ED.edit_pair
+    # MIRROR-01: first-published-wins within this run. A reverse pair is
+    # skipped before any paid call only after its twin published.
+    published_keys: dict[str, str] = {}
+    outcome["mirror_skipped"] = 0
     for pair in pairs:
+        mkey = unordered_mirror_key(pair.get("target"),
+                                    pair.get("counterpart"))
+        if mkey in published_keys:
+            row = mirror_preskip_row(pair, head_rev=head_rev,
+                                     base_rev=base_rev,
+                                     kept=published_keys[mkey])
+            outcome["pairs"].append(row)
+            outcome["suppressed"].append(_suppressed_row(row))
+            outcome["mirror_skipped"] += 1
+            continue
         row = _review_pair(
             pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
             base_rev=base_rev, head_rev=head_rev, head_tree=head_tree,
@@ -280,6 +341,10 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
             OD=OD, ED=ED, R=R)
         outcome["pairs"].append(row)
         if row["path"] == "published":
+            t, c = row.get("target") or {}, row.get("counterpart") or {}
+            published_keys[mkey] = (
+                f"{t.get('path')}::{t.get('symbol')} -> "
+                f"{c.get('path')}::{c.get('symbol')}")
             outcome["published"].append(_public_row(row))
         else:
             outcome["suppressed"].append(_suppressed_row(row))
@@ -294,9 +359,41 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
     else:
         outcome["spend_usd"] = round(spent_t + spent_l, 6)
     outcome["spend_unknown"] = spent_t is None or spent_l is None
+    _record_mirror_savings(outcome, spent_t, spent_l, t0)
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     return outcome
+
+
+def _record_mirror_savings(outcome: dict, spent_t, spent_l, t0) -> None:
+    """Estimated dollars/latency saved by pre-examination mirror skips.
+
+    Estimates only (labeled _est): skipped examinations are valued at
+    the run's mean examined-pair cost and latency. None when the spend
+    is unknown.
+    """
+    mirror_n = int(outcome.get("mirror_skipped") or 0)
+    outcome["mirror_skipped"] = mirror_n
+    outcome["mirror_saved_usd_est"] = None
+    outcome["mirror_saved_wall_s_est"] = None
+    if not mirror_n:
+        outcome["mirror_saved_usd_est"] = 0.0
+        outcome["mirror_saved_wall_s_est"] = 0.0
+        return
+    examined = sum(1 for r in outcome.get("pairs", [])
+                   if isinstance(r, dict) and r.get("assess_ran"))
+    if not examined:
+        return
+    total = None
+    if spent_t is not None and spent_l is not None:
+        total = spent_t + spent_l
+    elif spent_t is not None or spent_l is not None:
+        total = (spent_t or 0.0) + (spent_l or 0.0)
+    if total is not None:
+        outcome["mirror_saved_usd_est"] = round(
+            mirror_n * total / examined, 6)
+    wall = round(time.monotonic() - t0, 1)
+    outcome["mirror_saved_wall_s_est"] = round(mirror_n * wall / examined, 1)
 
 
 def _review_pair(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
@@ -527,7 +624,8 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
                            assess_fn: Callable | None = None,
                            edit_fn: Callable | None = None,
                            on_pair: Callable | None = None,
-                           is_stale: Callable[[], bool] | None = None) -> dict:
+                           is_stale: Callable[[], bool] | None = None,
+                           known_published_keys=None) -> dict:
     """Terra-propose / Luna-edit over directly-retrieved pairs.
 
     SEMDUP-08 integrated stage: pairs come from deterministic retrieval
@@ -538,6 +636,12 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
 
     `on_pair` (optional) receives each judged row right after it is
     recorded, so the caller can persist verdicts incrementally.
+
+    `known_published_keys` (optional) maps unordered pair keys to the
+    kept direction for already-established published verdicts
+    (same-content continuation/cache hits). A reverse pair whose key
+    is present is skipped before examination (MIRROR-01); nothing is
+    ever skipped on a mere rejection.
 
     Returns {"ok", "models", "pairs", "published", "suppressed",
     "skipped", "spend_usd", "spend_unknown", "wall_s", "stage"/"error"}.
@@ -619,6 +723,15 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
     edit = edit_fn or ED.edit_pair
     judged_preflight = _preflight_usd(pairs, merged_db, terra_res,
                                        luna_res)
+    # MIRROR-01: first-published-wins. Seeds are same-content published
+    # verdicts (continuation/cache hits); the loop adds each published
+    # twin. Skips fire only on published verdicts, never on rejection.
+    try:
+        seeds = dict(known_published_keys or {})
+    except (TypeError, ValueError):
+        seeds = {k: "" for k in (known_published_keys or ())}
+    published_keys: dict[str, str] = seeds
+    outcome["mirror_skipped"] = 0
     for idx, pair in enumerate(pairs):
         # COST-01B: check live head before each additional paid assessment
         if is_stale is not None:
@@ -648,6 +761,21 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
                     break
             except Exception:
                 pass
+        mkey = unordered_mirror_key(pair.get("target"),
+                                    pair.get("counterpart"))
+        if mkey in published_keys:
+            row = mirror_preskip_row(pair, head_rev=head_rev,
+                                     base_rev=base_rev,
+                                     kept=published_keys[mkey])
+            outcome["pairs"].append(row)
+            outcome["suppressed"].append(_suppressed_row(row))
+            outcome["mirror_skipped"] += 1
+            if on_pair is not None:
+                try:
+                    on_pair(row)
+                except Exception:  # noqa: BLE001 - hook never breaks judging
+                    pass
+            continue
         row = _review_pair(
             pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
             base_rev=base_rev, head_rev=head_rev, head_tree=head_tree,
@@ -659,6 +787,10 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
             OD=OD, ED=ED, R=R)
         outcome["pairs"].append(row)
         if row["path"] == "published":
+            t, c = row.get("target") or {}, row.get("counterpart") or {}
+            published_keys[mkey] = (
+                f"{t.get('path')}::{t.get('symbol')} -> "
+                f"{c.get('path')}::{c.get('symbol')}")
             outcome["published"].append(_public_row(row))
         else:
             outcome["suppressed"].append(_suppressed_row(row))
@@ -683,6 +815,7 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
         outcome["spend_usd"] = round(spent_t + spent_l, 6)
     outcome["spend_unknown"] = spent_t is None or spent_l is None
     outcome["preflight_usd"] = judged_preflight
+    _record_mirror_savings(outcome, spent_t, spent_l, t0)
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     return outcome
