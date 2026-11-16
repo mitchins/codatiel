@@ -247,15 +247,17 @@ class Store:
 
         Supports acknowledgement repair when the completed outcome
         lives under a different delivery ID than the gated event.
+        ``head_sha`` may be a short prefix: history entries render
+        short SHAs, and hex prefixes are effectively unique.
         Replay-wrapped completions count: delivery_mark_replay keeps
         the original decision and detail (run_id) on the row.
         """
         return _delivery_select(
-            self.cx, "repo=? AND pr=? AND head_sha=?"
+            self.cx, "repo=? AND pr=? AND head_sha LIKE ?"
             " AND (decision='completed' OR (decision='skipped:replay'"
             " AND json_extract(detail, '$.original_decision')"
             "='completed')) ORDER BY rowid DESC LIMIT 1",
-            (repo, int(pr), head_sha),
+            (repo, int(pr), head_sha + "%"),
             "completed delivery read failed")
 
     def delivery_record(self, *, delivery_id: str, event_type: str,
