@@ -561,7 +561,8 @@ def test_deferred_suppressed_when_head_already_reviewed(tmp_path,
     out = P.request_ack(store=store, repo=REPO, pr=PR, head=C40,
                         state="deferred", detail="budget.", ack_gh=gh)
     assert out["outcome"] == "already-current"
-    assert gh.posts == [] and gh.patches == []
+    assert gh.posts == []
+    assert gh.patches == []
     store.close()
 
 
@@ -575,7 +576,8 @@ def test_deferred_suppressed_when_head_in_flight(tmp_path, monkeypatch):
     out = P.request_ack(store=store, repo=REPO, pr=PR, head=C40,
                         state="deferred", detail="budget.", ack_gh=gh)
     assert out["outcome"] == "already-current"
-    assert gh.posts == [] and gh.patches == []
+    assert gh.posts == []
+    assert gh.patches == []
     store.close()
 
 
@@ -601,9 +603,11 @@ def test_gate_prefers_stored_completed_over_deferred(tmp_path, monkeypatch):
                            "reason": "daily budget exhausted"},
                      ack_gh=gh)
     assert out["outcome"] == "reconciled-stored"
-    assert len(gh.posts) == 1 and gh.patches == []
+    assert len(gh.posts) == 1
+    assert gh.patches == []
     body = gh.comments[0]["body"]
-    assert "reviewed" in body and "#issuecomment-4242" in body
+    assert "reviewed" in body
+    assert "#issuecomment-4242" in body
     assert "No review has run" not in body
     store.close()
 
@@ -643,8 +647,10 @@ def test_gate_corrects_misleading_deferred_to_completed(tmp_path,
                            "reason": "daily budget exhausted"},
                      ack_gh=gh)
     assert out["outcome"] == "reconciled-stored"
-    assert len(gh.posts) == 0 and len(gh.patches) == 1
+    assert len(gh.posts) == 0
+    assert len(gh.patches) == 1
     body = gh.comments[0]["body"]
-    assert "reviewed" in body and "#issuecomment-4242" in body
+    assert "reviewed" in body
+    assert "#issuecomment-4242" in body
     assert "No review has run" not in body
     store.close()
