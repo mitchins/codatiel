@@ -1585,16 +1585,12 @@ def cmd_events(args) -> dict:
                 # (inference holds it), so while a review runs no tick —
                 # and no deferred ack — fires; the first tick after the
                 # worker frees emits it. Only the in-progress ack is
-                # truly pre-inference.
+                # truly pre-inference. A stored terminal outcome for this
+                # head always wins over a blind deferred request.
                 if ev.get("pr_number") and gate["decision"] in (
                         "skipped:paused", "skipped:ceiling"):
-                    pipe_mod.request_ack(
-                        store=store, repo=ev.get("repo") or "",
-                        pr=int(ev.get("pr_number") or 0),
-                        head=ev.get("head_sha") or "",
-                        state="deferred",
-                        detail=pipe_mod.stable_ack_detail(
-                            gate["decision"], gate["reason"]))
+                    pipe_mod.gate_ack(store=store, ev=ev, row=row,
+                                      gate=gate)
                 return {"status": "skipped", **row}
             transport_kind = os.environ.get("CODATIEL_EVENTS_TRANSPORT",
                                             "fixture")

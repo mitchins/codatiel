@@ -877,20 +877,14 @@ def _prior_retry_attempts(prior: dict) -> int:
         return 0
 
 
-def _ceiling_original_decision(prior: dict) -> str | None:
+def _ceiling_original_decision(prior: dict | None) -> str | None:
     """The refusal a delivery row records, unwrapping replay wrappers.
 
     Returns "skipped:ceiling" only for a pure ceiling refusal, either
     directly or via a skipped:replay wrapper preserving it as the
     original decision; None for every other shape.
     """
-    dec = str(prior.get("decision") or "")
-    if dec == "skipped:replay":
-        try:
-            detail = json.loads(prior.get("detail") or "{}")
-        except Exception:
-            return None
-        dec = str(detail.get("original_decision") or "")
+    dec, _, _ = _original_outcome(prior)
     return dec if dec == "skipped:ceiling" else None
 
 
@@ -1747,9 +1741,20 @@ def request_ack(*, store: store_mod.Store, repo: str, pr: int,
                 live_head: str = "",
                 ack_gh: Any = None) -> dict:
     """Best-effort ack comment sync. Returns the outcome dict, never
-    raises, never affects review, spend, email, or publication paths."""
+    raises, never affects review, spend, email, or publication paths.
+
+    A deferred request never fires for a head the checkpoint already
+    shows as reviewed or in flight (same-head no-regression rule at
+    the source, before any GitHub traffic).
+    """
     from codatiel_i2.github import ack as ack_mod
     try:
+        if state == "deferred" and _head_has_review(store, repo, pr,
+                                                    head):
+            return {"outcome": "already-current",
+                    "reason": ("head already reviewed or under review; "
+                               "deferred ack suppressed"),
+                    "repo": repo, "pr": pr, "head_sha": head}
         return ack_mod.sync_ack(
             repo=repo, pr=pr, head=head, state=state, detail=detail,
             findings_comment_id=findings_comment_id,
@@ -1760,6 +1765,129 @@ def request_ack(*, store: store_mod.Store, repo: str, pr: int,
                 "repo": repo, "pr": pr, "head_sha": head}
 
 
+def _head_has_review(store: store_mod.Store, repo: str, pr: int,
+                     head: str) -> bool:
+    """True when the checkpoint shows this head reviewed or in flight."""
+    try:
+        cp = store.checkpoint_get(repo, int(pr))
+    except Exception:
+        return False
+    if not isinstance(cp, dict):
+        return False
+    if (cp.get("last_reviewed_head") or "") == (head or "") and head:
+        return True
+    return bool(cp.get("status") == "in_progress"
+                and (cp.get("in_progress_head") or "") == (head or "")
+                and head)
+
+
+def gate_ack(*, store: store_mod.Store, ev: dict, row: dict | None,
+             gate: dict, ack_gh: Any = None) -> dict:
+    """Ack for an operator-gate refusal. Never raises.
+
+    The gate refused, but a completed outcome for this head may exist
+    (same delivery, another delivery ID, or replay-wrapped): the
+    truthful completed state always wins first, so a published review
+    is never relabeled as "no review has run". Otherwise the stored
+    row's own terminal outcome reconciles, and only then does the
+    deferred request go through the usual checkpoint guard in
+    request_ack.
+    """
+    try:
+        if _reconcile_cross_delivery(store, ev, ack_gh=ack_gh):
+            return {"outcome": "reconciled-stored",
+                    "decision": "completed",
+                    "repo": ev.get("repo") or "",
+                    "pr": ev.get("pr_number"),
+                    "head_sha": ev.get("head_sha") or ""}
+        hit = _reconcile_stored_row(store, ev, row, gate, ack_gh=ack_gh)
+        if hit is not None:
+            return hit
+        if ev.get("pr_number"):
+            return request_ack(
+                store=store, repo=ev.get("repo") or "",
+                pr=int(ev.get("pr_number") or 0),
+                head=ev.get("head_sha") or "", state="deferred",
+                detail=stable_ack_detail(
+                    gate.get("decision") or "",
+                    gate.get("reason") or ""),
+                ack_gh=ack_gh)
+        return {"outcome": "refused", "reason": "no PR",
+                "repo": ev.get("repo") or ""}
+    except Exception as exc:  # noqa: BLE001 - ack never blocks ingest
+        return {"outcome": "error",
+                "reason": f"{type(exc).__name__}: {exc}"[:300],
+                "repo": ev.get("repo") or ""}
+
+
+def _reconcile_stored_row(store: store_mod.Store, ev: dict,
+                            row: dict | None, gate: dict,
+                            ack_gh: Any = None) -> dict | None:
+    """Reconcile the stored row's own terminal outcome, if it differs
+    from the gate refusal. Returns the outcome dict, or None when the
+    deferred path should proceed. Never raises."""
+    try:
+        stored, _, _ = _original_outcome(row)
+    except Exception:
+        return None
+    if stored not in ACK_DECISION_STATE:
+        return None
+    if stored == gate.get("decision"):
+        return None
+    _reconcile_ack_on_replay(store, ev, row, ack_gh=ack_gh)
+    return {"outcome": "reconciled-stored", "decision": stored,
+            "repo": ev.get("repo") or "", "pr": ev.get("pr_number"),
+            "head_sha": ev.get("head_sha") or ""}
+
+
+def _reconcile_cross_delivery(store: store_mod.Store, ev: dict,
+                                ack_gh: Any = None) -> bool:
+    """Reconcile a completed outcome stored under another delivery ID.
+
+    Returns True when a completed row for this head was found and its
+    acknowledgement reconciled (the caller reports reconciled-stored).
+    Never raises.
+    """
+    try:
+        if not (ev.get("pr_number") and ev.get("head_sha")):
+            return False
+        completed = store.delivery_get_completed(
+            ev.get("repo") or "", int(ev.get("pr_number") or 0),
+            ev.get("head_sha") or "")
+    except Exception:
+        return False
+    if completed is None:
+        return False
+    _ack_for_terminal(store, ev, "completed",
+                      str(completed.get("reason") or ""),
+                      _original_outcome(completed)[2],
+                      ack_gh=ack_gh, live_head="")
+    return True
+
+
+def _original_outcome(row: dict | None) -> tuple[str, str, dict]:
+    """Original decision, reason and detail, unwrapping replay wrappers.
+
+    A duplicate delivery stores skipped:replay with the original outcome
+    preserved in detail (mirrors _ceiling_original_decision). Returns
+    ("", "", {}) when nothing terminal can be recovered.
+    """
+    row = row or {}
+    decision = str(row.get("decision") or "")
+    reason = str(row.get("reason") or "")
+    raw_detail = row.get("detail") or {}
+    if isinstance(raw_detail, str):
+        try:
+            raw_detail = json.loads(raw_detail)
+        except ValueError:
+            raw_detail = {}
+    detail = raw_detail if isinstance(raw_detail, dict) else {}
+    if decision == "skipped:replay":
+        decision = str(detail.get("original_decision") or "")
+        reason = str(detail.get("original_reason") or "")
+    return decision, reason, detail
+
+
 def _reconcile_ack_on_replay(store: store_mod.Store, ev: dict,
                                prior: dict | None,
                                ack_gh: Any = None) -> None:
@@ -1768,23 +1896,14 @@ def _reconcile_ack_on_replay(store: store_mod.Store, ev: dict,
     Replays carry no inference and change no review state; they only
     re-render the stored terminal outcome through the ack path, so a
     PATCH that failed after the decision was stored converges on the
-    next duplicate delivery. Never raises.
+    next duplicate delivery. Replay wrappers are unwrapped to the
+    original outcome first. Never raises.
     """
     try:
-        prior = prior or {}
-        decision = str(prior.get("decision") or "")
+        decision, reason, detail = _original_outcome(prior)
         if decision not in ACK_DECISION_STATE:
             return
-        raw_detail = prior.get("detail") or {}
-        if isinstance(raw_detail, str):
-            try:
-                detail = json.loads(raw_detail)
-            except ValueError:
-                detail = {}
-        else:
-            detail = raw_detail if isinstance(raw_detail, dict) else {}
-        _ack_for_terminal(store, ev, decision,
-                          str(prior.get("reason") or ""), detail,
+        _ack_for_terminal(store, ev, decision, reason, detail,
                           ack_gh=ack_gh, live_head="")
     except Exception:
         pass

@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS reviews (
     finished_ts REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_reviews_repo_pr ON reviews(repo, pr);
+CREATE INDEX IF NOT EXISTS idx_deliveries_repo_pr_head
+    ON deliveries(repo, pr, head_sha);
 CREATE TABLE IF NOT EXISTS publications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     repo TEXT NOT NULL,
@@ -131,6 +133,33 @@ CREATE TABLE IF NOT EXISTS finding_deliveries (
 
 class StoreError(RuntimeError):
     """Any persistence problem: caller must refuse/stop, never default."""
+
+
+_DELIVERY_KEYS = ("delivery_id", "received_ts", "event_type", "action",
+                  "repo", "pr", "head_sha", "decision", "reason",
+                  "cost_usd", "detail")
+
+_DELIVERY_COLS = ("SELECT delivery_id, received_ts, event_type,"
+                  " action, repo, pr, head_sha, decision, reason,"
+                  " cost_usd, detail")
+
+
+def _delivery_row(row: Any) -> dict | None:
+    """Delivery row tuple to dict; None stays None."""
+    if not row:
+        return None
+    return dict(zip(_DELIVERY_KEYS, row))
+
+
+def _delivery_select(cx: Any, where: str, params: tuple,
+                     err: str) -> dict | None:
+    """One delivery row by filter; None when absent. Raises StoreError."""
+    try:
+        row = cx.execute(_DELIVERY_COLS + " FROM deliveries WHERE "
+                         + where, params).fetchone()
+    except Exception as exc:
+        raise StoreError(f"{err}: {exc}")
+    return _delivery_row(row)
 
 
 class Store:
@@ -208,20 +237,26 @@ class Store:
 
     # -- deliveries (replay detection) ----------------------------------
     def delivery_get(self, delivery_id: str) -> dict | None:
-        try:
-            row = self.cx.execute(
-                "SELECT delivery_id, received_ts, event_type, action, repo,"
-                " pr, head_sha, decision, reason, cost_usd, detail"
-                " FROM deliveries WHERE delivery_id=?",
-                (delivery_id,)).fetchone()
-        except Exception as exc:
-            raise StoreError(f"delivery read failed: {exc}")
-        if not row:
-            return None
-        keys = ("delivery_id", "received_ts", "event_type", "action",
-                "repo", "pr", "head_sha", "decision", "reason",
-                "cost_usd", "detail")
-        return dict(zip(keys, row))
+        return _delivery_select(
+            self.cx, "delivery_id=?", (delivery_id,),
+            "delivery read failed")
+
+    def delivery_get_completed(self, repo: str, pr: int,
+                               head_sha: str) -> dict | None:
+        """Latest completed delivery for (repo, PR, head), if any.
+
+        Supports acknowledgement repair when the completed outcome
+        lives under a different delivery ID than the gated event.
+        Replay-wrapped completions count: delivery_mark_replay keeps
+        the original decision and detail (run_id) on the row.
+        """
+        return _delivery_select(
+            self.cx, "repo=? AND pr=? AND head_sha=?"
+            " AND (decision='completed' OR (decision='skipped:replay'"
+            " AND json_extract(detail, '$.original_decision')"
+            "='completed')) ORDER BY rowid DESC LIMIT 1",
+            (repo, int(pr), head_sha),
+            "completed delivery read failed")
 
     def delivery_record(self, *, delivery_id: str, event_type: str,
                         action: str, repo: str, pr: int, head_sha: str,
