@@ -1806,24 +1806,12 @@ def gate_ack(*, store: store_mod.Store, ev: dict, row: dict | None,
             return {"outcome": "reconciled-stored", "decision": stored,
                     "repo": ev.get("repo") or "", "pr": ev.get("pr_number"),
                     "head_sha": ev.get("head_sha") or ""}
-        if ev.get("pr_number") and ev.get("head_sha"):
-            try:
-                completed = store.delivery_get_completed(
-                    ev.get("repo") or "", int(ev.get("pr_number") or 0),
-                    ev.get("head_sha") or "")
-            except Exception:
-                completed = None
-            if completed is not None:
-                _ack_for_terminal(
-                    store, ev, "completed",
-                    str(completed.get("reason") or ""),
-                    _original_outcome(completed)[2],
-                    ack_gh=ack_gh, live_head="")
-                return {"outcome": "reconciled-stored",
-                        "decision": "completed",
-                        "repo": ev.get("repo") or "",
-                        "pr": ev.get("pr_number"),
-                        "head_sha": ev.get("head_sha") or ""}
+        if _reconcile_cross_delivery(store, ev, ack_gh=ack_gh):
+            return {"outcome": "reconciled-stored",
+                    "decision": "completed",
+                    "repo": ev.get("repo") or "",
+                    "pr": ev.get("pr_number"),
+                    "head_sha": ev.get("head_sha") or ""}
         if ev.get("pr_number"):
             return request_ack(
                 store=store, repo=ev.get("repo") or "",
@@ -1839,6 +1827,31 @@ def gate_ack(*, store: store_mod.Store, ev: dict, row: dict | None,
         return {"outcome": "error",
                 "reason": f"{type(exc).__name__}: {exc}"[:300],
                 "repo": ev.get("repo") or ""}
+
+
+def _reconcile_cross_delivery(store: store_mod.Store, ev: dict,
+                                ack_gh: Any = None) -> bool:
+    """Reconcile a completed outcome stored under another delivery ID.
+
+    Returns True when a completed row for this head was found and its
+    acknowledgement reconciled (the caller reports reconciled-stored).
+    Never raises.
+    """
+    try:
+        if not (ev.get("pr_number") and ev.get("head_sha")):
+            return False
+        completed = store.delivery_get_completed(
+            ev.get("repo") or "", int(ev.get("pr_number") or 0),
+            ev.get("head_sha") or "")
+    except Exception:
+        return False
+    if completed is None:
+        return False
+    _ack_for_terminal(store, ev, "completed",
+                      str(completed.get("reason") or ""),
+                      _original_outcome(completed)[2],
+                      ack_gh=ack_gh, live_head="")
+    return True
 
 
 def _original_outcome(row: dict | None) -> tuple[str, str, dict]:
