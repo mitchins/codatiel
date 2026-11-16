@@ -1377,7 +1377,12 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                      if ev.get("pr_number") else None)
     _claimed_auto_run = (_claimed_auto or {}).get("in_progress_run") or ""
     _claimed_auto_base = (_claimed_auto or {}).get("in_progress_base") or ""
-    store.reserve(cfg.reserve_usd)
+    # RESERVE-RECOVERY-01: the reservation is attributed to the claim's
+    # generation token, so a later recovery can settle or release
+    # exactly this claim's hold (never another worker's).
+    store.reserve(cfg.reserve_usd, holder=_claimed_auto_run,
+                  repo=ev["repo"], pr=pr, head_sha=to_sha,
+                  delivery_id=ev.get("delivery_id") or "")
     # CODATIEL-ACK-01: the claim is atomic and paid inference has not
     # started — this is the early visible acknowledgement, pinned to
     # the exact head under review.
@@ -1406,7 +1411,8 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
         model_factory=model_factory, is_stale=_is_stale)
     cost = result.get("cost_usd")
     unknown = bool(result.get("cost_unknown")) or cost is None
-    store.settle(cfg.reserve_usd, None if unknown else float(cost or 0.0))
+    store.settle(cfg.reserve_usd, None if unknown else float(cost or 0.0),
+                 holder=_claimed_auto_run)
     cp_now = (store.checkpoint_get(ev["repo"], pr)
               if ev.get("pr_number") else None)
     owned = bool(
@@ -2162,7 +2168,126 @@ def recover(*, cfg: EventConfig, store: store_mod.Store) -> dict:
                 "worker restart: pinned review did not seal; operator "
                 "must explicitly re-drive (no automatic re-spend)")
             marked.append(f"{cp['repo']}#{cp['pr']}")
-    return {"status": "ok", "interrupted": marked}
+    recovered = recover_reservations(cfg, store, now=now)
+    return {"status": "ok", "interrupted": marked,
+            "reservations_recovered": recovered}
+
+
+def _proven_spend(run_dir: Path | str | None) -> tuple[float, bool]:
+    """Priced spend proven by a run dir, and whether it ever started.
+
+    Proven = priced Terra ledger lines + priced semdup stage total (both
+    written only for executed, priced work). Started = run.json present
+    (written when the run begins). Anything unpriced stays uncertain
+    and is handled by the caller as an unknown hold, never as $0.
+    """
+    if not run_dir:
+        return 0.0, False
+    root = Path(run_dir)
+    try:
+        if not (root / "run.json").is_file():
+            return 0.0, False
+    except Exception:
+        return 0.0, False
+    proven = 0.0
+    try:
+        metrics = json.loads(
+            (root / "metrics.json").read_text(encoding="utf-8"))
+        for row in (metrics.get("spend") or {}).get("request_ledger", []):
+            if isinstance(row, dict):
+                proven += float(row.get("priced_cost_usd") or 0.0)
+    except Exception:
+        pass
+    try:
+        semdup = json.loads(
+            (root / "semdup.json").read_text(encoding="utf-8"))
+        proven += float(semdup.get("spend_usd") or 0.0)
+    except Exception:
+        pass
+    return round(proven, 6), True
+
+
+def _find_run_dir(state_dir: Path, delivery_id: str) -> Path | None:
+    """Locate a run dir by its bound delivery ID (exact match)."""
+    if not delivery_id:
+        return None
+    try:
+        runs_root = Path(state_dir) / "runs"
+        if not runs_root.is_dir():
+            return None
+        for ident in runs_root.rglob("identity.json"):
+            try:
+                data = json.loads(ident.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if data.get("delivery_id") == delivery_id:
+                return ident.parent
+    except Exception:
+        return None
+    return None
+
+
+def recover_reservations(cfg: EventConfig, store: store_mod.Store,
+                         now: float | None = None) -> list[str]:
+    """Settle or release orphaned reservations, idempotently.
+
+    For each open reservation whose claim can no longer settle (no live
+    worker owns its token): settle priced usage proven by the run dir;
+    when the run started, preserve the unproven remainder as an
+    explicit unknown hold; when it never started, release the hold.
+    Each holder closes in the same transaction as its spend update, so
+    a repeated recovery is a no-op and settled spend is never
+    rewritten or double-counted. A live worker's hold is never
+    touched. Per-holder failures are recorded, never raised.
+    """
+    ts = time.time() if now is None else now
+    done: list[str] = []
+    try:
+        holders = store.reservations_open()
+    except Exception:
+        return done
+    for h in holders:
+        holder = str(h.get("holder") or "")
+        if not holder:
+            continue
+        try:
+            if _holder_owned_by_live_worker(store, h, ts,
+                                            cfg.stale_after_s):
+                continue
+            run_dir = _find_run_dir(cfg.state_dir,
+                                    str(h.get("delivery_id") or ""))
+            proven, started = _proven_spend(run_dir)
+            out = store.reservation_recover(
+                holder, proven_usd=proven, started=started)
+            if out.get("recovered"):
+                done.append(
+                    f"{h.get('repo')}#{h.get('pr')} {holder[:8]}"
+                    f" proven=${proven:.4f}"
+                    f"{' started' if started else ' never-started'}")
+        except Exception as exc:  # noqa: BLE001 - one bad holder
+            done.append(f"{holder[:8]} error: {type(exc).__name__}")
+    return done
+
+
+def _holder_owned_by_live_worker(store: store_mod.Store, h: dict,
+                                 now: float, stale_after_s: float) -> bool:
+    """True when a live worker may still own this reservation."""
+    try:
+        cp = store.checkpoint_get(str(h.get("repo") or ""),
+                                  int(h.get("pr") or 0))
+    except Exception:
+        return False
+    if not isinstance(cp, dict):
+        return False
+    if cp.get("status") != "in_progress":
+        return False
+    if (cp.get("in_progress_run") or "") != str(h.get("holder") or ""):
+        return False
+    try:
+        age = now - float(cp.get("updated_ts") or 0)
+    except (TypeError, ValueError):
+        return False
+    return age < float(stale_after_s)
 
 
 def reset_spend(*, store: store_mod.Store) -> dict:

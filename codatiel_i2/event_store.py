@@ -84,6 +84,20 @@ CREATE TABLE IF NOT EXISTS spend (
     key TEXT PRIMARY KEY,
     value REAL NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS reservations (
+    holder TEXT PRIMARY KEY,
+    repo TEXT NOT NULL DEFAULT '',
+    pr INTEGER NOT NULL DEFAULT 0,
+    head_sha TEXT NOT NULL DEFAULT '',
+    delivery_id TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    amount_usd REAL NOT NULL DEFAULT 0,
+    proven_usd REAL,
+    held_unknown_usd REAL,
+    state TEXT NOT NULL DEFAULT 'open',
+    created_ts REAL NOT NULL DEFAULT 0,
+    closed_ts REAL
+);
 CREATE TABLE IF NOT EXISTS reviews (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     repo TEXT NOT NULL,
@@ -962,10 +976,26 @@ class Store:
             "unknown_holds": self.spend_get("unknown_holds") or 0.0,
         }
 
-    def reserve(self, amount: float) -> tuple[bool, dict[str, float]]:
-        """Hold a per-review reservation; False when it would breach."""
+    def reserve(self, amount: float, *, holder: str, repo: str,
+                pr: int, head_sha: str, delivery_id: str,
+                run_id: str = "", now: float | None = None) -> dict:
+        """Hold a per-review reservation attributed to its claim.
+
+        ``holder`` is the claim's generation token: every reservation
+        is attributable, and settle/recover consume each holder exactly
+        once. A duplicate holder is refused loudly (fail-closed).
+        """
+        if not holder:
+            raise StoreError("reserve requires a holder token")
+        ts = time.time() if now is None else now
         try:
             self.cx.execute(_BEGIN)
+            if self.cx.execute(
+                    "SELECT holder FROM reservations WHERE holder=?",
+                    (holder,)).fetchone():
+                raise StoreError(
+                    f"reservation {holder!r} already held; refusing "
+                    "double reserve")
             s = (self.cx.execute(
                 "SELECT value FROM spend WHERE key='settled_usd'"
             ).fetchone() or (0.0,))[0]
@@ -976,19 +1006,41 @@ class Store:
                 "INSERT INTO spend(key, value) VALUES('reserved_usd', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (r + amount,))
+            self.cx.execute(
+                "INSERT INTO reservations(holder, repo, pr, head_sha,"
+                " delivery_id, run_id, amount_usd, state, created_ts)"
+                " VALUES(?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+                (holder, repo, int(pr), head_sha, delivery_id, run_id,
+                 float(amount), ts))
             self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
                 self.cx.execute(_ROLLBACK)
             except Exception:
                 pass
+            if isinstance(exc, StoreError):
+                raise
             raise StoreError(f"reserve failed: {exc}")
-        return True, {"settled_usd": s, "reserved_usd": r + amount}
+        return {"settled_usd": s, "reserved_usd": r + amount}
 
-    def settle(self, reserved: float, actual: float | None) -> dict:
-        """Release a reservation; settle actuals (None = unknown: hold)."""
+    def settle(self, reserved: float, actual: float | None, *,
+               holder: str) -> dict:
+        """Release a reservation; settle actuals (None = unknown: hold).
+
+        The holder must be open: a second settle for the same claim is
+        refused instead of double-counting settled spend.
+        """
+        if not holder:
+            raise StoreError("settle requires a holder token")
         try:
             self.cx.execute(_BEGIN)
+            row = self.cx.execute(
+                "SELECT state FROM reservations WHERE holder=?",
+                (holder,)).fetchone()
+            if row is None or row[0] != "open":
+                raise StoreError(
+                    f"reservation {holder!r} is not open; refusing "
+                    "double settle")
             s = (self.cx.execute(
                 "SELECT value FROM spend WHERE key='settled_usd'"
             ).fetchone() or (0.0,))[0]
@@ -1018,14 +1070,107 @@ class Store:
                 "INSERT INTO spend(key, value) VALUES('unknown_holds', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (u,))
+            self.cx.execute(
+                "UPDATE reservations SET state='settled',"
+                " proven_usd=?, held_unknown_usd=0, closed_ts=?"
+                " WHERE holder=?", (float(actual or 0.0), time.time(),
+                                    holder))
             self.cx.execute(_COMMIT)
         except Exception as exc:
             try:
                 self.cx.execute(_ROLLBACK)
             except Exception:
                 pass
+            if isinstance(exc, StoreError):
+                raise
             raise StoreError(f"settle failed: {exc}")
         return {"settled_usd": s, "reserved_usd": r,
+                "unknown_holds": u}
+
+    def reservations_open(self) -> list[dict]:
+        """All open (unsettled, unreleased) reservations."""
+        try:
+            rows = self.cx.execute(
+                "SELECT holder, repo, pr, head_sha, delivery_id, run_id,"
+                " amount_usd, created_ts FROM reservations"
+                " WHERE state='open' ORDER BY created_ts").fetchall()
+        except Exception as exc:
+            raise StoreError(f"reservations list failed: {exc}")
+        keys = ("holder", "repo", "pr", "head_sha", "delivery_id",
+                "run_id", "amount_usd", "created_ts")
+        return [dict(zip(keys, r)) for r in rows]
+
+    def reservation_recover(self, holder: str, *, proven_usd: float,
+                            started: bool) -> dict:
+        """Settle proven usage for an orphaned reservation, idempotently.
+
+        Proven spend settles exactly; when the run started, the
+        unproven remainder is preserved as an explicit unknown hold
+        (never silently recorded as zero). When the run never started,
+        the full hold is released. The holder closes in the same
+        transaction, so a repeated recovery is a no-op. Never raises
+        for a missing/closed holder (returns recovered=False).
+        """
+        try:
+            self.cx.execute(_BEGIN)
+            row = self.cx.execute(
+                "SELECT amount_usd FROM reservations WHERE holder=?"
+                " AND state='open'", (holder,)).fetchone()
+            if row is None:
+                self.cx.execute(_COMMIT)
+                return {"recovered": False, "holder": holder}
+            amount = float(row[0])
+            proven = max(0.0, float(proven_usd or 0.0))
+            s = (self.cx.execute(
+                "SELECT value FROM spend WHERE key='settled_usd'"
+            ).fetchone() or (0.0,))[0]
+            r = (self.cx.execute(
+                "SELECT value FROM spend WHERE key='reserved_usd'"
+            ).fetchone() or (0.0,))[0]
+            u = (self.cx.execute(
+                "SELECT value FROM spend WHERE key='unknown_holds'"
+            ).fetchone() or (0.0,))[0]
+            if r < amount:
+                raise StoreError(
+                    f"reserve ledger {r} below holder {amount}; "
+                    "refusing to rewrite spend")
+            r -= amount
+            s += proven
+            held = 0.0
+            if started:
+                held = max(0.0, amount - proven)
+                if held > 0:
+                    s += held
+                    u += 1.0
+            self.cx.execute(
+                "INSERT INTO spend(key, value) VALUES('settled_usd', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (s,))
+            self.cx.execute(
+                "INSERT INTO spend(key, value) VALUES('reserved_usd', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (r,))
+            self.cx.execute(
+                "INSERT INTO spend(key, value) VALUES('unknown_holds', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (u,))
+            self.cx.execute(
+                "UPDATE reservations SET state='recovered',"
+                " proven_usd=?, held_unknown_usd=?, closed_ts=?"
+                " WHERE holder=? AND state='open'",
+                (proven, held, time.time(), holder))
+            self.cx.execute(_COMMIT)
+        except Exception as exc:
+            try:
+                self.cx.execute(_ROLLBACK)
+            except Exception:
+                pass
+            if isinstance(exc, StoreError):
+                raise
+            raise StoreError(f"reservation recovery failed: {exc}")
+        return {"recovered": True, "holder": holder, "proven_usd": proven,
+                "held_unknown_usd": held,
+                "settled_usd": s, "reserved_usd": r,
                 "unknown_holds": u}
 
     # -- publications (GitHub comment record; PROD-01 Track A) ---------------

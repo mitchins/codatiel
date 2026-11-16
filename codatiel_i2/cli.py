@@ -1278,7 +1278,9 @@ def cmd_events(args) -> dict:
                             "reason": f"claim returned {claim}"}
                 _claimed_cp = store.checkpoint_get(repo, number)
                 _claimed_run = (_claimed_cp or {}).get("in_progress_run") or ""
-                store.reserve(cfg.reserve_usd)
+                store.reserve(cfg.reserve_usd, holder=_claimed_run,
+                              repo=repo, pr=number, head_sha=head,
+                              delivery_id=f"explicit:{repo}:{number}:{head}")
                 transport = os.environ.get(
                     "CODATIEL_EVENTS_TRANSPORT", "fixture")
                 result = _pm.run_review_for_range(
@@ -1291,7 +1293,8 @@ def cmd_events(args) -> dict:
                 cost = result.get("cost_usd")
                 unknown = bool(result.get("cost_unknown")) or cost is None
                 store.settle(cfg.reserve_usd,
-                             None if unknown else float(cost or 0.0))
+                             None if unknown else float(cost or 0.0),
+                             holder=_claimed_run)
                 # Freshness recheck before sealing: the head may have
                 # moved (or another run taken the pin) during
                 # inference. Spend is real and stays settled; a stale
