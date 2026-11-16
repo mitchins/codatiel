@@ -1007,10 +1007,20 @@ def _record(store: store_mod.Store, ev: dict, decision: str, reason: str,
 def _finalize_delivery(store: store_mod.Store, ev: dict, decision: str,
                        reason: str, cost: float | None,
                        now: float | None = None,
-                       detail: dict | None = None) -> dict:
+                       detail: dict | None = None,
+                       ack_gh: Any = None,
+                       live_head: str = "") -> dict:
     store.delivery_update_decision(ev["delivery_id"], decision, reason,
                                    cost, now=now, detail=detail)
-    return store.delivery_get(ev["delivery_id"]) or {}
+    row = store.delivery_get(ev["delivery_id"]) or {}
+    # CODATIEL-ACK-01: terminal decisions update the PR ack comment
+    # (best-effort, never raises, never affects the stored row).
+    if ev.get("pr_number"):
+        if ack_gh is None:
+            ack_gh = ev.get("_ack_gh")
+        _ack_for_terminal(store, ev, decision, reason, detail,
+                          ack_gh=ack_gh, live_head=live_head)
+    return row
 
 def _provenance_detail(*, repo: str, pr: int, base: str, head: str,
                       result: dict | None, kind: str | None,
@@ -1190,9 +1200,20 @@ def _github_delivery_posted(store, repo: str, pr: int, head_sha: str, run_id: st
 
 def process_event(*, cfg: EventConfig, store: store_mod.Store,
                   ev: dict, model_factory: Any = None,
-                  transport: Any = None) -> dict:
-    """Process one normalized event. Returns the stored delivery row."""
+                  transport: Any = None, ack_gh: Any = None) -> dict:
+    """Process one normalized event. Returns the stored delivery row.
+
+    ``ack_gh`` is the injectable GitHub transport for the early
+    acknowledgement comment (tests pass fakes; None shells out to the
+    gh CLI and stays silent unless comments are switched on+armed).
+    """
     now = cfg.clock()
+    if ack_gh is not None:
+        # CODATIEL-ACK-01: carry the injectable ack transport on the
+        # event so every terminal decision in this call tree (including
+        # queued drains) acknowledges through it. Production passes
+        # None and the real gh CLI applies under the HOLD gates.
+        ev = dict(ev, _ack_gh=ack_gh)
     store.require_enabled()
     prior = store.delivery_get(ev["delivery_id"])
     if prior is not None and prior.get("decision") not in ("in_progress",):
@@ -1224,9 +1245,16 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                     # us): fall back to replay, never process as new
                     # work. The replay mark cannot overwrite the
                     # winner's active claim.
+                    _reconcile_ack_on_replay(
+                        store, ev, prior, ack_gh=ev.get("_ack_gh"))
                     return store.delivery_mark_replay(
                         ev["delivery_id"], prior)
             else:
+                # CODATIEL-ACK-01: a replayed terminal delivery retries
+                # its acknowledgement from the stored outcome (a failed
+                # PATCH converges here). No inference, no state change.
+                _reconcile_ack_on_replay(
+                    store, ev, prior, ack_gh=ev.get("_ack_gh"))
                 return store.delivery_mark_replay(ev["delivery_id"], prior)
     if prior is None:
         _record(store, ev, "in_progress", "claimed", None, now=now)
@@ -1312,7 +1340,8 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             store, ev, "skipped:stale_head",
             f"event head {to_sha[:12]} is not the live PR head "
             f"{live[:12]}; superseded event dropped with no "
-            "inference, no email, no checkpoint change", 0.0, now=now)
+            "inference, no email, no checkpoint change", 0.0, now=now,
+            live_head=live)
     if live is None and cp is not None:
         # gh unreachable: fall back to local ancestry (PROD-02 review).
         # A head older than the reviewed head is stale even when the
@@ -1355,6 +1384,14 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
     _claimed_auto_run = (_claimed_auto or {}).get("in_progress_run") or ""
     _claimed_auto_base = (_claimed_auto or {}).get("in_progress_base") or ""
     store.reserve(cfg.reserve_usd)
+    # CODATIEL-ACK-01: the claim is atomic and paid inference has not
+    # started — this is the early visible acknowledgement, pinned to
+    # the exact head under review.
+    request_ack(store=store, repo=ev["repo"], pr=pr, head=to_sha,
+                state="in_progress",
+                detail=(f"claim pinned {from_sha[:12]}..{to_sha[:12]}; "
+                        f"{kind} review starting."),
+                ack_gh=ack_gh)
     # COST-01B: persistent stale observation latch (CodeRabbit)
     _stale_observed: list[str] = []
 
@@ -1413,7 +1450,8 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
             f"{'claim lost' if not owned else 'claim released'}); "
             "no checkpoint change, no email, no comment; "
             f"inference cost ${float(cost or 0.0):.4f} recorded",
-            cost if not unknown else None, now=cfg.clock(), detail=prov)
+            cost if not unknown else None, now=cfg.clock(), detail=prov,
+            live_head=(live_after or ""))
         # A newer head queued during this run must not strand: drain
         # it through the same verified path (stale queues drop $0).
         # The follow range starts at the queued BASE (not this run's
@@ -1428,7 +1466,8 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                 cfg=cfg, store=store, ev=ev, pr=pr,
                 to_sha=(qb_after or to_sha),
                 queued=(qb_after, qh_after), final=final, access=access,
-                model_factory=model_factory, transport=transport, now=now)
+                model_factory=model_factory, transport=transport, now=now,
+                ack_gh=ack_gh)
         return final
     if result["status"] not in ("complete", "inconclusive"):
         _remember_queued(store, ev, cp, from_sha, to_sha, "failed")
@@ -1585,12 +1624,14 @@ def process_event(*, cfg: EventConfig, store: store_mod.Store,
                              to_sha=to_sha, queued=done["queued"],
                              final=final, access=access,
                              model_factory=model_factory,
-                             transport=transport, now=now)
+                             transport=transport, now=now,
+                             ack_gh=ack_gh)
     return final
 
 
 def _drain_queued(*, cfg, store, ev, pr, to_sha, queued, final,
-                  access, model_factory=None, transport=None, now=None):
+                  access, model_factory=None, transport=None, now=None,
+                  ack_gh=None):
     """Run a queued delta after its parent sealed (or was superseded).
 
     PROD-02: the queued head is verified before spending — against the
@@ -1635,7 +1676,7 @@ def _drain_queued(*, cfg, store, ev, pr, to_sha, queued, final,
                 now=now)
         out = process_event(cfg=cfg, store=store, ev=follow,
                             model_factory=model_factory,
-                            transport=transport)
+                            transport=transport, ack_gh=ack_gh)
         final = {**final, "drained": out.get("decision")}
     return final
 
@@ -1643,7 +1684,8 @@ def _drain_queued(*, cfg, store, ev, pr, to_sha, queued, final,
 def _maybe_publish_comment(*, cfg: EventConfig, store: store_mod.Store,
                            run_dir: str, now: float | None = None) -> str:
     """Best-effort GitHub comment post. Returns reason bits, never
-    raises, never affects the email outcome recorded by the caller."""
+    raises, never affects the email outcome recorded by the caller.
+    """
     from codatiel_i2.github import comments as comments_mod
     if not comments_mod.is_enabled():
         return ""
@@ -1660,6 +1702,123 @@ def _maybe_publish_comment(*, cfg: EventConfig, store: store_mod.Store,
         return (f"; github-comment posted "
                 f"(comment {pub.get('comment_id') or '?'})")
     return f"; github-comment {outcome} ({str(pub.get('reason') or '')[:160]})"
+
+
+ACK_DECISION_STATE = {
+    "skipped:draft": "deferred",
+    "skipped:paused": "deferred",
+    "skipped:ceiling": "deferred",
+    "queued": "queued",
+    "skipped:stale_head": "superseded",
+    "skipped:stale_superseded": "superseded",
+    "completed": "completed",
+    "failed": "failed",
+}
+
+
+def stable_ack_detail(decision: str, reason: str) -> str:
+    """Tick-stable ack detail: never embeds volatile ledger amounts or
+    timestamps, so repeated ticks reconcile to already-current."""
+    low = (reason or "").lower()
+    if decision == "skipped:draft":
+        return "draft PR — held until marked ready for review."
+    if decision == "skipped:paused":
+        return "operator pause is set — automatic ingest holds."
+    if decision == "skipped:ceiling":
+        if "daily" in low:
+            return ("daily budget exhausted — automatic bounded retry "
+                    "when budget frees.")
+        return ("spend cap reached — bounded retry when budget is "
+                "available.")
+    if decision == "queued":
+        return ("waiting for the review worker; the review runs as soon "
+                "as the worker is free.")
+    if decision in ("skipped:stale_head", "skipped:stale_superseded"):
+        return ("partial inference cost was recorded; no findings were "
+                "published for this head.")
+    if decision == "failed":
+        return (reason or "review failed")[:160]
+    return ""
+
+
+def request_ack(*, store: store_mod.Store, repo: str, pr: int,
+                head: str, state: str, detail: str = "",
+                findings_comment_id: str = "",
+                live_head: str = "",
+                ack_gh: Any = None) -> dict:
+    """Best-effort ack comment sync. Returns the outcome dict, never
+    raises, never affects review, spend, email, or publication paths."""
+    from codatiel_i2.github import ack as ack_mod
+    try:
+        return ack_mod.sync_ack(
+            repo=repo, pr=pr, head=head, state=state, detail=detail,
+            findings_comment_id=findings_comment_id,
+            live_head=live_head, store=store, gh=ack_gh)
+    except Exception as exc:  # noqa: BLE001 - ack never blocks review
+        return {"outcome": "error",
+                "reason": f"{type(exc).__name__}: {exc}"[:300],
+                "repo": repo, "pr": pr, "head_sha": head}
+
+
+def _reconcile_ack_on_replay(store: store_mod.Store, ev: dict,
+                               prior: dict | None,
+                               ack_gh: Any = None) -> None:
+    """Retry a terminal acknowledgement from the stored delivery row.
+
+    Replays carry no inference and change no review state; they only
+    re-render the stored terminal outcome through the ack path, so a
+    PATCH that failed after the decision was stored converges on the
+    next duplicate delivery. Never raises.
+    """
+    try:
+        prior = prior or {}
+        decision = str(prior.get("decision") or "")
+        if decision not in ACK_DECISION_STATE:
+            return
+        raw_detail = prior.get("detail") or {}
+        if isinstance(raw_detail, str):
+            try:
+                detail = json.loads(raw_detail)
+            except ValueError:
+                detail = {}
+        else:
+            detail = raw_detail if isinstance(raw_detail, dict) else {}
+        _ack_for_terminal(store, ev, decision,
+                          str(prior.get("reason") or ""), detail,
+                          ack_gh=ack_gh, live_head="")
+    except Exception:
+        pass
+
+
+def _ack_for_terminal(store: store_mod.Store, ev: dict, decision: str,
+                      reason: str, detail: dict | None,
+                      ack_gh: Any = None, live_head: str = "") -> None:
+    """Map a terminal delivery decision to an ack state (silent when the
+    decision carries no visibility meaning)."""
+    state = ACK_DECISION_STATE.get(decision)
+    if state is None:
+        return
+    try:
+        pr = int(ev.get("pr_number") or 0)
+    except (TypeError, ValueError):
+        return
+    if not pr:
+        return
+    findings = ""
+    if decision == "completed":
+        run_id = (detail or {}).get("run_id") or ""
+        try:
+            pub = store.publication_get(
+                ev.get("repo") or "", pr, ev.get("head_sha") or "",
+                str(run_id))
+        except Exception:
+            pub = None
+        findings = str((pub or {}).get("comment_id") or "")
+    request_ack(store=store, repo=ev.get("repo") or "", pr=pr,
+                head=ev.get("head_sha") or "", state=state,
+                detail=stable_ack_detail(decision, reason),
+                findings_comment_id=findings, live_head=live_head,
+                ack_gh=ack_gh)
 
 
 def _find_by_branch(store: store_mod.Store, repo: str,
