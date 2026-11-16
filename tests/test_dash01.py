@@ -154,6 +154,67 @@ def _get(port: int, path: str) -> tuple[int, str]:
         return resp.status, resp.read().decode()
 
 
+# -- merge-authorized corrections: failing-first regressions ---------------
+
+
+def test_settings_prefill_uses_active_environment(tmp_path, monkeypatch):
+    """The editable repo list comes from the served environment only."""
+    from codatiel_i2 import event_store as _S
+    dev_state = tmp_path / "devstate"
+    dev_state.mkdir()
+    test_state = tmp_path / "teststate"
+    test_state.mkdir()
+    _S.Store(dev_state / "events.sqlite").close()
+    _S.Store(test_state / "events.sqlite").close()
+    monkeypatch.setenv("CODATIEL_DEV_STATE", str(dev_state))
+    monkeypatch.setenv("CODATIEL_TEST_STATE", str(test_state))
+    monkeypatch.setenv("CODATIEL_DEV_REPOS", "o/dev")
+    monkeypatch.setenv("CODATIEL_TEST_REPOS", "o/test")
+    dev_vals = DA._settings_form_values(
+        {}, _env_dict(), repo_key=DA._active_repo_key(dev_state))
+    test_vals = DA._settings_form_values(
+        {}, _env_dict(), repo_key=DA._active_repo_key(test_state))
+    assert dev_vals["repos"].split() == ["o/dev"], dev_vals
+    assert test_vals["repos"].split() == ["o/test"], test_vals
+
+
+def _env_dict():
+    import os as _os
+    out = {}
+    for name in ("CODATIEL_DEV_REPOS", "CODATIEL_TEST_REPOS"):
+        present = bool(_os.environ.get(name, ""))
+        out[name] = {"value": _os.environ.get(name, "") if present
+                     else None,
+                     "display": _os.environ.get(name, "") if present
+                     else "unset"}
+    return out
+
+
+def test_remaining_budget_counts_settled_plus_reserved():
+    """Remaining = cap − (settled + reserved), matching worker admission."""
+    ledger = {"settled_usd": 10.0, "reserved_usd": 2.0,
+              "unknown_holds": 0.0}
+    effective = {"available": True, "monthly_effective_usd": 20.0,
+                 "daily_effective_usd": None}
+    rem = DD._budget_remaining(ledger, effective, None)
+    assert rem["monthly_remaining_usd"] == pytest.approx(8.0)
+
+
+def test_subprocess_startup_wait_is_bounded():
+    """The CLI-output reader fails fast instead of hanging forever."""
+    import subprocess as _sp
+    import sys as _sys
+    proc = _sp.Popen([_sys.executable, "-c",
+                      "import time; time.sleep(300)"],
+                     stdout=_sp.PIPE, text=True)
+    try:
+        with pytest.raises(TimeoutError):
+            DA._readline_timeout(proc, timeout=1)
+    finally:
+        proc.terminate()
+        proc.wait(timeout=15)
+
+
 # -- CodeRabbit DASH-01 corrections: failing-first regressions --------------
 
 
@@ -175,7 +236,8 @@ def test_cli_dashboard_startup_reports_allocated_port(tmp_path):
         stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True)
     try:
         import json as _json
-        line = proc.stdout.readline().strip()
+        # Bounded startup wait: never hang if the server never prints.
+        line = DA._readline_timeout(proc, timeout=60).strip()
         assert line.startswith("{"), line
         rec = _json.loads(line)
         assert rec["status"] == "ok", rec

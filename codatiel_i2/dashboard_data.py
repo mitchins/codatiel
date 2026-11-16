@@ -503,17 +503,22 @@ def _budget_remaining(ledger: dict[str, Any],
     if not effective.get("available"):
         return {"available": False,
                 "note": "effective caps unavailable"}
+    # Worker admission semantics: settled + reserved + new reserve must
+    # fit the cap, so remaining is cap minus settled minus reserved
+    # (unknown settled reads as unknown remaining, never zero).
     settled = ledger.get("settled_usd")
+    reserved = float(ledger.get("reserved_usd") or 0.0)
     out: dict[str, Any] = {"available": True}
     monthly = effective.get("monthly_effective_usd")
     out["monthly_remaining_usd"] = (
-        round(float(monthly) - float(settled), 6)
+        round(float(monthly) - float(settled) - reserved, 6)
         if monthly is not None and settled is not None else None)
     if out["monthly_remaining_usd"] is None:
         out["monthly_note"] = ("settled spend unreadable; remaining "
                                "is unknown, not zero")
     # Daily remaining reuses the authoritative day ledger (SELECTs
-    # only) via a shim exposing the read-only connection.
+    # only) via a shim exposing the read-only connection, minus the
+    # same in-flight reservation the worker gate holds back.
     daily = effective.get("daily_effective_usd")
     if daily is None or cx is None:
         out["daily_remaining_usd"] = None
@@ -525,7 +530,8 @@ def _budget_remaining(ledger: dict[str, Any],
             spent = opcfg.spend_on_day(types.SimpleNamespace(cx=cx), today)
             out["daily_remaining_usd"] = round(
                 float(daily) - float(
-                    spent.get("codatiel_ledger_usd") or 0.0), 6)
+                    spent.get("codatiel_ledger_usd") or 0.0)
+                - reserved, 6)
             out["daily_day"] = today
         except Exception as exc:
             out["daily_remaining_usd"] = None

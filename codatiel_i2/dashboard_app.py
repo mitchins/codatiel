@@ -138,6 +138,55 @@ def parse_settings_form(form: dict[str, list[str]]
     return patch, errors, actor
 
 
+def _active_repo_key(state: Path | str) -> str | None:
+    """Env repo list matching the served state dir.
+
+    The settings form prefills its editable repository list from the
+    ACTIVE environment (the TEST or DEV list governing the served
+    state), never a concatenation of both: saving a concatenated
+    list would write the wrong environment's repos into
+    operator.json. Returns None when the state dir matches neither
+    configured dir (both lists shown, existing fallback).
+    """
+    import os as _os
+    served = str(state)
+    test_state = _os.environ.get("CODATIEL_TEST_STATE", "")
+    if test_state and served == test_state:
+        return "CODATIEL_TEST_REPOS"
+    dev_state = _os.environ.get("CODATIEL_DEV_STATE", "")
+    if dev_state and served == dev_state:
+        return "CODATIEL_DEV_REPOS"
+    return None
+
+
+def _readline_timeout(proc: Any, timeout: float) -> str:
+    """Read one stdout line, failing fast instead of hanging forever.
+
+    Raises TimeoutError when no line arrives in time; the caller owns
+    the process lifecycle (terminate/wait) on every path.
+    """
+    import queue as _queue
+    import threading as _threading
+    box: _queue.Queue = _queue.Queue(maxsize=1)
+
+    def _read() -> None:
+        try:
+            box.put(proc.stdout.readline())
+        except Exception as exc:  # noqa: BLE001 - report, never hang
+            box.put(exc)
+
+    worker = _threading.Thread(target=_read, daemon=True)
+    worker.start()
+    try:
+        line = box.get(timeout=timeout)
+    except _queue.Empty:
+        raise TimeoutError(
+            f"no CLI output within {timeout}s; refusing to hang")
+    if isinstance(line, Exception):
+        raise line
+    return line
+
+
 def _mint_csrf(app: FastAPI) -> str:
     token = secrets.token_urlsafe(32)
     tokens = app.state.csrf_tokens
@@ -182,17 +231,25 @@ def _submitted_checked(form: dict[str, list[str]]) -> dict[str, bool]:
 
 
 def _settings_form_values(settings: dict[str, Any],
-                          env: dict[str, Any]) -> dict[str, str]:
+                          env: dict[str, Any],
+                          repo_key: str | None = None) -> dict[str, str]:
     def num(key: str) -> str:
         value = settings.get(key)
         return "" if value is None else str(value)
 
     repos = settings.get("repos") or {}
     if not repos:
-        dev_repos = env.get("CODATIEL_DEV_REPOS", {}).get("value") or ""
-        test_repos = env.get("CODATIEL_TEST_REPOS", {}).get("value") or ""
-        lines = [r.strip() for r in (dev_repos + "," + test_repos).split(",")
-                 if r.strip()]
+        if repo_key is None:
+            # State dir matches neither configured env dir: show both
+            # lists (existing fallback).
+            keys = ("CODATIEL_DEV_REPOS", "CODATIEL_TEST_REPOS")
+        else:
+            keys = (repo_key,)
+        seen: list[str] = []
+        for key in keys:
+            raw = env.get(key, {}).get("value") or ""
+            seen.extend(r.strip() for r in raw.split(",") if r.strip())
+        lines = list(dict.fromkeys(seen))
     else:
         lines = [f"{slug}=off" if not enabled else slug
                  for slug, enabled in sorted(repos.items())]
@@ -323,7 +380,8 @@ def create_app(state_dir: Path | str) -> FastAPI:
         return render("settings.html", title="Settings", d=data,
                       vals=_settings_form_values(
                           data.get("settings", {}),
-                          data.get("env", {})),
+                          data.get("env", {}),
+                          repo_key=_active_repo_key(state)),
                       checked=_saved_checked(data.get("settings", {})),
                       profiles=list(opcfg.MODEL_PROFILES),
                       csrf_token=token, errors=[],
@@ -344,7 +402,8 @@ def create_app(state_dir: Path | str) -> FastAPI:
                           checked=_submitted_checked(form),
                           profiles=list(opcfg.MODEL_PROFILES),
                           csrf_token=_mint_csrf(app), errors=errors,
-                          saved=False, form_disabled=disabled)
+                          saved=False,
+                          form_disabled=disabled)
             resp.status_code = status
             return resp
 
