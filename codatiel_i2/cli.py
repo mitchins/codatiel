@@ -1579,6 +1579,18 @@ def cmd_events(args) -> dict:
                     decision=gate["decision"], reason=gate["reason"],
                     cost_usd=0.0, detail={"operator_gate": True},
                     now=cfg.clock())
+                # CODATIEL-ACK-01: the synchronous poller acknowledges
+                # deferred heads every tick even while a review runs —
+                # discovery is fast and never waits on inference.
+                if ev.get("pr_number") and gate["decision"] in (
+                        "skipped:paused", "skipped:ceiling"):
+                    pipe_mod.request_ack(
+                        store=store, repo=ev.get("repo") or "",
+                        pr=int(ev.get("pr_number") or 0),
+                        head=ev.get("head_sha") or "",
+                        state="deferred",
+                        detail=pipe_mod.stable_ack_detail(
+                            gate["decision"], gate["reason"]))
                 return {"status": "skipped", **row}
             transport_kind = os.environ.get("CODATIEL_EVENTS_TRANSPORT",
                                             "fixture")
