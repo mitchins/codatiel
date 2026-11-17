@@ -204,9 +204,16 @@ def _semdup_entry(sem: dict) -> dict:
                  "is made; the ordinary review findings above stand on "
                  "their own.")
     elif effective_full:
+        preskipped = int(sem.get("mirror_skipped") or 0) + int(
+            sem.get("scaffold_skipped") or 0)
         if examined_targets == 0 and not pairs and not published:
-            state = ("No changed units in scope and nothing skipped — a "
-                     "genuine clean outcome for this check.")
+            if preskipped:
+                state = (f"Complete: no pairs examined — {preskipped} "
+                         "candidate pair(s) deterministically filtered "
+                         "before inference (mirrors/scaffolding).")
+            else:
+                state = ("No changed units in scope and nothing skipped "
+                         "— a genuine clean outcome for this check.")
         else:
             state = (f"Complete: {examined_targets} changed units "
                      f"examined, {pairs_display}, {len(published)} reuse "

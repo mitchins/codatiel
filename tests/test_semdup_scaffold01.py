@@ -20,8 +20,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from codatiel_i2.semdup_dev import editorial_shadow as ES
 
 
@@ -98,19 +96,23 @@ def test_scaffold_no_shared_lines_fails_open():
 
 
 def test_scaffold_midbody_sharing_fails_open():
+    # Shared lines sit mid-body in A (after its first assertion) even
+    # though they are setup-positioned in B: the region gate is
+    # positional per unit, so this fails open (target side).
     a = ("def test_a():\n"
-         "    assert setup() is not None\n"
-         "    x = compute()\n"
-         "    y = transform(x)\n"
+         "    assert ready_a()\n"
+         "    x = setup()\n"
+         "    y = use(x)\n"
          "    assert y == 1\n")
     b = ("def test_b():\n"
-         "    assert setup() is not None\n"
-         "    x = compute()\n"
-         "    y = transform(x)\n"
+         "    x = setup()\n"
+         "    y = use(x)\n"
+         "    assert ready_b()\n"
          "    assert y == 2\n")
     dec = ES.scaffold_preskip_decision(
         _u("tests/test_a.py", a), _u("tests/test_b.py", b))
     assert dec["skip"] is False
+    assert "target" in dec["detail"]
 
 
 def test_scaffold_teardown_only_sharing_skips():
@@ -127,7 +129,9 @@ def test_scaffold_teardown_only_sharing_skips():
     assert dec["skip"] is True
 
 
-def test_scaffold_literal_variants_match():
+def test_scaffold_literal_variants_in_asserts_fail_open():
+    # Same test with literal-only differences inside assertions: the
+    # shared lines carry verdicts, so this fails open.
     a = ("def test_a():\n"
          "    root = tmp / \"alpha\"\n"
          "    assert ok(root)\n")
@@ -136,8 +140,50 @@ def test_scaffold_literal_variants_match():
          "    assert ok(root)\n")
     dec = ES.scaffold_preskip_decision(
         _u("tests/test_a.py", a), _u("tests/test_b.py", b))
-    # 'assert ok(root)' is shared AND an assertion -> fail open.
     assert dec["skip"] is False
+
+
+def test_scaffold_literal_variants_in_setup_skip():
+    # Same setup modulo literal values, divergent assertions: skip.
+    a = ("def test_a():\n"
+         "    root = tmp / \"alpha\"\n"
+         "    store = make_store(root)\n"
+         "    assert store.count() == 1\n")
+    b = ("def test_b():\n"
+         "    root = tmp / \"beta\"\n"
+         "    store = make_store(root)\n"
+         "    assert store.done()\n")
+    dec = ES.scaffold_preskip_decision(
+        _u("tests/test_a.py", a), _u("tests/test_b.py", b))
+    assert dec["skip"] is True
+    assert dec["shared"] >= 2
+
+
+def test_scaffold_unittest_style_oracle_fails_open():
+    a = ("def test_a(self):\n"
+         "    store = make_store(\"a\")\n"
+         "    self.assertEqual(store.read(), \"a\")\n")
+    b = ("def test_b(self):\n"
+         "    store = make_store(\"b\")\n"
+         "    self.assertEqual(store.read(), \"b\")\n")
+    dec = ES.scaffold_preskip_decision(
+        _u("tests/test_a.py", a), _u("tests/test_b.py", b))
+    assert dec["skip"] is False
+
+
+def test_scaffold_empty_unit_text_fails_open():
+    dec = ES.scaffold_preskip_decision(
+        {"path": "tests/test_a.py", "text": ""},
+        {"path": "tests/test_b.py", "text": "x = 1\n"})
+    assert dec["skip"] is False
+    assert dec["detail"] == "empty unit"
+
+
+def test_scaffold_trivial_closers_ignored():
+    assert ES._scaffold_trivial("});") is True
+    assert ES._scaffold_trivial("},") is True
+    assert ES._scaffold_trivial('""""""') is True
+    assert ES._scaffold_trivial("let x = 1") is False
 
 
 def test_scaffold_garbage_never_raises():
@@ -145,6 +191,31 @@ def test_scaffold_garbage_never_raises():
     assert ES.scaffold_preskip_decision({}, {})["skip"] is False
     assert ES.scaffold_preskip_decision(
         {"path": "t.py"}, {"path": "t.py"})["skip"] is False
+
+
+def test_scaffold_row_cache_contract(tmp_path):
+    from codatiel_i2.semdup_dev import cache as CACHE
+    row = {"path": "suppressed", "reason": "scaffold_setup",
+           "completed": True, "budget_refused": False,
+           "target": {"path": "a.py", "symbol": "f"},
+           "counterpart": {"path": "b.py", "symbol": "g"},
+           "head_rev": "h", "_scaffold_rule": ES.SCAFFOLD_RULE}
+    assert ES.scaffold_cacheable(row) is False
+    assert ES.scaffold_cacheable({"reason": "terra_no_lead"}) is True
+    ident = {"k": "v"}
+    CACHE.store(tmp_path, "o/r", 7, ident, row)
+    got = CACHE.lookup(tmp_path, "o/r", 7, ident)
+    assert got is not None and got.get("reason") == "scaffold_setup"
+    from codatiel_i2.semdup_dev import stage as ST
+    key = ST._pair_key({"path": "a.py", "symbol": "f"},
+                       {"path": "b.py", "symbol": "g"})
+    pairs = [{"target": {"path": "a.py", "symbol": "f"},
+              "counterpart": {"path": "b.py", "symbol": "g"}}]
+    stale = dict(row, **{"_scaffold_rule": "scaffold-00"})
+    new, reused = ST._partition_new(pairs, {key: stale})
+    assert len(new) == 1 and not reused
+    new2, reused2 = ST._partition_new(pairs, {key: dict(row)})
+    assert not new2 and len(reused2) == 1
 
 
 def test_scaffold_throws_signature_not_verdict_but_throw_is():

@@ -390,6 +390,22 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                 cont_buf.clear()
             if row.get("terra_tool_calls") or row.get("luna_tool_calls"):
                 return
+            # SCAFFOLD-01 rows never enter the cross-revision cache:
+            # the deterministic rule is expected to evolve, and a
+            # cached skip must not outlive its rule version. Same-head
+            # retries still reuse them via continuation (version-gated
+            # in _partition_new).
+            # SCAFFOLD-01 rows never enter the cross-revision cache:
+            # the deterministic rule is expected to evolve, and a
+            # cached skip must not outlive its rule version. Same-head
+            # retries still reuse them via continuation (version-gated
+            # in _partition_new).
+            try:
+                from codatiel_i2.semdup_dev import editorial_shadow as _ES2
+            except Exception:
+                _ES2 = None
+            if _ES2 is not None and not _ES2.scaffold_cacheable(row):
+                return
             # COST-01B: persist to cross-revision cache as well.
             try:
                 from codatiel_i2.semdup_dev import cache as CACHE2
@@ -866,13 +882,24 @@ def _partition_new(pairs: list[dict], known: dict) -> tuple[list, list]:
     Rows that were recorded as model verdicts but carry a spending-guard
     refusal in their detail were never judged: they are re-judged, never
     reused. (Older records predate refusal classification.)
+    Scaffold skips recorded under an older rule version are likewise
+    re-judged: the deterministic rule may have changed.
     """
+    try:
+        from codatiel_i2.semdup_dev import editorial_shadow as _ES
+        rule_version = str(_ES.SCAFFOLD_RULE)
+    except Exception:
+        rule_version = ""
     new_pairs, reused = [], []
     for p in pairs:
         key = _pair_key(p.get("target") or {}, p.get("counterpart") or {})
         row = known.get(key)
         if (isinstance(row, dict)
                 and not _mislabeled_refusal(row)):
+            if (row.get("reason") == "scaffold_setup"
+                    and row.get("_scaffold_rule") != rule_version):
+                new_pairs.append(p)
+                continue
             row = dict(row)
             row["reused"] = True
             reused.append(row)

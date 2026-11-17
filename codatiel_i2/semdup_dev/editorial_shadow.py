@@ -101,18 +101,23 @@ def _split_unit(ref: str) -> tuple[str, str] | None:
 # setup/teardown/fixture scaffolding. All inputs are pre-inference
 # (unit texts from the evidence package, file paths); no model
 # judgment, no shared_component, no yield signal is consulted.
+SCAFFOLD_RULE = "scaffold-01"
 # Matched against the whitespace-collapsed (not fully stripped)
-# line, so verdict keywords keep word boundaries ("throw " never
-# matches "throws"; "assert " never matches an identifier containing
-# "assert"). Substring matching errs toward failing open.
+# line. Stems ("assert") deliberately also match longer verdict
+# calls ("assertEqual", "assert(") and misspellings-proof variants:
+# over-matching only ever fails open (safe). Word boundaries are
+# preserved where a bare word would collide ("throw " never matches
+# "throws"; "."-suffixed forms cover dotted families like
+# "assert."/"require.").
 SCAFFOLD_ASSERT_TOKENS = (
-    "assert ", "#expect", "#require", "xctassert", "xctfail",
-    "issue.record", "pytest.raises", "require(", "expect(", "wait(",
-    "fatalerror", "precondition", "raise ", "throw ", "throw(",
-    "check(",
+    "assert", "assert.", "#expect", "#require", "xctassert", "xctfail",
+    "recordfailure", "issue.record", "pytest.raises", "require(",
+    "require.", "expect(", "verify(", "wait(", "fatalerror",
+    "precondition", "raise ", "throw ", "throw(", "check(",
 )
 
-_SCAFFOLD_TRIVIAL = {"{", "}", "}", "(", ")", ",", ";"}
+_SCAFFOLD_TRIVIAL = {"{", "}", "(", ")", ",", ";", "});", "})", ");",
+                     "},", "],", "}}", "{{", ");"}
 
 
 def _scaffold_mask_collapsed(line: str) -> str:
@@ -129,19 +134,15 @@ def _scaffold_mask_collapsed(line: str) -> str:
         return ""
 
 
-def _scaffold_mask(line: str) -> str:
-    """Sharing key: collapsed skeleton with all whitespace stripped,
-    so purely stylistic spacing never splits a shared setup line."""
-    try:
-        return "".join(_scaffold_mask_collapsed(line).split())
-    except Exception:
-        return ""
-
-
 def _scaffold_trivial(masked: str) -> bool:
     if not masked or masked in _SCAFFOLD_TRIVIAL:
         return True
     if len(masked) < 3 and not masked[0].isalnum():
+        return True
+    if set(masked) <= {'"', "'"}:
+        # A line that is only (masked) quote characters, e.g. a bare
+        # docstring delimiter skeleton shared by any two documented
+        # units: not evidence of shared setup.
         return True
     if masked.startswith("//"):
         return True
@@ -153,7 +154,12 @@ def _scaffold_trivial(masked: str) -> bool:
 
 def _scaffold_is_test_path(path: str) -> bool:
     """Positive test-only identification: existing classifier plus the
-    *-Tests directory convention (e.g. PresentationTests/)."""
+    Xcode *-Tests directory convention (e.g. PresentationTests/).
+
+    The suffix check is case-sensitive on purpose: a lowercase plural
+    like "Contests/" is a plausible product domain, while capital-T
+    *Tests directories are the test-target convention.
+    """
     try:
         from pathlib import PurePosixPath as _PPP
         from codatiel_i2.core import files as _F
@@ -163,7 +169,9 @@ def _scaffold_is_test_path(path: str) -> bool:
         pass
     try:
         parts = str(path or "").split("/")
-        return any(p.lower().endswith("tests") for p in parts[:-1])
+        return any(p == "test" or p == "tests" or p.endswith("_tests")
+                   or p.endswith("-tests") or p.endswith(" Tests")
+                   or p.endswith("Tests") for p in parts[:-1])
     except Exception:
         return False
 
@@ -250,6 +258,20 @@ def scaffold_preskip_decision(target: dict,
                            "no assertions); skipped before examination")}
     except Exception:
         return dict(no, detail="unreadable input")
+
+
+def scaffold_cacheable(row: dict) -> bool:
+    """Whether a scaffold verdict may enter the cross-revision cache.
+
+    Never: scaffold skips persist only in same-head continuation
+    (version-gated). The deterministic rule is expected to evolve
+    (assertion-token list), and a cached skip must not outlive the
+    rule version that produced it.
+    """
+    try:
+        return (row or {}).get("reason") != "scaffold_setup"
+    except Exception:
+        return False
 
 
 def candidate_pairs(records: list, max_pairs: int) -> tuple[list, list]:
@@ -643,7 +665,10 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         row.update({"path": "suppressed", "reason": "scaffold_setup",
                     "detail": sc["detail"],
                     "completed": True, "budget_refused": False,
-                    "terra_completed": False, "luna_completed": None})
+                    "terra_completed": False, "luna_completed": None,
+                    # Rule version travels with the verdict so a future
+                    # rule change never silently reuses a stale skip.
+                    "_scaffold_rule": SCAFFOLD_RULE})
         return row
     terra_ctx = R.ReviewContext(
         repo=cfg.repos[0] if cfg.repos else "dev", base_sha=base_rev,
