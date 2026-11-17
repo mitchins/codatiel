@@ -1,15 +1,17 @@
 """SEMDUP-SCAFFOLD-01: deterministic pre-examination suppression of
 test setup/teardown/fixture scaffolding.
 
-Failing-first: scaffold helpers do not exist yet.
-
 Rule (all pre-inference, no model judgment):
 1. Both units live in test-only code (existing _is_test_path plus
    *-Tests directory convention).
-2. Skeleton-shared lines (string literals masked, all whitespace
-   stripped, trivial/comment lines dropped) are non-empty.
-3. No shared line carries an assertion/verdict token.
-4. Every shared line lies in the setup region (before the first
+2. At least one recognized assertion exists in either unit or its
+   sent file context (pairs with no verifiable verdict anywhere fail
+   open, including helper-only and smoke-test pairs).
+3. Skeleton-shared lines (string literals masked, brace-adjacent
+   whitespace normalized, trivial/comment lines dropped) are
+   non-empty.
+4. No shared line carries an assertion/verdict token.
+5. Every shared line lies in the setup region (before the first
    assertion) or teardown region (after the last assertion) of BOTH
    units.
 Fail open otherwise (including unparseable input).
@@ -17,10 +19,8 @@ Fail open otherwise (including unparseable input).
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
-
 from codatiel_i2.semdup_dev import editorial_shadow as ES
+from tests import semdup_testkit as T
 
 
 FA_SETUP = (
@@ -61,6 +61,10 @@ FB_LOGIC = (
 
 def _u(path, text):
     return {"path": path, "text": text}
+
+
+def _pair(t_path, t_sym, c_path, c_sym):
+    return T.pair(t_path, t_sym, c_path, c_sym)
 
 
 def test_scaffold_shared_setup_skips():
@@ -318,111 +322,27 @@ def test_scaffold_throws_signature_not_verdict_but_throw_is():
     assert dec["skip"] is True
 
 
-def _git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(repo), *args], check=True,
-                   capture_output=True)
-
-
-def _commit(repo: Path, msg: str) -> str:
-    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "-qm", msg)
-    out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
-                         check=True, capture_output=True, text=True)
-    return out.stdout.strip()
-
-
-def _repo2(tmp_path: Path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q")
-    (repo / "a_test.py").write_text(
-        "def test_a(tmp_path):\n"
-        "    root = tmp_path / \"a\"\n"
-        "    root.mkdir()\n"
-        "    store = make_store(root)\n"
-        "    assert store.count() == 1\n")
-    (repo / "b_test.py").write_text(
-        "def test_b(tmp_path):\n"
-        "    root = tmp_path / \"b\"\n"
-        "    root.mkdir()\n"
-        "    store = make_store(root)\n"
-        "    assert store.names() == [\"b\"]\n")
-    _git(repo, "add", "-A")
-    base = _commit(repo, "base")
-    (repo / "b_test.py").write_text(
-        "def test_b(tmp_path):\n"
-        "    root = tmp_path / \"b2\"\n"
-        "    root.mkdir()\n"
-        "    store = make_store(root)\n"
-        "    assert store.names() == [\"b\"]\n")
-    _git(repo, "add", "-A")
-    head = _commit(repo, "head")
-    return repo, base, head
-
-
-def _indexed(tmp_path: Path):
-    from codatiel_i2.semdup_dev import index_state as IX
-    repo, base, head = _repo2(tmp_path)
-    state = tmp_path / "state"
-    out = IX.ensure_base_index(repo, "o/r", head, state,
-                               allow_embeddings=False)
-    assert out["present"]
-    return repo, base, head, IX.base_paths(state, "o/r", head)["db"]
-
-
-def _backends(monkeypatch):
-    from codatiel_i2 import providers as P
-
-    def fake_resolve(name):
-        return {"backend": name, "model": f"test-{name}",
-                "provider": "test",
-                "rate_usd_per_mtok": {"input": 1.0, "output": 1.0},
-                "rate_status": "test"}
-
-    monkeypatch.setattr(P, "resolve_backend", fake_resolve)
-    monkeypatch.setattr(P, "build_model",
-                        lambda name: (f"test-{name}", None))
-
-
-def _publish_assess(**kw):
-    return {"ok": True,
-            "terra": {"overlap": True, "relationship": "equivalent",
-                      "opportunity": "direct_reuse",
-                      "shared_component": "x", "differences": []},
-            "transcript": {"tool_calls": [], "final_text": "{}"}}
-
-
-def _publish_edit(**kw):
-    return {"ok": True,
-            "editor": {"decision": "KEEP", "revised_comment": "share it",
-                       "reason": "concrete"},
-            "transcript": {"tool_calls": []}, "error": ""}
-
-
 def test_integration_scaffold_pair_skipped_pre_examination(tmp_path,
-                                                            monkeypatch):
-    _backends(monkeypatch)
-    repo, base, head, db = _indexed(tmp_path)
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    calls = []
-
-    def assess(**kw):
-        calls.append("assess")
-        return _publish_assess(**kw)
-
-    def edit(**kw):
-        calls.append("edit")
-        return _publish_edit(**kw)
-
-    out = ES.review_candidate_pairs(
-        [{"target": {"path": "a_test.py", "symbol": "test_a"},
-          "counterpart": {"path": "b_test.py", "symbol": "test_b"},
-          "classification": "introduced"}],
-        repo="o/r", repo_path=repo, merged_db=db, base_rev=base,
-        head_rev=head, head_tree=tmp_path, base_tree=tmp_path,
-        run_dir=run_dir, ceiling_usd=2.0, assess_fn=assess,
-        edit_fn=edit)
+                                                           monkeypatch):
+    base_files = {
+        "a_test.py": ("def test_a(tmp_path):\n"
+                      "    root = tmp_path / \"a\"\n"
+                      "    root.mkdir()\n"
+                      "    store = make_store(root)\n"
+                      "    assert store.count() == 1\n"),
+        "b_test.py": ("def test_b(tmp_path):\n"
+                      "    root = tmp_path / \"b\"\n"
+                      "    root.mkdir()\n"
+                      "    store = make_store(root)\n"
+                      "    assert store.names() == [\"b\"]\n"),
+    }
+    head_files = dict(base_files)
+    head_files["b_test.py"] = head_files["b_test.py"] + "# head\n"
+    calls, assess, edit = T.recording_calls()
+    out = T.run_judged(tmp_path, monkeypatch, base_files, head_files,
+                       [_pair("a_test.py", "test_a",
+                              "b_test.py", "test_b")],
+                       assess, edit)
     assert out["ok"] is True
     assert calls == []
     assert out["scaffold_skipped"] == 1
@@ -437,102 +357,44 @@ def test_integration_scaffold_pair_skipped_pre_examination(tmp_path,
 
 
 def test_integration_helper_pair_without_asserts_fails_open(tmp_path,
-                                                            monkeypatch):
+                                                             monkeypatch):
     # Neither side verifies anything: without a recognizable verdict
     # the pair could be unasserted logic, so it must be examined.
-    _backends(monkeypatch)
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q")
-    (repo / "a_test.py").write_text(
-        "def helper_a(tmp_path):\n"
-        "    root = tmp_path / \"a\"\n"
-        "    root.mkdir()\n"
-        "    return root\n")
-    (repo / "b_test.py").write_text(
-        "def helper_b(tmp_path):\n"
-        "    root = tmp_path / \"b\"\n"
-        "    root.mkdir()\n"
-        "    return root\n")
-    _git(repo, "add", "-A")
-    base = _commit(repo, "base")
-    _git(repo, "commit", "-q", "--allow-empty", "-m", "head")
-    out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
-                         check=True, capture_output=True, text=True)
-    head = out.stdout.strip()
-    from codatiel_i2.semdup_dev import index_state as IX
-    state = tmp_path / "state"
-    assert IX.ensure_base_index(repo, "o/r", head, state,
-                                allow_embeddings=False)["present"]
-    db = IX.base_paths(state, "o/r", head)["db"]
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    calls = []
-
-    def assess(**kw):
-        calls.append("assess")
-        return _publish_assess(**kw)
-
-    def edit(**kw):
-        calls.append("edit")
-        return _publish_edit(**kw)
-
-    out = ES.review_candidate_pairs(
-        [{"target": {"path": "a_test.py", "symbol": "helper_a"},
-          "counterpart": {"path": "b_test.py", "symbol": "helper_b"},
-          "classification": "introduced"}],
-        repo="o/r", repo_path=repo, merged_db=db, base_rev=base,
-        head_rev=head, head_tree=tmp_path, base_tree=tmp_path,
-        run_dir=run_dir, ceiling_usd=2.0, assess_fn=assess,
-        edit_fn=edit)
+    base_files = {
+        "a_test.py": ("def helper_a(tmp_path):\n"
+                      "    root = tmp_path / \"a\"\n"
+                      "    root.mkdir()\n"
+                      "    return root\n"),
+        "b_test.py": ("def helper_b(tmp_path):\n"
+                      "    root = tmp_path / \"b\"\n"
+                      "    root.mkdir()\n"
+                      "    return root\n"),
+    }
+    head_files = dict(base_files)
+    head_files["b_test.py"] = base_files["b_test.py"] + "# head\n"
+    calls, assess, edit = T.recording_calls()
+    out = T.run_judged(tmp_path, monkeypatch, base_files, head_files,
+                       [_pair("a_test.py", "helper_a",
+                              "b_test.py", "helper_b")],
+                       assess, edit)
     assert calls == ["assess", "edit"]
     assert out["scaffold_skipped"] == 0
     assert len(out["published"]) == 1
 
 
 def test_integration_assertion_sharing_pair_examined(tmp_path,
-                                                     monkeypatch):
-    _backends(monkeypatch)
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q")
-    (repo / "a_test.py").write_text(
-        "def test_a(tmp_path):\n"
-        "    assert compute(tmp_path) == 1\n")
-    (repo / "b_test.py").write_text(
-        "def test_b(tmp_path):\n"
-        "    assert compute(tmp_path) == 1\n")
-    _git(repo, "add", "-A")
-    base = _commit(repo, "base")
-    _git(repo, "commit", "-q", "--allow-empty", "-m", "head")
-    out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
-                         check=True, capture_output=True, text=True)
-    head = out.stdout.strip()
-    from codatiel_i2.semdup_dev import index_state as IX
-    state = tmp_path / "state"
-    assert IX.ensure_base_index(repo, "o/r", head, state,
-                                allow_embeddings=False)["present"]
-    db = IX.base_paths(state, "o/r", head)["db"]
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    calls = []
-
-    def assess(**kw):
-        calls.append("assess")
-        return _publish_assess(**kw)
-
-    def edit(**kw):
-        calls.append("edit")
-        return _publish_edit(**kw)
-
-    out = ES.review_candidate_pairs(
-        [{"target": {"path": "a_test.py", "symbol": "test_a"},
-          "counterpart": {"path": "b_test.py", "symbol": "test_b"},
-          "classification": "introduced"}],
-        repo="o/r", repo_path=repo, merged_db=db, base_rev=base,
-        head_rev=head, head_tree=tmp_path, base_tree=tmp_path,
-        run_dir=run_dir, ceiling_usd=2.0, assess_fn=assess,
-        edit_fn=edit)
+                                                        monkeypatch):
+    base_files = {
+        "a_test.py": "def test_a(tmp_path):\n    assert compute(tmp_path) == 1\n",
+        "b_test.py": "def test_b(tmp_path):\n    assert compute(tmp_path) == 1\n",
+    }
+    head_files = dict(base_files)
+    head_files["b_test.py"] = base_files["b_test.py"] + "# head\n"
+    calls, assess, edit = T.recording_calls()
+    out = T.run_judged(tmp_path, monkeypatch, base_files, head_files,
+                       [_pair("a_test.py", "test_a",
+                              "b_test.py", "test_b")],
+                       assess, edit)
     assert calls == ["assess", "edit"]
     assert out["scaffold_skipped"] == 0
     assert len(out["published"]) == 1

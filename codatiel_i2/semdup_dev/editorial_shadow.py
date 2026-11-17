@@ -87,6 +87,53 @@ def mirror_preskip_row(pair: dict, *, head_rev: str, base_rev: str,
     }
 
 
+def _mirror_preskip(pair: dict, *, head_rev: str, base_rev: str,
+                    published_keys: dict, outcome: dict,
+                    on_pair=None) -> tuple[bool, str]:
+    """Mirror pre-skip for one pair; records the row when it fires.
+
+    Shared by run_editorial and review_candidate_pairs so the
+    first-published-wins rule cannot drift between the two entry
+    points. Returns (skipped, mirror_key).
+    """
+    mkey = unordered_mirror_key(pair.get("target"),
+                                pair.get("counterpart"))
+    if not mirror_skip_decision(pair.get("target"),
+                                pair.get("counterpart"), published_keys):
+        return False, mkey
+    row = mirror_preskip_row(pair, head_rev=head_rev, base_rev=base_rev,
+                             kept=published_keys[mkey])
+    outcome["pairs"].append(row)
+    outcome["suppressed"].append(_suppressed_row(row))
+    outcome["mirror_skipped"] = int(outcome.get("mirror_skipped") or 0) + 1
+    if on_pair is not None:
+        try:
+            on_pair(row)
+        except Exception:  # noqa: BLE001 - hook never breaks judging
+            pass
+    return True, mkey
+
+
+def _record_judged(outcome: dict, row: dict, mkey: str,
+                   published_keys: dict, on_pair=None) -> None:
+    """Record one judged pair: verdict row, published twin tracking,
+    optional on_pair hook. Shared by both judging loops."""
+    outcome["pairs"].append(row)
+    if row["path"] == "published":
+        t, c = row.get("target") or {}, row.get("counterpart") or {}
+        published_keys[mkey] = (
+            f"{t.get('path')}::{t.get('symbol')} -> "
+            f"{c.get('path')}::{c.get('symbol')}")
+        outcome["published"].append(_public_row(row))
+    else:
+        outcome["suppressed"].append(_suppressed_row(row))
+    if on_pair is not None:
+        try:
+            on_pair(row)
+        except Exception:  # noqa: BLE001 - hook never breaks judging
+            pass
+
+
 def _split_unit(ref: str) -> tuple[str, str] | None:
     if "::" not in ref:
         return None
@@ -557,18 +604,11 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
     # MIRROR-01: first-published-wins within this run. A reverse pair is
     # skipped before any paid call only after its twin published.
     published_keys: dict[str, str] = {}
-    outcome["mirror_skipped"] = 0
     for pair in pairs:
-        mkey = unordered_mirror_key(pair.get("target"),
-                                    pair.get("counterpart"))
-        if mirror_skip_decision(pair.get("target"),
-                                pair.get("counterpart"), published_keys):
-            row = mirror_preskip_row(pair, head_rev=head_rev,
-                                     base_rev=base_rev,
-                                     kept=published_keys[mkey])
-            outcome["pairs"].append(row)
-            outcome["suppressed"].append(_suppressed_row(row))
-            outcome["mirror_skipped"] += 1
+        skipped, mkey = _mirror_preskip(
+            pair, head_rev=head_rev, base_rev=base_rev,
+            published_keys=published_keys, outcome=outcome)
+        if skipped:
             continue
         row = _review_pair(
             pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
@@ -579,15 +619,7 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
             terra_ledger=terra_ledger, luna_ledger=luna_ledger,
             ceiling_usd=ceiling_usd, half=half, assess=assess, edit=edit,
             OD=OD, ED=ED, R=R)
-        outcome["pairs"].append(row)
-        if row["path"] == "published":
-            t, c = row.get("target") or {}, row.get("counterpart") or {}
-            published_keys[mkey] = (
-                f"{t.get('path')}::{t.get('symbol')} -> "
-                f"{c.get('path')}::{c.get('symbol')}")
-            outcome["published"].append(_public_row(row))
-        else:
-            outcome["suppressed"].append(_suppressed_row(row))
+        _record_judged(outcome, row, mkey, published_keys)
     spent_t, spent_l = _spent(terra_ledger), _spent(luna_ledger)
     outcome["spend_terra_usd"] = spent_t
     outcome["spend_luna_usd"] = spent_l
@@ -1048,21 +1080,11 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
                     break
             except Exception:
                 pass
-        mkey = unordered_mirror_key(pair.get("target"),
-                                    pair.get("counterpart"))
-        if mirror_skip_decision(pair.get("target"),
-                                pair.get("counterpart"), published_keys):
-            row = mirror_preskip_row(pair, head_rev=head_rev,
-                                     base_rev=base_rev,
-                                     kept=published_keys[mkey])
-            outcome["pairs"].append(row)
-            outcome["suppressed"].append(_suppressed_row(row))
-            outcome["mirror_skipped"] += 1
-            if on_pair is not None:
-                try:
-                    on_pair(row)
-                except Exception:  # noqa: BLE001 - hook never breaks judging
-                    pass
+        skipped, mkey = _mirror_preskip(
+            pair, head_rev=head_rev, base_rev=base_rev,
+            published_keys=published_keys, outcome=outcome,
+            on_pair=on_pair)
+        if skipped:
             continue
         row = _review_pair(
             pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
@@ -1073,20 +1095,7 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
             terra_ledger=terra_ledger, luna_ledger=luna_ledger,
             ceiling_usd=ceiling_usd, half=half, assess=assess, edit=edit,
             OD=OD, ED=ED, R=R)
-        outcome["pairs"].append(row)
-        if row["path"] == "published":
-            t, c = row.get("target") or {}, row.get("counterpart") or {}
-            published_keys[mkey] = (
-                f"{t.get('path')}::{t.get('symbol')} -> "
-                f"{c.get('path')}::{c.get('symbol')}")
-            outcome["published"].append(_public_row(row))
-        else:
-            outcome["suppressed"].append(_suppressed_row(row))
-        if on_pair is not None:
-            try:
-                on_pair(row)
-            except Exception:  # noqa: BLE001 - hook never breaks judging
-                pass
+        _record_judged(outcome, row, mkey, published_keys, on_pair=on_pair)
     spent_t, spent_l = _spent(terra_ledger), _spent(luna_ledger)
     # Per-model spend from the priced ledger results (persisted with the
     # stage outcome). None means unknown — never represented as $0.

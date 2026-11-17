@@ -9,6 +9,8 @@ cases, duplicate-delivery prevention lives in test_semdup_stage.
 import json
 from pathlib import Path
 
+import pytest
+
 from codatiel_i2 import digest_model as DM
 
 
@@ -165,27 +167,22 @@ def _scaffold_suppressed():
             "detail": "shared test setup"}
 
 
-def test_all_suppressed_by_preskip_is_not_clean(tmp_path: Path):
-    sem = {"status": "ok", "coverage": "full", "spend_usd": 0.0,
-           "reason": "examined 2 targets, 0 pairs; 0 approved",
-           "targets": [], "pairs_examined": 0,
-           "mirror_skipped": 1, "scaffold_skipped": 2,
-           "skipped": [], "published": [],
-           "suppressed": [_scaffold_suppressed()]}
-    d = _run(tmp_path, advisory=[], sem=sem)
-    text = DM.render_text(DM.build_review_model(d, context="dev:o/r#7"))
-    assert "No changed units in scope" not in text
-    assert "deterministically filtered" in text
-
-
-def test_reused_only_preskip_is_not_clean(tmp_path: Path):
-    # Legacy/continued shape: no fresh counters, but suppressed
-    # scaffold rows are present.
+@pytest.mark.parametrize("with_counters", [True, False],
+                         ids=["fresh-counters", "reused-only"])
+def test_all_suppressed_is_not_clean(tmp_path: Path, with_counters: bool):
+    # Fresh skips report counters; a reuse-only run carries the same
+    # signal in its suppressed rows. Either way the digest must not
+    # claim a clean scope.
     sem = {"status": "ok", "coverage": "full", "spend_usd": 0.0,
            "reason": "examined 0 targets, 0 pairs; 0 approved",
            "targets": [], "pairs_examined": 0,
            "skipped": [], "published": [],
+           "mirror_skipped": 1 if with_counters else 0,
+           "scaffold_skipped": 2 if with_counters else 0,
            "suppressed": [_scaffold_suppressed()]}
+    if not with_counters:
+        sem["suppressed"].append(dict(_scaffold_suppressed(),
+                                      reason="mirror_of_published"))
     d = _run(tmp_path, advisory=[], sem=sem)
     text = DM.render_text(DM.build_review_model(d, context="dev:o/r#7"))
     assert "No changed units in scope" not in text
