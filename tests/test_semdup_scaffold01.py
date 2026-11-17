@@ -175,6 +175,16 @@ def test_scaffold_unittest_style_oracle_fails_open():
     assert dec["skip"] is False
 
 
+def test_scaffold_key_normalizes_braces_not_tokens():
+    n = ES._scaffold_key
+    assert n("defer {foo();}") == n("defer{foo();}")
+    assert n("f(a, b)") == n("f(a,b)")
+    assert n("x = 1") == n("x=1")
+    # Inner spacing is semantic: must not merge.
+    assert n("x = a and b") != n("x = aandb")
+    assert n("return x") != n("returnx")
+
+
 def test_scaffold_assert_spans_cover_multiline_verdicts():
     # A multi-line assertion's body and closing line count as part of
     # the verdict, so shared continuation lines can never read as

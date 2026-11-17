@@ -3,7 +3,7 @@
 Replays the shipped scaffold_preskip_decision over recorded
 pre-inference inputs (unit texts + sent file context at the reviewed
 heads) and asserts the audited outcome per case: 55 cases total —
-16 useful findings, all fail-open (gate 1, prod code); 2 prod-gate
+15 useful findings, all fail-open (gate 1, prod code); 3 prod-gate
 controls; 37 audit/adversarial cases (17 scaffolding skips, 20
 fail-opens on shared assertions/waits, unrecognized verdicts, or
 test-only gate). The audit found useful findings never suppressed

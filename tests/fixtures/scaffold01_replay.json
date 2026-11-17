@@ -7099,7 +7099,7 @@
    "note": "useful prod finding preserved"
   },
   {
-   "id": "useful-yt35-validate",
+   "id": "prod-yt35-validate",
    "repo": "mitchins/yt2wiki",
    "head": "e6aec129722596d10720ad32c7ddd3e5126145f6",
    "target": {
@@ -7358,7 +7358,7 @@
    },
    "expect_skip": false,
    "expect_reason": "not both test-only",
-   "note": "useful prod finding preserved"
+   "note": "prod pair: gate-1 fail-open"
   },
   {
    "id": "prod-yt35-norm-a",

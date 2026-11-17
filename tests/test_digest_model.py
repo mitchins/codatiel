@@ -168,21 +168,40 @@ def _scaffold_suppressed():
 
 
 @pytest.mark.parametrize("with_counters", [True, False],
-                         ids=["fresh-counters", "reused-only"])
-def test_all_suppressed_is_not_clean(tmp_path: Path, with_counters: bool):
+                         ids=["fresh-counters", "reuse-only"])
+def test_all_suppressed_is_not_clean(tmp_path, with_counters):
     # Fresh skips report counters; a reuse-only run carries the same
     # signal in its suppressed rows. Either way the digest must not
     # claim a clean scope.
     sem = {"status": "ok", "coverage": "full", "spend_usd": 0.0,
            "reason": "examined 0 targets, 0 pairs; 0 approved",
            "targets": [], "pairs_examined": 0,
-           "skipped": [], "published": [],
            "mirror_skipped": 1 if with_counters else 0,
            "scaffold_skipped": 2 if with_counters else 0,
-           "suppressed": [_scaffold_suppressed()]}
+           "skipped": [], "published": [],
+           "suppressed": ([_scaffold_suppressed()] if with_counters else [])}
     if not with_counters:
-        sem["suppressed"].append(dict(_scaffold_suppressed(),
-                                      reason="mirror_of_published"))
+        sem["suppressed"] = [
+            dict(_scaffold_suppressed(), reason="scaffold_setup"),
+            dict(_scaffold_suppressed(), reason="mirror_of_published")]
+    d = _run(tmp_path, advisory=[], sem=sem)
+    text = DM.render_text(DM.build_review_model(d, context="dev:o/r#7"))
+    assert "No changed units in scope" not in text
+    assert "deterministically filtered" in text
+
+
+def test_mixed_fresh_and_reused_counts_both(tmp_path):
+    # A run with fresh skips AND reused verdicts must not claim a
+    # clean scope; the fresh counters drive the headline and the
+    # reused rows are visible as suppressed entries.
+    sem = {"status": "ok", "coverage": "full", "spend_usd": 0.0,
+           "reason": "examined 0 targets, 0 pairs; 0 approved",
+           "targets": [], "pairs_examined": 0,
+           "mirror_skipped": 1, "scaffold_skipped": 1,
+           "skipped": [], "published": [],
+           "suppressed": [_scaffold_suppressed(),
+                          dict(_scaffold_suppressed(),
+                               reason="mirror_of_published")]}
     d = _run(tmp_path, advisory=[], sem=sem)
     text = DM.render_text(DM.build_review_model(d, context="dev:o/r#7"))
     assert "No changed units in scope" not in text

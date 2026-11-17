@@ -555,9 +555,13 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             "pairs_total": len(pairs),
             "pairs_examined": examined_pairs,
             "pairs_reused": len(reused_rows),
-            "pairs_mirror_skipped": int(outcome.get("mirror_skipped") or 0),
-            "pairs_scaffold_skipped": int(
-                outcome.get("scaffold_skipped") or 0),
+        "pairs_mirror_skipped": int(outcome.get("mirror_skipped") or 0),
+        "pairs_scaffold_skipped": int(
+            outcome.get("scaffold_skipped") or 0),
+        "pairs_scaffold_reused": sum(
+            1 for r in list(continuation_reused)
+            if isinstance(r, dict)
+            and r.get("reason") == "scaffold_setup"),
             "skipped": list(outcome["skipped"]),
         },
         "editorial": {"published": len(published),
@@ -579,6 +583,12 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     scaffold_n = int(outcome.get("scaffold_skipped") or 0)
     scaffold_note = (f"; {scaffold_n} scaffolding pair(s) skipped "
                      "pre-examination" if scaffold_n else "")
+    reused_scaffold_n = sum(
+        1 for r in list(continuation_reused)
+        if isinstance(r, dict) and r.get("reason") == "scaffold_setup")
+    if reused_scaffold_n:
+        scaffold_note += (f" (+{reused_scaffold_n} reused prior "
+                          "scaffolding verdicts)")
     # Any retrieval failure means the delta was only partially examined:
     # degraded, never a clean-looking zero.
     if retrieval_failures:

@@ -385,10 +385,23 @@ def scaffold_preskip_decision(target: dict,
         cnorm = normalized(c.get("text"))
         if not tnorm or not cnorm:
             return dict(no, detail="empty unit")
-        tctx = [_scaffold_mask_collapsed(l) for l in (t.get("context") or [])
-                if isinstance(l, str)]
-        cctx = [_scaffold_mask_collapsed(l) for l in (c.get("context") or [])
-                if isinstance(l, str)]
+
+        def _context_assert_lines(raw_lines):
+            # Context participates in the union gate only through
+            # substantive lines: trivial closers, lone brackets and
+            # comment-only lines are not verdicts, even nearby.
+            out = []
+            for raw in raw_lines or []:
+                if not isinstance(raw, str):
+                    continue
+                col = _scaffold_mask_collapsed(raw)
+                if not col or _scaffold_trivial(col):
+                    continue
+                out.append(col)
+            return out
+
+        tctx = _context_assert_lines(t.get("context"))
+        cctx = _context_assert_lines(c.get("context"))
         if not any(_scaffold_has_assert(col)
                    for col in ([c for _, c in tnorm + cnorm] + tctx + cctx)):
             # No recognizable verdict in either unit or its sent file
