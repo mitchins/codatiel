@@ -171,6 +171,54 @@ def test_scaffold_unittest_style_oracle_fails_open():
     assert dec["skip"] is False
 
 
+def test_scaffold_go_verdict_style_fails_open():
+    a = ("func TestA(t *testing.T) {\n"
+         "    x := setup(\"a\")\n"
+         "    if x.N != 1 { t.Errorf(\"n=%d\", x.N) }\n"
+         "}\n")
+    b = ("func TestB(t *testing.T) {\n"
+         "    x := setup(\"b\")\n"
+         "    if x.N != 1 { t.Errorf(\"n=%d\", x.N) }\n"
+         "}\n")
+    dec = ES.scaffold_preskip_decision(
+        _u("pkg/foo_test.go", a), _u("pkg/foo_test.go", b))
+    assert dec["skip"] is False
+
+
+def test_scaffold_contests_dir_is_not_test_only():
+    dec = ES.scaffold_preskip_decision(
+        {"path": "src/Contests/runner.py",
+         "text": "def run_all():\n    setup()\n    assert done()\n"},
+        {"path": "src/Contests/other.py",
+         "text": "def run_all():\n    setup()\n    assert done()\n"})
+    assert dec["skip"] is False
+    assert ES._scaffold_is_test_path("PresentationTests/Foo.swift") is True
+    assert ES._scaffold_is_test_path("src/Contests/runner.py") is False
+
+
+def test_scaffold_spacing_normalization():
+    # Inner spacing is preserved: distinct token sequences never merge.
+    a = "def test_a():\n    x = load(a, b)\n    assert x.ok()\n"
+    b = "def test_b():\n    x = load(a,b)\n    assert x.done()\n"
+    dec = ES.scaffold_preskip_decision(
+        _u("tests/test_a.py", a), _u("tests/test_b.py", b))
+    assert dec["skip"] is True
+    c = "def test_c():\n    x = aandb\n    assert x.ok()\n"
+    d = "def test_d():\n    x = a and b\n    assert x.done()\n"
+    dec = ES.scaffold_preskip_decision(
+        _u("tests/test_c.py", c), _u("tests/test_d.py", d))
+    assert dec["skip"] is False
+
+
+def test_scaffold_assignment_spacing_normalized():
+    # Only spacing around '=' differs: same setup line.
+    a = "def test_a():\n    total = count(x)\n    assert total == 1\n"
+    b = "def test_b():\n    total=count(x)\n    assert total == 2\n"
+    dec = ES.scaffold_preskip_decision(
+        _u("tests/test_a.py", a), _u("tests/test_b.py", b))
+    assert dec["skip"] is True
+
+
 def test_scaffold_empty_unit_text_fails_open():
     dec = ES.scaffold_preskip_decision(
         {"path": "tests/test_a.py", "text": ""},
@@ -191,6 +239,23 @@ def test_scaffold_garbage_never_raises():
     assert ES.scaffold_preskip_decision({}, {})["skip"] is False
     assert ES.scaffold_preskip_decision(
         {"path": "t.py"}, {"path": "t.py"})["skip"] is False
+
+
+def test_scaffold_context_assertions_count_for_union():
+    # Assert-free units with no verifiable context fail open ...
+    a = {"path": "tests/a_test.py",
+         "text": "def setup_a():\n    x = make()\n    return x\n"}
+    b = ("def setup_b():\n    x = make()\n    return x\n")
+    dec = ES.scaffold_preskip_decision(a, {"path": "tests/b_test.py",
+                                           "text": b})
+    assert dec["skip"] is False
+    assert dec["detail"] == "no recognized assertions"
+    # ... while the same pair with a verified context skips.
+    ctx = ["    #expect(store.count() == 1)"]
+    a2 = dict(a, context=ctx)
+    b2 = {"path": "tests/b_test.py", "text": b, "context": ctx}
+    dec = ES.scaffold_preskip_decision(a2, b2)
+    assert dec["skip"] is True
 
 
 def test_scaffold_row_cache_contract(tmp_path):
@@ -271,22 +336,25 @@ def _repo2(tmp_path: Path):
     repo.mkdir()
     _git(repo, "init", "-q")
     (repo / "a_test.py").write_text(
-        "def helper_a(tmp_path):\n"
+        "def test_a(tmp_path):\n"
         "    root = tmp_path / \"a\"\n"
         "    root.mkdir()\n"
-        "    return root\n")
+        "    store = make_store(root)\n"
+        "    assert store.count() == 1\n")
     (repo / "b_test.py").write_text(
-        "def helper_b(tmp_path):\n"
+        "def test_b(tmp_path):\n"
         "    root = tmp_path / \"b\"\n"
         "    root.mkdir()\n"
-        "    return root\n")
+        "    store = make_store(root)\n"
+        "    assert store.names() == [\"b\"]\n")
     _git(repo, "add", "-A")
     base = _commit(repo, "base")
     (repo / "b_test.py").write_text(
-        "def helper_b(tmp_path):\n"
+        "def test_b(tmp_path):\n"
         "    root = tmp_path / \"b2\"\n"
         "    root.mkdir()\n"
-        "    return root\n")
+        "    store = make_store(root)\n"
+        "    assert store.names() == [\"b\"]\n")
     _git(repo, "add", "-A")
     head = _commit(repo, "head")
     return repo, base, head
@@ -332,9 +400,71 @@ def _publish_edit(**kw):
 
 
 def test_integration_scaffold_pair_skipped_pre_examination(tmp_path,
-                                                           monkeypatch):
+                                                            monkeypatch):
     _backends(monkeypatch)
     repo, base, head, db = _indexed(tmp_path)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    calls = []
+
+    def assess(**kw):
+        calls.append("assess")
+        return _publish_assess(**kw)
+
+    def edit(**kw):
+        calls.append("edit")
+        return _publish_edit(**kw)
+
+    out = ES.review_candidate_pairs(
+        [{"target": {"path": "a_test.py", "symbol": "test_a"},
+          "counterpart": {"path": "b_test.py", "symbol": "test_b"},
+          "classification": "introduced"}],
+        repo="o/r", repo_path=repo, merged_db=db, base_rev=base,
+        head_rev=head, head_tree=tmp_path, base_tree=tmp_path,
+        run_dir=run_dir, ceiling_usd=2.0, assess_fn=assess,
+        edit_fn=edit)
+    assert out["ok"] is True
+    assert calls == []
+    assert out["scaffold_skipped"] == 1
+    assert len(out["published"]) == 0
+    sup = out["suppressed"]
+    assert len(sup) == 1 and sup[0]["reason"] == "scaffold_setup"
+    full = out["pairs"][0]
+    assert full.get("completed") is True
+    assert full.get("budget_refused") is False
+    assert full.get("_scaffold_rule") == ES.SCAFFOLD_RULE
+    assert out["mirror_skipped"] == 0
+
+
+def test_integration_helper_pair_without_asserts_fails_open(tmp_path,
+                                                            monkeypatch):
+    # Neither side verifies anything: without a recognizable verdict
+    # the pair could be unasserted logic, so it must be examined.
+    _backends(monkeypatch)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "a_test.py").write_text(
+        "def helper_a(tmp_path):\n"
+        "    root = tmp_path / \"a\"\n"
+        "    root.mkdir()\n"
+        "    return root\n")
+    (repo / "b_test.py").write_text(
+        "def helper_b(tmp_path):\n"
+        "    root = tmp_path / \"b\"\n"
+        "    root.mkdir()\n"
+        "    return root\n")
+    _git(repo, "add", "-A")
+    base = _commit(repo, "base")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "head")
+    out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                         check=True, capture_output=True, text=True)
+    head = out.stdout.strip()
+    from codatiel_i2.semdup_dev import index_state as IX
+    state = tmp_path / "state"
+    assert IX.ensure_base_index(repo, "o/r", head, state,
+                                allow_embeddings=False)["present"]
+    db = IX.base_paths(state, "o/r", head)["db"]
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     calls = []
@@ -355,16 +485,9 @@ def test_integration_scaffold_pair_skipped_pre_examination(tmp_path,
         head_rev=head, head_tree=tmp_path, base_tree=tmp_path,
         run_dir=run_dir, ceiling_usd=2.0, assess_fn=assess,
         edit_fn=edit)
-    assert out["ok"] is True
-    assert calls == []
-    assert out["scaffold_skipped"] == 1
-    assert len(out["published"]) == 0
-    sup = out["suppressed"]
-    assert len(sup) == 1 and sup[0]["reason"] == "scaffold_setup"
-    full = out["pairs"][0]
-    assert full.get("completed") is True
-    assert full.get("budget_refused") is False
-    assert out["mirror_skipped"] == 0
+    assert calls == ["assess", "edit"]
+    assert out["scaffold_skipped"] == 0
+    assert len(out["published"]) == 1
 
 
 def test_integration_assertion_sharing_pair_examined(tmp_path,

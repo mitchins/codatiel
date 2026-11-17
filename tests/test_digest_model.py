@@ -158,6 +158,40 @@ def test_unavailable_semdup_explicit(tmp_path: Path):
     assert "No reuse claim is made" in text
 
 
+def _scaffold_suppressed():
+    return {"path": "suppressed", "reason": "scaffold_setup",
+            "target": {"path": "tests/t.py", "symbol": "test_a"},
+            "counterpart": {"path": "tests/t.py", "symbol": "test_b"},
+            "detail": "shared test setup"}
+
+
+def test_all_suppressed_by_preskip_is_not_clean(tmp_path: Path):
+    sem = {"status": "ok", "coverage": "full", "spend_usd": 0.0,
+           "reason": "examined 2 targets, 0 pairs; 0 approved",
+           "targets": [], "pairs_examined": 0,
+           "mirror_skipped": 1, "scaffold_skipped": 2,
+           "skipped": [], "published": [],
+           "suppressed": [_scaffold_suppressed()]}
+    d = _run(tmp_path, advisory=[], sem=sem)
+    text = DM.render_text(DM.build_review_model(d, context="dev:o/r#7"))
+    assert "No changed units in scope" not in text
+    assert "deterministically filtered" in text
+
+
+def test_reused_only_preskip_is_not_clean(tmp_path: Path):
+    # Legacy/continued shape: no fresh counters, but suppressed
+    # scaffold rows are present.
+    sem = {"status": "ok", "coverage": "full", "spend_usd": 0.0,
+           "reason": "examined 0 targets, 0 pairs; 0 approved",
+           "targets": [], "pairs_examined": 0,
+           "skipped": [], "published": [],
+           "suppressed": [_scaffold_suppressed()]}
+    d = _run(tmp_path, advisory=[], sem=sem)
+    text = DM.render_text(DM.build_review_model(d, context="dev:o/r#7"))
+    assert "No changed units in scope" not in text
+    assert "deterministically filtered" in text
+
+
 def test_text_html_parity(tmp_path: Path):
     sem = {"status": "ok", "coverage": "partial", "spend_usd": 0.01,
            "reason": "examined 1 targets, 1 pairs; 0 approved; 1 skipped",

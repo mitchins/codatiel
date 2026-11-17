@@ -103,21 +103,24 @@ def _split_unit(ref: str) -> tuple[str, str] | None:
 # judgment, no shared_component, no yield signal is consulted.
 SCAFFOLD_RULE = "scaffold-01"
 # Matched against the whitespace-collapsed (not fully stripped)
-# line. Stems ("assert") deliberately also match longer verdict
-# calls ("assertEqual", "assert(") and misspellings-proof variants:
-# over-matching only ever fails open (safe). Word boundaries are
-# preserved where a bare word would collide ("throw " never matches
-# "throws"; "."-suffixed forms cover dotted families like
-# "assert."/"require.").
+# line, so verdict keywords keep word boundaries ("throw " never
+# matches "throws"; "should " never matches "should_retry").
+# Stems ("assert", "fail") deliberately also match longer verdict
+# calls ("assertEqual", "assert(", "t.Fatal", "self.fail("):
+# over-matching only ever fails open (safe). A bare "expect(" would
+# collide with neutral identifiers, so only the dotted/call forms
+# and Go/testify families are listed.
 SCAFFOLD_ASSERT_TOKENS = (
-    "assert", "assert.", "#expect", "#require", "xctassert", "xctfail",
-    "recordfailure", "issue.record", "pytest.raises", "require(",
-    "require.", "expect(", "verify(", "wait(", "fatalerror",
-    "precondition", "raise ", "throw ", "throw(", "check(",
+    "assert", "#expect", "#require", "xctassert", "xctfail",
+    "recordfailure", "issue.record", "pytest.raises", "pytest.fail",
+    "self.fail", "require(", "require.", "require_", "expect(",
+    "expect_", "verify(", "wait(", "fatalerror", "precondition",
+    "raise ", "throw ", "throw(", "check(", "t.error", "t.fatal",
+    "errorf", "fail(", "panic!", "expectexception", "should ",
 )
 
 _SCAFFOLD_TRIVIAL = {"{", "}", "(", ")", ",", ";", "});", "})", ");",
-                     "},", "],", "}}", "{{", ");"}
+                     "},", "],", "}}", "{{"}
 
 
 def _scaffold_mask_collapsed(line: str) -> str:
@@ -152,6 +155,22 @@ def _scaffold_trivial(masked: str) -> bool:
     return False
 
 
+def _scaffold_key(collapsed: str) -> str:
+    """Sharing key: collapsed skeleton with spacing around bracket,
+    comma, semicolon and colon characters removed.
+
+    Purely stylistic spacing (``defer {`` vs ``defer{``,
+    ``foo(a, b)`` vs ``foo(a,b)``) never splits a shared setup line,
+    while inner spacing is preserved so distinct token sequences
+    (``a and b`` vs ``aandb``) never merge.
+    """
+    import re as _re
+    try:
+        return _re.sub(r"\s*([{}()\[\],;:=])\s*", r"\1", collapsed)
+    except Exception:
+        return collapsed
+
+
 def _scaffold_is_test_path(path: str) -> bool:
     """Positive test-only identification: existing classifier plus the
     Xcode *-Tests directory convention (e.g. PresentationTests/).
@@ -176,18 +195,47 @@ def _scaffold_is_test_path(path: str) -> bool:
         return False
 
 
+def _scaffold_key(collapsed: str) -> str:
+    """Sharing key: collapsed skeleton with spacing around bracket,
+    comma, semicolon, colon and assignment characters removed.
+
+    Purely stylistic spacing (``defer {`` vs ``defer{``,
+    ``foo(a, b)`` vs ``foo(a,b)``, ``x = 1`` vs ``x=1``) never splits
+    a shared setup line, while inner spacing elsewhere is preserved
+    so distinct token sequences (``a and b`` vs ``aandb``) never merge.
+    """
+    import re as _re
+    try:
+        return _re.sub(r"\s*([{}()\[\],;:=])\s*", r"\1", collapsed)
+    except Exception:
+        return collapsed
+
+
+def _scaffold_has_assert(collapsed: str) -> bool:
+    """True when a collapsed skeleton line carries a verdict token."""
+    try:
+        low = collapsed.lower()
+        return any(tok in low for tok in SCAFFOLD_ASSERT_TOKENS)
+    except Exception:
+        return False
+
+
 def scaffold_preskip_decision(target: dict,
                               counterpart: dict) -> dict:
     """Decide pre-examination scaffolding suppression (deterministic).
 
-    ``target``/``counterpart`` carry ``path`` and ``text`` (unit text
-    from the evidence package). Returns {"skip", "shared", "detail"}.
-    Skips only when: both units are test-only; the skeleton-shared
-    lines are non-empty and carry no assertion/verdict token; and every
-    shared line lies in the setup region (before the first assertion)
-    or teardown region (after the last assertion) of BOTH units.
-    Fails open (no skip) on any ambiguity, including unparseable
-    input — never raises.
+    ``target``/``counterpart`` carry ``path``, ``text`` (unit text from
+    the evidence package) and optionally ``context`` (a list of the
+    file-context window lines sent with the evidence). Returns
+    {"skip", "shared", "detail"}. Skips only when: both units are
+    test-only; at least one recognized assertion token appears in
+    either unit or its sent context (pairs with no verifiable verdict
+    anywhere nearby fail open); the skeleton-shared lines are
+    non-empty and carry no assertion/verdict token; and every shared
+    line lies in the setup region (before the first assertion) or
+    teardown region (after the last assertion) of BOTH units. Fails
+    open (no skip) on any ambiguity, including unparseable input —
+    never raises.
     """
     no = {"skip": False, "shared": 0, "detail": ""}
     try:
@@ -199,20 +247,32 @@ def scaffold_preskip_decision(target: dict,
 
         def normalized(text):
             # (sharing key, collapsed line) pairs; sharing compares
-            # whitespace-insensitively while assertions and regions are
-            # judged on the collapsed form with word boundaries intact.
+            # brace-adjacent-normalized skeletons while assertions and
+            # regions are judged on the collapsed form with word
+            # boundaries intact.
             out = []
             for raw in str(text or "").splitlines():
                 col = _scaffold_mask_collapsed(raw)
                 if not col or _scaffold_trivial(col):
                     continue
-                out.append(("".join(col.split()), col))
+                out.append((_scaffold_key(col), col))
             return out
 
         tnorm = normalized(t.get("text"))
         cnorm = normalized(c.get("text"))
         if not tnorm or not cnorm:
             return dict(no, detail="empty unit")
+        tctx = [_scaffold_mask_collapsed(l) for l in (t.get("context") or [])
+                if isinstance(l, str)]
+        cctx = [_scaffold_mask_collapsed(l) for l in (c.get("context") or [])
+                if isinstance(l, str)]
+        if not any(_scaffold_has_assert(col)
+                   for col in ([c for _, c in tnorm + cnorm] + tctx + cctx)):
+            # No recognizable verdict in either unit or its sent file
+            # context: without a verifiable assertion nearby the pair
+            # could be unasserted logic rather than scaffolding around
+            # verified behavior.
+            return dict(no, detail="no recognized assertions")
         tkeys = [k for k, _ in tnorm]
         ckeys = [k for k, _ in cnorm]
         shared = sorted(set(tkeys) & set(ckeys))
@@ -222,8 +282,7 @@ def scaffold_preskip_decision(target: dict,
         def key_asserted(lines, key):
             # Assertion status of the collapsed line behind a key.
             for k, col in lines:
-                if k == key and any(tok in col.lower()
-                                    for tok in SCAFFOLD_ASSERT_TOKENS):
+                if k == key and _scaffold_has_assert(col):
                     return True
             return False
 
@@ -235,8 +294,7 @@ def scaffold_preskip_decision(target: dict,
         def regions(lines):
             first, last = None, -1
             for i, (_, col) in enumerate(lines):
-                if any(tok in col.lower()
-                       for tok in SCAFFOLD_ASSERT_TOKENS):
+                if _scaffold_has_assert(col):
                     if first is None:
                         first = i
                     last = i
@@ -656,11 +714,23 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
     # other deterministic verdicts, so retries and revisions reuse it
     # without re-examination. Never fires on shared assertions, test
     # logic, oracles, or non-test code (fail open).
+    # File-context windows travel with the evidence; their text
+    # counts toward the union-assert gate (verifiable behavior nearby)
+    # but never toward the shared set (only unit texts are compared).
+    _ctx_lines: list = []
+    try:
+        for _f in (ev.get("files") or {}).values():
+            if isinstance(_f, dict):
+                for _line in (_f.get("window_lines") or []):
+                    if isinstance(_line, str):
+                        _ctx_lines.append(_line)
+    except Exception:
+        _ctx_lines = []
     sc = scaffold_preskip_decision(
         {"path": pair["target"].get("path"),
-         "text": ev["target"]["text"]},
+         "text": ev["target"]["text"], "context": _ctx_lines},
         {"path": pair["counterpart"].get("path"),
-         "text": ev["counterpart"]["text"]})
+         "text": ev["counterpart"]["text"], "context": _ctx_lines})
     if sc["skip"]:
         row.update({"path": "suppressed", "reason": "scaffold_setup",
                     "detail": sc["detail"],

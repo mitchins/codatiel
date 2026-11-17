@@ -206,6 +206,13 @@ def _semdup_entry(sem: dict) -> dict:
     elif effective_full:
         preskipped = int(sem.get("mirror_skipped") or 0) + int(
             sem.get("scaffold_skipped") or 0)
+        if not preskipped:
+            # Legacy or reuse-only records predate the counters: fall
+            # back to suppressed rows carrying preskip reasons.
+            preskipped = sum(
+                1 for s in suppressed
+                if isinstance(s, dict) and s.get("reason") in (
+                    "mirror_of_published", "scaffold_setup"))
         if examined_targets == 0 and not pairs and not published:
             if preskipped:
                 state = (f"Complete: no pairs examined — {preskipped} "

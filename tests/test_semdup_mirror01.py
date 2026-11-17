@@ -350,7 +350,7 @@ def test_mirror_seed_keys_only_published():
     assert ST.mirror_seed_keys(None) == {}
 
 
-def test_record_mirror_savings_unknown_and_empty():
+def test_record_preskip_savings_unknown_and_empty():
     out = {"mirror_skipped": 2, "scaffold_skipped": 0,
            "pairs": [{"assess_ran": True}]}
     ES._record_preskip_savings(out, None, None, __import__("time").monotonic())
