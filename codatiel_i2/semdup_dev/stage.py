@@ -346,7 +346,10 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                         from codatiel_i2.semdup_dev import editorial_shadow as _ES2
                         usable = _ES2.scaffold_cache_usable(cached)
                     except Exception:
-                        usable = True
+                        # Fail closed: without the rule module loaded we
+                        # cannot validate a cached scaffold verdict, so
+                        # re-judge instead of trusting it.
+                        usable = False
                     if not usable:
                         still_new.append(p)
                         continue
@@ -411,7 +414,9 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                 from codatiel_i2.semdup_dev import editorial_shadow as _ES2
             except Exception:
                 _ES2 = None
-            if _ES2 is not None and not _ES2.scaffold_cacheable(row):
+            if _ES2 is None or not _ES2.scaffold_cacheable(row):
+                # Fail closed (including on unreadable import): scaffold
+                # rows never enter the cross-revision cache.
                 return
             # COST-01B: persist to cross-revision cache as well.
             try:

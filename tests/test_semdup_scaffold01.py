@@ -218,11 +218,22 @@ def test_scaffold_nested_verdict_does_not_close_outer_span():
              "store(x)"]
     mask = ES._scaffold_asserted([(l, l) for l in lines])
     assert mask == [False, True, True, True, True, False], mask
-    a = "def test_a():\n" + "\n".join(lines)
-    b = "def test_b():\n" + "\n".join(lines).replace("other", "other")
+    # Same shape through the decision: shared continuation lines of
+    # multi-line verdicts (with differing openings) block the skip.
+    a = ("def test_a():\n"
+         "    x = setup()\n"
+         "    assert outer(x,\n"
+         "        flag\n"
+         "    )\n")
+    b = ("def test_b():\n"
+         "    x = setup()\n"
+         "    assert other(x,\n"
+         "        flag\n"
+         "    )\n")
     dec = ES.scaffold_preskip_decision(
         _u("tests/test_a.py", a), _u("tests/test_b.py", b))
     assert dec["skip"] is False
+    assert dec["detail"] == "shared assertions (1)", dec
 
 
 def test_scaffold_go_verdict_style_fails_open():
