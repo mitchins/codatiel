@@ -173,8 +173,12 @@ SCAFFOLD_ASSERT_TOKENS = (
 _SCAFFOLD_TRIVIAL = frozenset({
     "{", "}", "(", ")", ",", ";",
     "});", "})", ");", "},", "],", "}}", "{{",
-    "}]);", "]),", "}]", "]);",
+    "}]);", "]),", "}]", "]);", "}),",
 })
+
+# Closer-only skeletons (any mix of brackets, commas, semicolons and
+# quotes, ignoring whitespace) carry no setup meaning on their own.
+_SCAFFOLD_CLOSER_CHARS = frozenset("{}()[],;\"'")
 
 
 def _scaffold_mask_collapsed(line: str) -> str:
@@ -193,6 +197,11 @@ def _scaffold_mask_collapsed(line: str) -> str:
 
 def _scaffold_trivial(masked: str) -> bool:
     if not masked or masked in _SCAFFOLD_TRIVIAL:
+        return True
+    # Any closer-only skeleton (e.g. "}),", "} ]);") is structural
+    # punctuation, not a setup statement — regardless of spacing.
+    nospace = "".join(masked.split())
+    if nospace and set(nospace) <= _SCAFFOLD_CLOSER_CHARS:
         return True
     if len(masked) < 3 and not masked[0].isalnum():
         return True
