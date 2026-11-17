@@ -175,6 +175,27 @@ def test_scaffold_unittest_style_oracle_fails_open():
     assert dec["skip"] is False
 
 
+def test_scaffold_assert_spans_cover_multiline_verdicts():
+    # A multi-line assertion's body and closing line count as part of
+    # the verdict, so shared continuation lines can never read as
+    # neutral setup.
+    lines = ["x = make()", "#expect(check(x, y,", "    flag,",
+             "    other=True)),", "store(x)"]
+    mask = ES._scaffold_asserted([(l, l) for l in lines])
+    assert mask[0] is False
+    assert mask[1] is True
+    assert mask[2] is True
+    assert mask[3] is True
+    assert mask[4] is False
+    dec = ES.scaffold_preskip_decision(
+        {"path": "tests/a_test.py", "text": "\n".join(lines)},
+        {"path": "tests/b_test.py",
+         "text": "\n".join(lines).replace("#expect(check",
+                                          "#expect(other")})
+    assert dec["skip"] is False
+    assert "shared assertions" in dec["detail"]
+
+
 def test_scaffold_go_verdict_style_fails_open():
     a = ("func TestA(t *testing.T) {\n"
          "    x := setup(\"a\")\n"
@@ -271,6 +292,11 @@ def test_scaffold_row_cache_contract(tmp_path):
            "head_rev": "h", "_scaffold_rule": ES.SCAFFOLD_RULE}
     assert ES.scaffold_cacheable(row) is False
     assert ES.scaffold_cacheable({"reason": "terra_no_lead"}) is True
+    # Read-side gate: only current-rule scaffold rows may be reused.
+    assert ES.scaffold_cache_usable(row) is True
+    assert ES.scaffold_cache_usable(dict(row, **{"_scaffold_rule": "scaffold-00"})) is False
+    assert ES.scaffold_cache_usable({"reason": "scaffold_setup"}) is False
+    assert ES.scaffold_cache_usable({"reason": "terra_no_lead"}) is True
     ident = {"k": "v"}
     CACHE.store(tmp_path, "o/r", 7, ident, row)
     got = CACHE.lookup(tmp_path, "o/r", 7, ident)

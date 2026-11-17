@@ -338,6 +338,18 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                 )
                 cached = CACHE.lookup(state_dir, repo, pr, ident, cache=cache_dict)
                 if cached is not None:
+                    # SCAFFOLD-01: never reuse a cached scaffold skip
+                    # from a different rule version (or an unversioned
+                    # legacy row). Re-judge instead; the current rule
+                    # decides afresh.
+                    try:
+                        from codatiel_i2.semdup_dev import editorial_shadow as _ES2
+                        usable = _ES2.scaffold_cache_usable(cached)
+                    except Exception:
+                        usable = True
+                    if not usable:
+                        still_new.append(p)
+                        continue
                     rebound = CACHE.rebind_row(cached, Path(merged["db"]), repo, pr, head_rev)
                     if rebound is not None:
                         # Validate suggestion still applicable at current head
@@ -390,11 +402,6 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                 cont_buf.clear()
             if row.get("terra_tool_calls") or row.get("luna_tool_calls"):
                 return
-            # SCAFFOLD-01 rows never enter the cross-revision cache:
-            # the deterministic rule is expected to evolve, and a
-            # cached skip must not outlive its rule version. Same-head
-            # retries still reuse them via continuation (version-gated
-            # in _partition_new).
             # SCAFFOLD-01 rows never enter the cross-revision cache:
             # the deterministic rule is expected to evolve, and a
             # cached skip must not outlive its rule version. Same-head

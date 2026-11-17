@@ -150,24 +150,29 @@ def _split_unit(ref: str) -> tuple[str, str] | None:
 # judgment, no shared_component, no yield signal is consulted.
 SCAFFOLD_RULE = "scaffold-01"
 # Matched against the whitespace-collapsed (not fully stripped)
-# line, so verdict keywords keep word boundaries ("throw " never
-# matches "throws"; "should " never matches "should_retry").
-# Stems ("assert", "fail") deliberately also match longer verdict
-# calls ("assertEqual", "assert(", "t.Fatal", "self.fail("):
-# over-matching only ever fails open (safe). A bare "expect(" would
-# collide with neutral identifiers, so only the dotted/call forms
-# and Go/testify families are listed.
+# line, so verdict keywords keep word boundaries where they matter
+# ("throw " never matches "throws"; "should " never matches
+# "should_retry"). Stems ("assert", "fail", "fatal", "expect_")
+# deliberately also match longer verdict calls ("assertEqual",
+# "assert(", "t.Fatal", "self.fail", "expectRaises"): over-matching
+# only ever fails open (safe). Bare call shapes ("expect(") would
+# collide with neutral identifiers, so only dotted/suffixed forms
+# and the Go/testify families are listed.
 SCAFFOLD_ASSERT_TOKENS = (
-    "assert", "#expect", "#require", "xctassert", "xctfail",
+    "assert", "xctunwrap", "xctexpectfailure", "xctskip", "confirmation",
+    "expect_exception", "#expect", "#require", "xctassert", "xctfail",
     "recordfailure", "issue.record", "pytest.raises", "pytest.fail",
     "self.fail", "require(", "require.", "require_", "expect(",
-    "expect_", "verify(", "wait(", "fatalerror", "precondition",
-    "raise ", "throw ", "throw(", "check(", "t.error", "t.fatal",
-    "errorf", "fail(", "panic!", "expectexception", "should ",
+    "expect_", "verify(", "wait(", "fatal", "precondition", "raise ",
+    "throw ", "throw(", "check(", "t.error", "t.fatal", "errorf",
+    "fail(", "panic(", "panic!", "should ", "t.throws",
 )
 
-_SCAFFOLD_TRIVIAL = {"{", "}", "(", ")", ",", ";", "});", "})", ");",
-                     "},", "],", "}}", "{{"}
+_SCAFFOLD_TRIVIAL = frozenset({
+    "{", "}", "(", ")", ",", ";",
+    "});", "})", ");", "},", "],", "}}", "{{",
+    "}]);", "]),", "}]", "]);",
+})
 
 
 def _scaffold_mask_collapsed(line: str) -> str:
@@ -202,42 +207,37 @@ def _scaffold_trivial(masked: str) -> bool:
     return False
 
 
-def _scaffold_key(collapsed: str) -> str:
-    """Sharing key: collapsed skeleton with spacing around bracket,
-    comma, semicolon and colon characters removed.
-
-    Purely stylistic spacing (``defer {`` vs ``defer{``,
-    ``foo(a, b)`` vs ``foo(a,b)``) never splits a shared setup line,
-    while inner spacing is preserved so distinct token sequences
-    (``a and b`` vs ``aandb``) never merge.
-    """
-    import re as _re
-    try:
-        return _re.sub(r"\s*([{}()\[\],;:=])\s*", r"\1", collapsed)
-    except Exception:
-        return collapsed
+_SCAFFOLD_TEST_DIRS = ("tests", "test", "__tests__")
 
 
 def _scaffold_is_test_path(path: str) -> bool:
-    """Positive test-only identification: existing classifier plus the
-    Xcode *-Tests directory convention (e.g. PresentationTests/).
+    """Positive test-only identification, self-contained and strict.
 
-    The suffix check is case-sensitive on purpose: a lowercase plural
-    like "Contests/" is a plausible product domain, while capital-T
+    A path counts as test-only when it carries an explicit test
+    marker: a tests/test/__tests__ directory, a test file name
+    (test_*, *_test.py, *.spec.*, *.test.*), or a *-Tests directory
+    (e.g. PresentationTests/). A bare fixtures/ or e2e/ attribution
+    is NOT enough on its own: production fixture and end-to-end
+    support code lives under such directories. The *-Tests suffix
+    check is case-sensitive on purpose: a lowercase plural like
+    "Contests/" is a plausible product domain, while capital-T
     *Tests directories are the test-target convention.
     """
     try:
-        from pathlib import PurePosixPath as _PPP
-        from codatiel_i2.core import files as _F
-        if _F._is_test_path(_PPP(str(path or ""))):
-            return True
-    except Exception:
-        pass
-    try:
         parts = str(path or "").split("/")
-        return any(p == "test" or p == "tests" or p.endswith("_tests")
-                   or p.endswith("-tests") or p.endswith(" Tests")
-                   or p.endswith("Tests") for p in parts[:-1])
+        if not parts or not parts[-1]:
+            return False
+        lowered = [p.lower() for p in parts]
+        if any(d in _SCAFFOLD_TEST_DIRS for d in lowered[:-1]):
+            return True
+        name = lowered[-1]
+        if (name.startswith("test_")
+                or name.endswith(("_test.py", ".spec.ts", ".spec.js",
+                                  ".test.ts", ".test.js"))):
+            return True
+        return any(d.endswith(("_tests", "-tests"))
+                   or d.endswith(" Tests") or d.endswith("Tests")
+                   for d in parts[:-1])
     except Exception:
         return False
 
@@ -259,10 +259,85 @@ def _scaffold_key(collapsed: str) -> str:
 
 
 def _scaffold_has_assert(collapsed: str) -> bool:
-    """True when a collapsed skeleton line carries a verdict token."""
+    """True when a collapsed skeleton line carries a verdict token.
+
+    Checks the collapsed form (word boundaries intact) and the
+    sharing-key form (catches spaced call shapes like ``check (x)``
+    that normalize to ``check(x)``). Either hit marks the line.
+    Over-matching only ever fails open.
+    """
     try:
         low = collapsed.lower()
-        return any(tok in low for tok in SCAFFOLD_ASSERT_TOKENS)
+        if any(tok in low for tok in SCAFFOLD_ASSERT_TOKENS):
+            return True
+        key = _scaffold_key(collapsed).lower()
+        return any(tok in key for tok in SCAFFOLD_ASSERT_TOKENS
+                   if not tok.endswith(" "))
+    except Exception:
+        return False
+
+
+def _scaffold_asserted(lines: list) -> list:
+    """Boolean mask: verdict lines plus their bracket continuations.
+
+    An assertion spans its full bracketed extent: continuation lines
+    (e.g. a multi-line call's arguments and closing bracket) belong
+    to the verdict even when the token sits only on the opening
+    line. Bracket depth is tracked on masked text (string contents
+    are already masked away, so only real delimiters count).
+    Unbalanced closers clamp at zero rather than poisoning later
+    lines. Anything missed here fails open downstream.
+    """
+    try:
+        cols = [c for _, c in lines]
+        mask = [False] * len(cols)
+        depth = 0
+        open_depth = None
+        for i, col in enumerate(cols):
+            if _scaffold_has_assert(col):
+                open_depth = depth
+                mask[i] = True
+            elif open_depth is not None and depth > open_depth:
+                mask[i] = True
+            depth += (col.count("{") + col.count("(") + col.count("[")
+                      - col.count("}") - col.count(")") - col.count("]"))
+            if depth < 0:
+                depth = 0
+            if open_depth is not None and depth <= open_depth:
+                open_depth = None
+        return mask
+    except Exception:
+        return [True] * len(lines)
+    """Positive test-only identification, self-contained and strict.
+
+    A path counts as test-only when it carries an explicit test
+    marker: a tests/test/__tests__ directory, a test file name
+    (test_*, *_test.py, *.spec.*. *.test.*), or a *-Tests directory
+    (e.g. PresentationTests/). A bare fixtures/ or e2e/ attribution
+    is NOT enough on its own: production fixture and end-to-end
+    support code lives under such directories. This deliberately does
+    not reuse the general file classifier, whose fixtures/e2e
+    attribution serves detector routing, not safety gating. The
+    *-Tests suffix check is case-sensitive on purpose: a lowercase
+    plural like "Contests/" is a plausible product domain, while
+    capital-T *Tests directories are the test-target convention.
+    """
+    try:
+        parts = str(path or "").split("/")
+        if not parts or not parts[-1]:
+            return False
+        lowered = [p.lower() for p in parts]
+        if any(d in ("tests", "test", "__tests__")
+               for d in lowered[:-1]):
+            return True
+        name = lowered[-1]
+        if (name.startswith("test_")
+                or name.endswith(("_test.py", ".spec.ts", ".spec.js",
+                                  ".test.ts", ".test.js"))):
+            return True
+        return any(d.endswith(("_tests", "-tests"))
+                   or d.endswith(" Tests") or d.endswith("Tests")
+                   for d in parts[:-1])
     except Exception:
         return False
 
@@ -278,11 +353,12 @@ def scaffold_preskip_decision(target: dict,
     test-only; at least one recognized assertion token appears in
     either unit or its sent context (pairs with no verifiable verdict
     anywhere nearby fail open); the skeleton-shared lines are
-    non-empty and carry no assertion/verdict token; and every shared
-    line lies in the setup region (before the first assertion) or
-    teardown region (after the last assertion) of BOTH units. Fails
-    open (no skip) on any ambiguity, including unparseable input —
-    never raises.
+    non-empty and none of them is (or continues) a verdict, where a
+    verdict spans its full bracketed extent so multi-line assertion
+    bodies count; and every shared line lies in the setup region
+    (before the first verdict) or teardown region (after the last
+    verdict) of BOTH units. Fails open (no skip) on any ambiguity,
+    including unparseable input — never raises.
     """
     no = {"skip": False, "shared": 0, "detail": ""}
     try:
@@ -326,37 +402,39 @@ def scaffold_preskip_decision(target: dict,
         if not shared:
             return dict(no, detail="no shared skeleton lines")
 
-        def key_asserted(lines, key):
-            # Assertion status of the collapsed line behind a key.
-            for k, col in lines:
-                if k == key and _scaffold_has_assert(col):
+        # Verdict spans first: a token anywhere marks its whole
+        # bracketed extent, so multi-line assertion bodies and their
+        # closing lines count as asserted even when only the opening
+        # line carries the token.
+        tmask = _scaffold_asserted(tnorm)
+        cmask = _scaffold_asserted(cnorm)
+
+        def key_asserted(lines, asserted, key):
+            for i, (k, _) in enumerate(lines):
+                if k == key and asserted[i]:
                     return True
             return False
 
         bad = [k for k in shared
-               if key_asserted(tnorm, k) or key_asserted(cnorm, k)]
+               if key_asserted(tnorm, tmask, k)
+               or key_asserted(cnorm, cmask, k)]
         if bad:
             return dict(no, detail=f"shared assertions ({len(bad)})")
 
-        def regions(lines):
-            first, last = None, -1
-            for i, (_, col) in enumerate(lines):
-                if _scaffold_has_assert(col):
-                    if first is None:
-                        first = i
-                    last = i
-            if first is None:
-                return set(range(len(lines))), set()
-            return set(range(first)), set(range(last + 1, len(lines)))
-
-        def in_setup(lines, key):
+        def in_setup(lines, asserted, key):
             idx = [i for i, (k, _) in enumerate(lines) if k == key]
-            ok = regions(lines)[0] | regions(lines)[1]
+            first = next((i for i, a in enumerate(asserted) if a), None)
+            if first is None:
+                setup, teardown = set(range(len(lines))), set()
+            else:
+                last = max(i for i, a in enumerate(asserted) if a)
+                setup, teardown = set(range(first)), set(range(last + 1, len(lines)))
+            ok = setup | teardown
             return bool(idx) and all(i in ok for i in idx)
 
-        if any(not in_setup(tnorm, k) for k in shared):
+        if any(not in_setup(tnorm, tmask, k) for k in shared):
             return dict(no, detail="shared outside setup/teardown (target)")
-        if any(not in_setup(cnorm, k) for k in shared):
+        if any(not in_setup(cnorm, cmask, k) for k in shared):
             return dict(no, detail="shared outside setup/teardown")
         return {"skip": True, "shared": len(shared),
                 "detail": (f"shared test setup ({len(shared)} lines, "
@@ -375,6 +453,24 @@ def scaffold_cacheable(row: dict) -> bool:
     """
     try:
         return (row or {}).get("reason") != "scaffold_setup"
+    except Exception:
+        return False
+
+
+def scaffold_cache_usable(cached: dict) -> bool:
+    """Whether a cached row may be reused as a scaffold verdict.
+
+    Defense in depth for the read path: a cached scaffold_setup row
+    is reusable only when it carries the current rule version.
+    Anything else (legacy/foreign rows, version drift) must be
+    re-judged, never trusted.
+    """
+    try:
+        if not isinstance(cached, dict):
+            return False
+        if cached.get("reason") != "scaffold_setup":
+            return True
+        return cached.get("_scaffold_rule") == SCAFFOLD_RULE
     except Exception:
         return False
 

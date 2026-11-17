@@ -2,12 +2,12 @@
 
 Replays the shipped scaffold_preskip_decision over recorded
 pre-inference inputs (unit texts + sent file context at the reviewed
-heads) and asserts the audited outcome per case:
-- 15 useful findings: must ALL fail open (gate 1, prod code).
-- 14 scaffolding cases: 7 skip, 7 fail open on shared assertions.
-- adversarial pairs: shared test logic always fails open;
-  fixture twins skip; mixed pairs fail open; Go custom-oracle
-  fails open; smoke pairs with nothing shared fail open.
+heads) and asserts the audited outcome per case: 55 cases total —
+16 useful findings, all fail-open (gate 1, prod code); 2 prod-gate
+controls; 37 audit/adversarial cases (17 scaffolding skips, 20
+fail-opens on shared assertions/waits, unrecognized verdicts, or
+test-only gate). The audit found useful findings never suppressed
+and scaffolding partially suppressed; the fixture pins both.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def test_fixture_meta_matches_shipped_rule():
 
 def test_historical_replay():
     cases = _FIXTURE["cases"]
-    assert len(cases) >= 40, "replay corpus must stay comprehensive"
+    assert len(cases) == 55, "replay corpus must stay comprehensive"
     skips = fails = 0
     for case in cases:
         t = case["target"]
