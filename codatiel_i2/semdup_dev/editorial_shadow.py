@@ -144,17 +144,19 @@ def _split_unit(ref: str) -> tuple[str, str] | None:
     return path, symbol
 
 
-# SCAFFOLD-01: deterministic pre-examination suppression of test
-# setup/teardown/fixture scaffolding. All inputs are pre-inference
-# (unit texts from the evidence package, file paths); no model
-# judgment, no shared_component, no yield signal is consulted.
+# Bump SCAFFOLD_RULE whenever the predicate changes in ANY way that
+# could alter a verdict (tokens, masking, regions, path gate): cached
+# and continued scaffold_skip rows are validated against it, and the
+# committed replay fixture pins the token set, so a behavior change
+# without a version bump fails tests instead of silently reusing
+# stale verdicts.
 SCAFFOLD_RULE = "scaffold-01"
 # Matched against the whitespace-collapsed (not fully stripped)
 # line, so verdict keywords keep word boundaries where they matter
 # ("throw " never matches "throws"; "should " never matches
-# "should_retry"). Stems ("assert", "fail", "fatal", "expect_")
+# "should_retry"). Stems ("assert", "fail") and dotted forms
 # deliberately also match longer verdict calls ("assertEqual",
-# "assert(", "t.Fatal", "self.fail", "expectRaises"): over-matching
+# "assert(", "t.Fatal", "self.fail(", "t.Errorf("): over-matching
 # only ever fails open (safe). Bare call shapes ("expect(") would
 # collide with neutral identifiers, so only dotted/suffixed forms
 # and the Go/testify families are listed.
@@ -283,63 +285,35 @@ def _scaffold_asserted(lines: list) -> list:
     An assertion spans its full bracketed extent: continuation lines
     (e.g. a multi-line call's arguments and closing bracket) belong
     to the verdict even when the token sits only on the opening
-    line. Bracket depth is tracked on masked text (string contents
-    are already masked away, so only real delimiters count).
-    Unbalanced closers clamp at zero rather than poisoning later
-    lines. Anything missed here fails open downstream.
+    line, so shared continuations can never read as neutral setup.
+    Bracket depth is tracked on masked text (string contents are
+    already masked away, so only real delimiters count). Nested
+    verdicts nest via a stack (an inner verdict never closes the
+    outer one early). Unbalanced closers mark the remainder asserted
+    rather than silently ending spans: malformed input fails safe.
     """
     try:
         cols = [c for _, c in lines]
         mask = [False] * len(cols)
         depth = 0
-        open_depth = None
+        stack: list = []
         for i, col in enumerate(cols):
             if _scaffold_has_assert(col):
-                open_depth = depth
-                mask[i] = True
-            elif open_depth is not None and depth > open_depth:
+                stack.append(depth)
+            if stack:
                 mask[i] = True
             depth += (col.count("{") + col.count("(") + col.count("[")
                       - col.count("}") - col.count(")") - col.count("]"))
             if depth < 0:
-                depth = 0
-            if open_depth is not None and depth <= open_depth:
-                open_depth = None
+                # More closers than openers: the text is not
+                # well-formed code; treat everything from here as
+                # verdict rather than risk mislabeling it as setup.
+                return [m or j >= i for j, m in enumerate(mask)]
+            while stack and depth <= stack[-1]:
+                stack.pop()
         return mask
     except Exception:
         return [True] * len(lines)
-    """Positive test-only identification, self-contained and strict.
-
-    A path counts as test-only when it carries an explicit test
-    marker: a tests/test/__tests__ directory, a test file name
-    (test_*, *_test.py, *.spec.*. *.test.*), or a *-Tests directory
-    (e.g. PresentationTests/). A bare fixtures/ or e2e/ attribution
-    is NOT enough on its own: production fixture and end-to-end
-    support code lives under such directories. This deliberately does
-    not reuse the general file classifier, whose fixtures/e2e
-    attribution serves detector routing, not safety gating. The
-    *-Tests suffix check is case-sensitive on purpose: a lowercase
-    plural like "Contests/" is a plausible product domain, while
-    capital-T *Tests directories are the test-target convention.
-    """
-    try:
-        parts = str(path or "").split("/")
-        if not parts or not parts[-1]:
-            return False
-        lowered = [p.lower() for p in parts]
-        if any(d in ("tests", "test", "__tests__")
-               for d in lowered[:-1]):
-            return True
-        name = lowered[-1]
-        if (name.startswith("test_")
-                or name.endswith(("_test.py", ".spec.ts", ".spec.js",
-                                  ".test.ts", ".test.js"))):
-            return True
-        return any(d.endswith(("_tests", "-tests"))
-                   or d.endswith(" Tests") or d.endswith("Tests")
-                   for d in parts[:-1])
-    except Exception:
-        return False
 
 
 def scaffold_preskip_decision(target: dict,

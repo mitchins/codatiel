@@ -27,14 +27,6 @@ def commit(repo: Path, msg: str) -> str:
     return out.stdout.strip()
 
 
-def empty_commit(repo: Path, msg: str) -> str:
-    """Empty HEAD commit (keeps line spans stable across revisions)."""
-    git(repo, "commit", "-q", "--allow-empty", "-m", msg)
-    out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
-                         check=True, capture_output=True, text=True)
-    return out.stdout.strip()
-
-
 def backends(monkeypatch: pytest.MonkeyPatch) -> None:
     from codatiel_i2 import providers as P
 

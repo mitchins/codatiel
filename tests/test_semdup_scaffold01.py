@@ -206,7 +206,29 @@ def test_scaffold_assert_spans_cover_multiline_verdicts():
     assert "shared assertions" in dec["detail"]
 
 
+def test_scaffold_nested_verdict_does_not_close_outer_span():
+    # An inner assertion must not close the outer verdict's extent:
+    # lines after the inner close but inside the outer call are
+    # still verdict, so shared ones block the skip.
+    lines = ["x = make()",
+             "assert outer(inner(y),",
+             "    inner(z),",
+             "    other",
+             ")",
+             "store(x)"]
+    mask = ES._scaffold_asserted([(l, l) for l in lines])
+    assert mask == [False, True, True, True, True, False], mask
+    a = "def test_a():\n" + "\n".join(lines)
+    b = "def test_b():\n" + "\n".join(lines).replace("other", "other")
+    dec = ES.scaffold_preskip_decision(
+        _u("tests/test_a.py", a), _u("tests/test_b.py", b))
+    assert dec["skip"] is False
+
+
 def test_scaffold_go_verdict_style_fails_open():
+    # t.Errorf IS recognized: identical Go verdicts are shared
+    # assertions, so the pair is retained. (Path is under tests/ so
+    # the gate under test is the token list, not test detection.)
     a = ("func TestA(t *testing.T) {\n"
          "    x := setup(\"a\")\n"
          "    if x.N != 1 { t.Errorf(\"n=%d\", x.N) }\n"
@@ -216,8 +238,25 @@ def test_scaffold_go_verdict_style_fails_open():
          "    if x.N != 1 { t.Errorf(\"n=%d\", x.N) }\n"
          "}\n")
     dec = ES.scaffold_preskip_decision(
-        _u("pkg/foo_test.go", a), _u("pkg/foo_test.go", b))
+        _u("tests/foo_test.go", a), _u("tests/foo_test.go", b))
     assert dec["skip"] is False
+    assert "shared assertions" in dec["detail"]
+
+
+def test_scaffold_xctunwrap_counts_as_verdict():
+    a = ("func testA() async throws {\n"
+         "    let x = try await fetch(\"a\")\n"
+         "    let y = try XCTUnwrap(x.next())\n"
+         "    assert y.ok()\n"
+         "}\n")
+    b = ("func testB() async throws {\n"
+         "    let x = try await fetch(\"b\")\n"
+         "    let y = try XCTUnwrap(x.next())\n"
+         "    assert y.done()\n")
+    dec = ES.scaffold_preskip_decision(
+        _u("Tests/a.swift", a), _u("Tests/b.swift", b))
+    assert dec["skip"] is False
+    assert "shared assertions" in dec["detail"]
 
 
 def test_scaffold_contests_dir_is_not_test_only():
