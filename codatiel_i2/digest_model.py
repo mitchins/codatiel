@@ -204,9 +204,23 @@ def _semdup_entry(sem: dict) -> dict:
                  "is made; the ordinary review findings above stand on "
                  "their own.")
     elif effective_full:
+        preskipped = int(sem.get("mirror_skipped") or 0) + int(
+            sem.get("scaffold_skipped") or 0)
+        if not preskipped:
+            # Legacy or reuse-only records predate the counters: fall
+            # back to suppressed rows carrying preskip reasons.
+            preskipped = sum(
+                1 for s in suppressed
+                if isinstance(s, dict) and s.get("reason") in (
+                    "mirror_of_published", "scaffold_setup"))
         if examined_targets == 0 and not pairs and not published:
-            state = ("No changed units in scope and nothing skipped — a "
-                     "genuine clean outcome for this check.")
+            if preskipped:
+                state = (f"Complete: no pairs examined — {preskipped} "
+                         "candidate pair(s) deterministically filtered "
+                         "before inference (mirrors/scaffolding).")
+            else:
+                state = ("No changed units in scope and nothing skipped "
+                         "— a genuine clean outcome for this check.")
         else:
             state = (f"Complete: {examined_targets} changed units "
                      f"examined, {pairs_display}, {len(published)} reuse "
@@ -535,6 +549,7 @@ _REASON_GLOSSARY = {
     "deterministic_drop": "a deterministic overlap check ruled it out",
     "duplicate_of_review": "the ordinary review already covers it",
     "mirror_of_published": "the same pair published in the other direction",
+    "scaffold_setup": "shared test setup/teardown skipped before inference",
     "delta pair budget exhausted": "pair budget reached before it",
     "experimental pair budget": "held back by the explicit experiment limit",
     "budget_stop": "stopped by the spending guard before inference",

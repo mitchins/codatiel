@@ -87,6 +87,53 @@ def mirror_preskip_row(pair: dict, *, head_rev: str, base_rev: str,
     }
 
 
+def _mirror_preskip(pair: dict, *, head_rev: str, base_rev: str,
+                    published_keys: dict, outcome: dict,
+                    on_pair=None) -> tuple[bool, str]:
+    """Mirror pre-skip for one pair; records the row when it fires.
+
+    Shared by run_editorial and review_candidate_pairs so the
+    first-published-wins rule cannot drift between the two entry
+    points. Returns (skipped, mirror_key).
+    """
+    mkey = unordered_mirror_key(pair.get("target"),
+                                pair.get("counterpart"))
+    if not mirror_skip_decision(pair.get("target"),
+                                pair.get("counterpart"), published_keys):
+        return False, mkey
+    row = mirror_preskip_row(pair, head_rev=head_rev, base_rev=base_rev,
+                             kept=published_keys[mkey])
+    outcome["pairs"].append(row)
+    outcome["suppressed"].append(_suppressed_row(row))
+    outcome["mirror_skipped"] = int(outcome.get("mirror_skipped") or 0) + 1
+    if on_pair is not None:
+        try:
+            on_pair(row)
+        except Exception:  # noqa: BLE001 - hook never breaks judging
+            pass
+    return True, mkey
+
+
+def _record_judged(outcome: dict, row: dict, mkey: str,
+                   published_keys: dict, on_pair=None) -> None:
+    """Record one judged pair: verdict row, published twin tracking,
+    optional on_pair hook. Shared by both judging loops."""
+    outcome["pairs"].append(row)
+    if row["path"] == "published":
+        t, c = row.get("target") or {}, row.get("counterpart") or {}
+        published_keys[mkey] = (
+            f"{t.get('path')}::{t.get('symbol')} -> "
+            f"{c.get('path')}::{c.get('symbol')}")
+        outcome["published"].append(_public_row(row))
+    else:
+        outcome["suppressed"].append(_suppressed_row(row))
+    if on_pair is not None:
+        try:
+            on_pair(row)
+        except Exception:  # noqa: BLE001 - hook never breaks judging
+            pass
+
+
 def _split_unit(ref: str) -> tuple[str, str] | None:
     if "::" not in ref:
         return None
@@ -95,6 +142,333 @@ def _split_unit(ref: str) -> tuple[str, str] | None:
     if not path or not symbol:
         return None
     return path, symbol
+
+
+# Bump SCAFFOLD_RULE whenever the predicate changes in ANY way that
+# could alter a verdict (tokens, masking, regions, path gate): cached
+# and continued scaffold_skip rows are validated against it, and the
+# committed replay fixture pins the token set, so a behavior change
+# without a version bump fails tests instead of silently reusing
+# stale verdicts.
+SCAFFOLD_RULE = "scaffold-01"
+# Matched against the whitespace-collapsed (not fully stripped)
+# line, so verdict keywords keep word boundaries where they matter
+# ("throw " never matches "throws"; "should " never matches
+# "should_retry"). Stems ("assert", "fail") and dotted forms
+# deliberately also match longer verdict calls ("assertEqual",
+# "assert(", "t.Fatal", "self.fail(", "t.Errorf("): over-matching
+# only ever fails open (safe). Bare call shapes ("expect(") would
+# collide with neutral identifiers, so only dotted/suffixed forms
+# and the Go/testify families are listed.
+SCAFFOLD_ASSERT_TOKENS = (
+    "assert", "xctunwrap", "xctexpectfailure", "xctskip", "confirmation",
+    "expect_exception", "#expect", "#require", "xctassert", "xctfail",
+    "recordfailure", "issue.record", "pytest.raises", "pytest.fail",
+    "self.fail", "require(", "require.", "require_", "expect(",
+    "expect_", "verify(", "wait(", "fatal", "precondition", "raise ",
+    "throw ", "throw(", "check(", "t.error", "t.fatal", "errorf",
+    "fail(", "panic(", "panic!", "should ", "t.throws",
+)
+
+_SCAFFOLD_TRIVIAL = frozenset({
+    "{", "}", "(", ")", ",", ";",
+    "});", "})", ");", "},", "],", "}}", "{{",
+    "}]);", "]),", "}]", "]);", "}),",
+})
+
+# Closer-only skeletons (any mix of brackets, commas, semicolons and
+# quotes, ignoring whitespace) carry no setup meaning on their own.
+_SCAFFOLD_CLOSER_CHARS = frozenset("{}()[],;\"'")
+
+
+def _scaffold_mask_collapsed(line: str) -> str:
+    """Skeleton form: string literals masked, whitespace collapsed.
+
+    Assertion tokens are matched against this form so keywords keep
+    word boundaries."""
+    import re as _re
+    try:
+        masked = _re.sub(r'"(?:[^"\\]|\\.)*"', '""', line)
+        masked = _re.sub(r"'(?:[^'\\]|\\.)*'", "''", masked)
+        return _re.sub(r"\s+", " ", masked).strip()
+    except Exception:
+        return ""
+
+
+def _scaffold_trivial(masked: str) -> bool:
+    if not masked or masked in _SCAFFOLD_TRIVIAL:
+        return True
+    # Any closer-only skeleton (e.g. "}),", "} ]);") is structural
+    # punctuation, not a setup statement — regardless of spacing.
+    nospace = "".join(masked.split())
+    if nospace and set(nospace) <= _SCAFFOLD_CLOSER_CHARS:
+        return True
+    if len(masked) < 3 and not masked[0].isalnum():
+        return True
+    if set(masked) <= {'"', "'"}:
+        # A line that is only (masked) quote characters, e.g. a bare
+        # docstring delimiter skeleton shared by any two documented
+        # units: not evidence of shared setup.
+        return True
+    if masked.startswith("//"):
+        return True
+    if masked.startswith("#") and not masked.startswith(
+            ("#expect", "#require")):
+        return True
+    return False
+
+
+_SCAFFOLD_TEST_DIRS = ("tests", "test", "__tests__")
+
+
+def _scaffold_is_test_path(path: str) -> bool:
+    """Positive test-only identification, self-contained and strict.
+
+    A path counts as test-only when it carries an explicit test
+    marker: a tests/test/__tests__ directory, a test file name
+    (test_*, *_test.py, *.spec.*, *.test.*), or a *-Tests directory
+    (e.g. PresentationTests/). A bare fixtures/ or e2e/ attribution
+    is NOT enough on its own: production fixture and end-to-end
+    support code lives under such directories. The *-Tests suffix
+    check is case-sensitive on purpose: a lowercase plural like
+    "Contests/" is a plausible product domain, while capital-T
+    *Tests directories are the test-target convention.
+    """
+    try:
+        parts = str(path or "").split("/")
+        if not parts or not parts[-1]:
+            return False
+        lowered = [p.lower() for p in parts]
+        if any(d in _SCAFFOLD_TEST_DIRS for d in lowered[:-1]):
+            return True
+        name = lowered[-1]
+        if (name.startswith("test_")
+                or name.endswith(("_test.py", ".spec.ts", ".spec.js",
+                                  ".test.ts", ".test.js"))):
+            return True
+        return any(d.endswith(("_tests", "-tests"))
+                   or d.endswith(" Tests") or d.endswith("Tests")
+                   for d in parts[:-1])
+    except Exception:
+        return False
+
+
+def _scaffold_key(collapsed: str) -> str:
+    """Sharing key: collapsed skeleton with spacing around bracket,
+    comma, semicolon, colon and assignment characters removed.
+
+    Purely stylistic spacing (``defer {`` vs ``defer{``,
+    ``foo(a, b)`` vs ``foo(a,b)``, ``x = 1`` vs ``x=1``) never splits
+    a shared setup line, while inner spacing elsewhere is preserved
+    so distinct token sequences (``a and b`` vs ``aandb``) never merge.
+    """
+    import re as _re
+    try:
+        return _re.sub(r"\s*([{}()\[\],;:=])\s*", r"\1", collapsed)
+    except Exception:
+        return collapsed
+
+
+def _scaffold_has_assert(collapsed: str) -> bool:
+    """True when a collapsed skeleton line carries a verdict token.
+
+    Checks the collapsed form (word boundaries intact) and the
+    sharing-key form (catches spaced call shapes like ``check (x)``
+    that normalize to ``check(x)``). Either hit marks the line.
+    Over-matching only ever fails open.
+    """
+    try:
+        low = collapsed.lower()
+        if any(tok in low for tok in SCAFFOLD_ASSERT_TOKENS):
+            return True
+        key = _scaffold_key(collapsed).lower()
+        return any(tok in key for tok in SCAFFOLD_ASSERT_TOKENS
+                   if not tok.endswith(" "))
+    except Exception:
+        return False
+
+
+def _scaffold_asserted(lines: list) -> list:
+    """Boolean mask: verdict lines plus their bracket continuations.
+
+    An assertion spans its full bracketed extent: continuation lines
+    (e.g. a multi-line call's arguments and closing bracket) belong
+    to the verdict even when the token sits only on the opening
+    line, so shared continuations can never read as neutral setup.
+    Bracket depth is tracked on masked text (string contents are
+    already masked away, so only real delimiters count). Nested
+    verdicts nest via a stack (an inner verdict never closes the
+    outer one early). Unbalanced closers mark the remainder asserted
+    rather than silently ending spans: malformed input fails safe.
+    """
+    try:
+        cols = [c for _, c in lines]
+        mask = [False] * len(cols)
+        depth = 0
+        stack: list = []
+        for i, col in enumerate(cols):
+            if _scaffold_has_assert(col):
+                stack.append(depth)
+            if stack:
+                mask[i] = True
+            depth += (col.count("{") + col.count("(") + col.count("[")
+                      - col.count("}") - col.count(")") - col.count("]"))
+            if depth < 0:
+                # More closers than openers: the text is not
+                # well-formed code; treat everything from here as
+                # verdict rather than risk mislabeling it as setup.
+                return [m or j >= i for j, m in enumerate(mask)]
+            while stack and depth <= stack[-1]:
+                stack.pop()
+        return mask
+    except Exception:
+        return [True] * len(lines)
+
+
+def scaffold_preskip_decision(target: dict,
+                              counterpart: dict) -> dict:
+    """Decide pre-examination scaffolding suppression (deterministic).
+
+    ``target``/``counterpart`` carry ``path``, ``text`` (unit text from
+    the evidence package) and optionally ``context`` (a list of the
+    file-context window lines sent with the evidence). Returns
+    {"skip", "shared", "detail"}. Skips only when: both units are
+    test-only; at least one recognized assertion token appears in
+    either unit or its sent context (pairs with no verifiable verdict
+    anywhere nearby fail open); the skeleton-shared lines are
+    non-empty and none of them is (or continues) a verdict, where a
+    verdict spans its full bracketed extent so multi-line assertion
+    bodies count; and every shared line lies in the setup region
+    (before the first verdict) or teardown region (after the last
+    verdict) of BOTH units. Fails open (no skip) on any ambiguity,
+    including unparseable input — never raises.
+    """
+    no = {"skip": False, "shared": 0, "detail": ""}
+    try:
+        t = target or {}
+        c = counterpart or {}
+        if not (_scaffold_is_test_path(t.get("path"))
+                and _scaffold_is_test_path(c.get("path"))):
+            return dict(no, detail="not both test-only")
+
+        def normalized(text):
+            # (sharing key, collapsed line) pairs; sharing compares
+            # brace-adjacent-normalized skeletons while assertions and
+            # regions are judged on the collapsed form with word
+            # boundaries intact.
+            out = []
+            for raw in str(text or "").splitlines():
+                col = _scaffold_mask_collapsed(raw)
+                if not col or _scaffold_trivial(col):
+                    continue
+                out.append((_scaffold_key(col), col))
+            return out
+
+        tnorm = normalized(t.get("text"))
+        cnorm = normalized(c.get("text"))
+        if not tnorm or not cnorm:
+            return dict(no, detail="empty unit")
+
+        def _context_assert_lines(raw_lines):
+            # Context participates in the union gate only through
+            # substantive lines: trivial closers, lone brackets and
+            # comment-only lines are not verdicts, even nearby.
+            out = []
+            for raw in raw_lines or []:
+                if not isinstance(raw, str):
+                    continue
+                col = _scaffold_mask_collapsed(raw)
+                if not col or _scaffold_trivial(col):
+                    continue
+                out.append(col)
+            return out
+
+        tctx = _context_assert_lines(t.get("context"))
+        cctx = _context_assert_lines(c.get("context"))
+        if not any(_scaffold_has_assert(col)
+                   for col in ([c for _, c in tnorm + cnorm] + tctx + cctx)):
+            # No recognizable verdict in either unit or its sent file
+            # context: without a verifiable assertion nearby the pair
+            # could be unasserted logic rather than scaffolding around
+            # verified behavior.
+            return dict(no, detail="no recognized assertions")
+        tkeys = [k for k, _ in tnorm]
+        ckeys = [k for k, _ in cnorm]
+        shared = sorted(set(tkeys) & set(ckeys))
+        if not shared:
+            return dict(no, detail="no shared skeleton lines")
+
+        # Verdict spans first: a token anywhere marks its whole
+        # bracketed extent, so multi-line assertion bodies and their
+        # closing lines count as asserted even when only the opening
+        # line carries the token.
+        tmask = _scaffold_asserted(tnorm)
+        cmask = _scaffold_asserted(cnorm)
+
+        def key_asserted(lines, asserted, key):
+            for i, (k, _) in enumerate(lines):
+                if k == key and asserted[i]:
+                    return True
+            return False
+
+        bad = [k for k in shared
+               if key_asserted(tnorm, tmask, k)
+               or key_asserted(cnorm, cmask, k)]
+        if bad:
+            return dict(no, detail=f"shared assertions ({len(bad)})")
+
+        def in_setup(lines, asserted, key):
+            idx = [i for i, (k, _) in enumerate(lines) if k == key]
+            first = next((i for i, a in enumerate(asserted) if a), None)
+            if first is None:
+                setup, teardown = set(range(len(lines))), set()
+            else:
+                last = max(i for i, a in enumerate(asserted) if a)
+                setup, teardown = set(range(first)), set(range(last + 1, len(lines)))
+            ok = setup | teardown
+            return bool(idx) and all(i in ok for i in idx)
+
+        if any(not in_setup(tnorm, tmask, k) for k in shared):
+            return dict(no, detail="shared outside setup/teardown (target)")
+        if any(not in_setup(cnorm, cmask, k) for k in shared):
+            return dict(no, detail="shared outside setup/teardown")
+        return {"skip": True, "shared": len(shared),
+                "detail": (f"shared test setup ({len(shared)} lines, "
+                           "no assertions); skipped before examination")}
+    except Exception:
+        return dict(no, detail="unreadable input")
+
+
+def scaffold_cacheable(row: dict) -> bool:
+    """Whether a scaffold verdict may enter the cross-revision cache.
+
+    Never: scaffold skips persist only in same-head continuation
+    (version-gated). The deterministic rule is expected to evolve
+    (assertion-token list), and a cached skip must not outlive the
+    rule version that produced it.
+    """
+    try:
+        return (row or {}).get("reason") != "scaffold_setup"
+    except Exception:
+        return False
+
+
+def scaffold_cache_usable(cached: dict) -> bool:
+    """Whether a cached row may be reused as a scaffold verdict.
+
+    Defense in depth for the read path: a cached scaffold_setup row
+    is reusable only when it carries the current rule version.
+    Anything else (legacy/foreign rows, version drift) must be
+    re-judged, never trusted.
+    """
+    try:
+        if not isinstance(cached, dict):
+            return False
+        if cached.get("reason") != "scaffold_setup":
+            return True
+        return cached.get("_scaffold_rule") == SCAFFOLD_RULE
+    except Exception:
+        return False
 
 
 def candidate_pairs(records: list, max_pairs: int) -> tuple[list, list]:
@@ -241,7 +615,9 @@ def run_editorial(*, cfg, repo_path: Path, merged_db: Path,
         "pairs": [], "published": [], "suppressed": [],
         "skipped": [], "spend_usd": 0.0, "wall_s": 0.0,
         "mirror_skipped": 0, "mirror_saved_usd_est": None,
-        "mirror_saved_wall_s_est": None,
+        "mirror_saved_wall_s_est": None, "scaffold_skipped": 0,
+        "scaffold_saved_usd_est": None,
+        "scaffold_saved_wall_s_est": None,
     }
     try:
         return _run(cfg=cfg, repo_path=repo_path, merged_db=merged_db,
@@ -320,18 +696,11 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
     # MIRROR-01: first-published-wins within this run. A reverse pair is
     # skipped before any paid call only after its twin published.
     published_keys: dict[str, str] = {}
-    outcome["mirror_skipped"] = 0
     for pair in pairs:
-        mkey = unordered_mirror_key(pair.get("target"),
-                                    pair.get("counterpart"))
-        if mirror_skip_decision(pair.get("target"),
-                                pair.get("counterpart"), published_keys):
-            row = mirror_preskip_row(pair, head_rev=head_rev,
-                                     base_rev=base_rev,
-                                     kept=published_keys[mkey])
-            outcome["pairs"].append(row)
-            outcome["suppressed"].append(_suppressed_row(row))
-            outcome["mirror_skipped"] += 1
+        skipped, mkey = _mirror_preskip(
+            pair, head_rev=head_rev, base_rev=base_rev,
+            published_keys=published_keys, outcome=outcome)
+        if skipped:
             continue
         row = _review_pair(
             pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
@@ -342,15 +711,7 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
             terra_ledger=terra_ledger, luna_ledger=luna_ledger,
             ceiling_usd=ceiling_usd, half=half, assess=assess, edit=edit,
             OD=OD, ED=ED, R=R)
-        outcome["pairs"].append(row)
-        if row["path"] == "published":
-            t, c = row.get("target") or {}, row.get("counterpart") or {}
-            published_keys[mkey] = (
-                f"{t.get('path')}::{t.get('symbol')} -> "
-                f"{c.get('path')}::{c.get('symbol')}")
-            outcome["published"].append(_public_row(row))
-        else:
-            outcome["suppressed"].append(_suppressed_row(row))
+        _record_judged(outcome, row, mkey, published_keys)
     spent_t, spent_l = _spent(terra_ledger), _spent(luna_ledger)
     outcome["spend_terra_usd"] = spent_t
     outcome["spend_luna_usd"] = spent_l
@@ -362,40 +723,54 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
     else:
         outcome["spend_usd"] = round(spent_t + spent_l, 6)
     outcome["spend_unknown"] = spent_t is None or spent_l is None
-    _record_mirror_savings(outcome, spent_t, spent_l, t0)
+    _record_preskip_savings(outcome, spent_t, spent_l, t0)
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     return outcome
 
 
-def _record_mirror_savings(outcome: dict, spent_t, spent_l, t0) -> None:
-    """Estimated dollars/latency saved by pre-examination mirror skips.
+def _record_preskip_savings(outcome: dict, spent_t, spent_l, t0) -> None:
+    """Record estimated savings for both pre-examination skip kinds."""
+    # Scaffold skips land inside _review_inner (no loop counter), so
+    # count suppressed scaffold_setup rows at finalize time.
+    outcome["scaffold_skipped"] = sum(
+        1 for r in outcome.get("pairs", [])
+        if isinstance(r, dict) and r.get("reason") == "scaffold_setup")
+    for prefix in ("mirror", "scaffold"):
+        _record_skip_savings(
+            outcome, spent_t, spent_l, t0, f"{prefix}_skipped",
+            f"{prefix}_saved_usd_est", f"{prefix}_saved_wall_s_est")
+
+
+def _record_skip_savings(outcome: dict, spent_t, spent_l, t0, count_key: str,
+                         usd_key: str, wall_key: str) -> None:
+    """Estimated dollars/latency saved by pre-examination skips.
 
     Estimates only (labeled _est): skipped examinations are valued at
     the run's mean examined-pair cost and latency. The mean includes
     cheap Terra-only rejections, so the dollar figure is a
-    conservative floor (a skipped mirror twin of a published pair
-    would have cost Terra+Luna). USD is None when the spend is
+    conservative floor (a skipped examination that would have run both
+    models costs more than the mean). USD is None when the spend is
     unknown or no examination baseline exists; latency needs only the
     wall clock.
     """
-    mirror_n = int(outcome.get("mirror_skipped") or 0)
-    outcome["mirror_skipped"] = mirror_n
-    outcome["mirror_saved_usd_est"] = None
-    outcome["mirror_saved_wall_s_est"] = None
+    mirror_n = int(outcome.get(count_key) or 0)
+    outcome[count_key] = mirror_n
+    outcome[usd_key] = None
+    outcome[wall_key] = None
     if not mirror_n:
-        outcome["mirror_saved_usd_est"] = 0.0
-        outcome["mirror_saved_wall_s_est"] = 0.0
+        outcome[usd_key] = 0.0
+        outcome[wall_key] = 0.0
         return
     examined = sum(1 for r in outcome.get("pairs", [])
                    if isinstance(r, dict) and r.get("assess_ran"))
     if not examined:
         return
     if spent_t is not None and spent_l is not None:
-        outcome["mirror_saved_usd_est"] = round(
+        outcome[usd_key] = round(
             mirror_n * (spent_t + spent_l) / examined, 6)
     wall = round(time.monotonic() - t0, 1)
-    outcome["mirror_saved_wall_s_est"] = round(mirror_n * wall / examined, 1)
+    outcome[wall_key] = round(mirror_n * wall / examined, 1)
 
 
 def _review_pair(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
@@ -457,6 +832,37 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
                     # model calls, safely reusable across revisions.
                     "completed": True, "budget_refused": False,
                     "terra_completed": None, "luna_completed": None})
+        return row
+    # SCAFFOLD-01: deterministic test-scaffolding suppression. Runs on
+    # pre-inference evidence only (unit texts + paths); completed like
+    # other deterministic verdicts, so retries and revisions reuse it
+    # without re-examination. Never fires on shared assertions, test
+    # logic, oracles, or non-test code (fail open).
+    # File-context windows travel with the evidence; their text
+    # counts toward the union-assert gate (verifiable behavior nearby)
+    # but never toward the shared set (only unit texts are compared).
+    _ctx_lines: list = []
+    try:
+        for _f in (ev.get("files") or {}).values():
+            if isinstance(_f, dict):
+                for _line in (_f.get("window_lines") or []):
+                    if isinstance(_line, str):
+                        _ctx_lines.append(_line)
+    except Exception:
+        _ctx_lines = []
+    sc = scaffold_preskip_decision(
+        {"path": pair["target"].get("path"),
+         "text": ev["target"]["text"], "context": _ctx_lines},
+        {"path": pair["counterpart"].get("path"),
+         "text": ev["counterpart"]["text"], "context": _ctx_lines})
+    if sc["skip"]:
+        row.update({"path": "suppressed", "reason": "scaffold_setup",
+                    "detail": sc["detail"],
+                    "completed": True, "budget_refused": False,
+                    "terra_completed": False, "luna_completed": None,
+                    # Rule version travels with the verdict so a future
+                    # rule change never silently reuses a stale skip.
+                    "_scaffold_rule": SCAFFOLD_RULE})
         return row
     terra_ctx = R.ReviewContext(
         repo=cfg.repos[0] if cfg.repos else "dev", base_sha=base_rev,
@@ -657,6 +1063,8 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
         "skipped": [], "spend_usd": 0.0, "wall_s": 0.0,
         "preflight_usd": None, "mirror_skipped": 0,
         "mirror_saved_usd_est": None, "mirror_saved_wall_s_est": None,
+        "scaffold_skipped": 0, "scaffold_saved_usd_est": None,
+        "scaffold_saved_wall_s_est": None,
     }
     try:
         from codatiel_i2 import providers as P
@@ -764,21 +1172,11 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
                     break
             except Exception:
                 pass
-        mkey = unordered_mirror_key(pair.get("target"),
-                                    pair.get("counterpart"))
-        if mirror_skip_decision(pair.get("target"),
-                                pair.get("counterpart"), published_keys):
-            row = mirror_preskip_row(pair, head_rev=head_rev,
-                                     base_rev=base_rev,
-                                     kept=published_keys[mkey])
-            outcome["pairs"].append(row)
-            outcome["suppressed"].append(_suppressed_row(row))
-            outcome["mirror_skipped"] += 1
-            if on_pair is not None:
-                try:
-                    on_pair(row)
-                except Exception:  # noqa: BLE001 - hook never breaks judging
-                    pass
+        skipped, mkey = _mirror_preskip(
+            pair, head_rev=head_rev, base_rev=base_rev,
+            published_keys=published_keys, outcome=outcome,
+            on_pair=on_pair)
+        if skipped:
             continue
         row = _review_pair(
             pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
@@ -789,20 +1187,7 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
             terra_ledger=terra_ledger, luna_ledger=luna_ledger,
             ceiling_usd=ceiling_usd, half=half, assess=assess, edit=edit,
             OD=OD, ED=ED, R=R)
-        outcome["pairs"].append(row)
-        if row["path"] == "published":
-            t, c = row.get("target") or {}, row.get("counterpart") or {}
-            published_keys[mkey] = (
-                f"{t.get('path')}::{t.get('symbol')} -> "
-                f"{c.get('path')}::{c.get('symbol')}")
-            outcome["published"].append(_public_row(row))
-        else:
-            outcome["suppressed"].append(_suppressed_row(row))
-        if on_pair is not None:
-            try:
-                on_pair(row)
-            except Exception:  # noqa: BLE001 - hook never breaks judging
-                pass
+        _record_judged(outcome, row, mkey, published_keys, on_pair=on_pair)
     spent_t, spent_l = _spent(terra_ledger), _spent(luna_ledger)
     # Per-model spend from the priced ledger results (persisted with the
     # stage outcome). None means unknown — never represented as $0.
@@ -819,7 +1204,7 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
         outcome["spend_usd"] = round(spent_t + spent_l, 6)
     outcome["spend_unknown"] = spent_t is None or spent_l is None
     outcome["preflight_usd"] = judged_preflight
-    _record_mirror_savings(outcome, spent_t, spent_l, t0)
+    _record_preskip_savings(outcome, spent_t, spent_l, t0)
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     return outcome

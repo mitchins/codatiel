@@ -338,6 +338,21 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                 )
                 cached = CACHE.lookup(state_dir, repo, pr, ident, cache=cache_dict)
                 if cached is not None:
+                    # SCAFFOLD-01: never reuse a cached scaffold skip
+                    # from a different rule version (or an unversioned
+                    # legacy row). Re-judge instead; the current rule
+                    # decides afresh.
+                    try:
+                        from codatiel_i2.semdup_dev import editorial_shadow as _ES2
+                        usable = _ES2.scaffold_cache_usable(cached)
+                    except Exception:
+                        # Fail closed: without the rule module loaded we
+                        # cannot validate a cached scaffold verdict, so
+                        # re-judge instead of trusting it.
+                        usable = False
+                    if not usable:
+                        still_new.append(p)
+                        continue
                     rebound = CACHE.rebind_row(cached, Path(merged["db"]), repo, pr, head_rev)
                     if rebound is not None:
                         # Validate suggestion still applicable at current head
@@ -389,6 +404,19 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                                     head_rev, cont_buf)
                 cont_buf.clear()
             if row.get("terra_tool_calls") or row.get("luna_tool_calls"):
+                return
+            # SCAFFOLD-01 rows never enter the cross-revision cache:
+            # the deterministic rule is expected to evolve, and a
+            # cached skip must not outlive its rule version. Same-head
+            # retries still reuse them via continuation (version-gated
+            # in _partition_new).
+            try:
+                from codatiel_i2.semdup_dev import editorial_shadow as _ES2
+            except Exception:
+                _ES2 = None
+            if _ES2 is None or not _ES2.scaffold_cacheable(row):
+                # Fail closed (including on unreadable import): scaffold
+                # rows never enter the cross-revision cache.
                 return
             # COST-01B: persist to cross-revision cache as well.
             try:
@@ -463,11 +491,13 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     outcome["spend_terra_unknown"] = judged.get("spend_terra_unknown", False)
     outcome["spend_luna_unknown"] = judged.get("spend_luna_unknown", False)
     outcome["preflight_usd"] = judged.get("preflight_usd")
-    # MIRROR-01 savings (estimates labeled _est; None when unknown).
-    outcome["mirror_skipped"] = judged.get("mirror_skipped", 0)
-    outcome["mirror_saved_usd_est"] = judged.get("mirror_saved_usd_est")
-    outcome["mirror_saved_wall_s_est"] = judged.get(
-        "mirror_saved_wall_s_est")
+    # MIRROR-01 / SCAFFOLD-01 savings (estimates labeled _est).
+    for prefix in ("mirror", "scaffold"):
+        outcome[f"{prefix}_skipped"] = judged.get(f"{prefix}_skipped", 0)
+        outcome[f"{prefix}_saved_usd_est"] = judged.get(
+            f"{prefix}_saved_usd_est")
+        outcome[f"{prefix}_saved_wall_s_est"] = judged.get(
+            f"{prefix}_saved_wall_s_est")
     outcome["skipped"].extend(judged.get("skipped", []))
     if not judged.get("ok") or judged.get("stage") in (
             "backends_unavailable",):
@@ -530,7 +560,13 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             "pairs_total": len(pairs),
             "pairs_examined": examined_pairs,
             "pairs_reused": len(reused_rows),
-            "pairs_mirror_skipped": int(outcome.get("mirror_skipped") or 0),
+        "pairs_mirror_skipped": int(outcome.get("mirror_skipped") or 0),
+        "pairs_scaffold_skipped": int(
+            outcome.get("scaffold_skipped") or 0),
+        "pairs_scaffold_reused": sum(
+            1 for r in list(continuation_reused)
+            if isinstance(r, dict)
+            and r.get("reason") == "scaffold_setup"),
             "skipped": list(outcome["skipped"]),
         },
         "editorial": {"published": len(published),
@@ -549,6 +585,15 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     mirror_n = int(outcome.get("mirror_skipped") or 0)
     mirror_note = (f"; {mirror_n} mirror(s) skipped pre-examination"
                    if mirror_n else "")
+    scaffold_n = int(outcome.get("scaffold_skipped") or 0)
+    scaffold_note = (f"; {scaffold_n} scaffolding pair(s) skipped "
+                     "pre-examination" if scaffold_n else "")
+    reused_scaffold_n = sum(
+        1 for r in list(continuation_reused)
+        if isinstance(r, dict) and r.get("reason") == "scaffold_setup")
+    if reused_scaffold_n:
+        scaffold_note += (f" (+{reused_scaffold_n} reused prior "
+                          "scaffolding verdicts)")
     # Any retrieval failure means the delta was only partially examined:
     # degraded, never a clean-looking zero.
     if retrieval_failures:
@@ -559,7 +604,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                              f"{len(published)} approved; "
                              f"{retrieval_failures} target(s) failed "
                              "retrieval and were not examined"
-                             f"{skip_summary}{mirror_note}")
+                             f"{skip_summary}{mirror_note}{scaffold_note}")
     else:
         outcome["status"] = "ok"
         outcome["coverage"] = ("partial"
@@ -567,7 +612,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         outcome["reason"] = (f"examined {examined_targets} targets, "
                              f"{examined_pairs} pairs{reused_note}; "
                              f"{len(published)} approved"
-                             f"{skip_summary}{guard_note}{mirror_note}")
+                             f"{skip_summary}{guard_note}{mirror_note}{scaffold_note}")
     # Dedup against the ordinary review's advisory anchors.
     published, dups = _dedup(run_dir, published)
     suppressed.extend(dups)
@@ -859,13 +904,24 @@ def _partition_new(pairs: list[dict], known: dict) -> tuple[list, list]:
     Rows that were recorded as model verdicts but carry a spending-guard
     refusal in their detail were never judged: they are re-judged, never
     reused. (Older records predate refusal classification.)
+    Scaffold skips recorded under an older rule version are likewise
+    re-judged: the deterministic rule may have changed.
     """
+    try:
+        from codatiel_i2.semdup_dev import editorial_shadow as _ES
+        rule_version = str(_ES.SCAFFOLD_RULE)
+    except Exception:
+        rule_version = ""
     new_pairs, reused = [], []
     for p in pairs:
         key = _pair_key(p.get("target") or {}, p.get("counterpart") or {})
         row = known.get(key)
         if (isinstance(row, dict)
                 and not _mislabeled_refusal(row)):
+            if (row.get("reason") == "scaffold_setup"
+                    and row.get("_scaffold_rule") != rule_version):
+                new_pairs.append(p)
+                continue
             row = dict(row)
             row["reused"] = True
             reused.append(row)
