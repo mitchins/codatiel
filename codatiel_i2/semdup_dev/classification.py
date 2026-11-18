@@ -83,12 +83,13 @@ def normalize_classification(raw: Any) -> dict[str, Any]:
             raw.get("shared_responsibility"))
         out["divergence_consequence"] = _clean_text(
             raw.get("divergence_consequence"))
-        if isinstance(raw.get("uncertainty"), bool):
+        # An unknown label with uncertainty:false is contradictory: the
+        # consequence cannot be established, so uncertainty is forced.
+        if (out["divergence_impact"] == "unknown"
+                or out["primary_category"] == "unknown"):
+            out["uncertainty"] = True
+        elif isinstance(raw.get("uncertainty"), bool):
             out["uncertainty"] = raw["uncertainty"]
-        else:
-            out["uncertainty"] = (
-                out["divergence_impact"] == "unknown"
-                or out["primary_category"] == "unknown")
     except Exception:
         return {
             "schema_version": SCHEMA_VERSION,
@@ -105,13 +106,16 @@ def normalize_classification(raw: Any) -> dict[str, Any]:
 CLASSIFICATION_PROMPT_BLOCK = """
 Also describe what kind of duplication this is, WITHOUT changing your
 KEEP/REVISE/DROP judgment (classification never alters the decision).
-Add a "classification" object to your JSON response:
-{"primary_category": "security_safety|state_integrity|lifecycle_recovery|verification|performance_resilience|maintainability|unknown",
- "secondary_category": "one of the same values or null when not needed",
- "divergence_impact": "critical|high|medium|low|unknown",
- "shared_responsibility": "the shared invariant or responsibility, in a few words",
- "divergence_consequence": "what could go wrong if the implementations diverged, or \\"\\" when unknown",
- "uncertainty": true|false}
+Emit exactly ONE JSON object total: add an optional "classification"
+object alongside decision/revised_comment/reason with these fields:
+primary_category (one of security_safety, state_integrity,
+lifecycle_recovery, verification, performance_resilience,
+maintainability, unknown), secondary_category (one of the same values
+or null when not needed), divergence_impact (one of critical, high,
+medium, low, unknown), shared_responsibility (the shared invariant in
+a few words), divergence_consequence (what could go wrong if the
+implementations diverged, or "" when unknown), uncertainty
+(true/false).
 Rules: "critical"/"high" require concrete supporting evidence from the
 delivered source — never promote speculative future consequences into
 claims. Divergence impact is potential impact if the implementations

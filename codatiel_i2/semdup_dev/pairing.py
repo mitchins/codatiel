@@ -42,23 +42,30 @@ def pair_id_for(pair: dict, *, repo: str, pr: Any, base_rev: str,
             target, counterpart, classification, str(int(rank)),
         ])
     except Exception:
-        body = f"{PAIR_ID_VERSION}\nfallback\n{rank}"
-    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+        # Deterministic fallback: still binds repo/revs/units, never
+        # source text or secrets.
+        body = (f"{PAIR_ID_VERSION}\nfallback\n{rank}\n"
+                f"{repo}\n{pr}\n{base_rev}\n{head_rev}\n{pair!r}")
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:24]
     return f"spair-{digest}"
 
 
 def stamp_pairs(pairs: list, *, repo: str, pr: Any, base_rev: str,
                 head_rev: str) -> list:
-    """Attach pair_rank + pair_id in place. Order-preserving (no reorder)."""
+    """Attach pair_rank + pair_id in place. Order-preserving (no reorder).
+
+    Always recomputed deterministically, so re-stamping the same ordered
+    list is idempotent. Stamp the actually-examined list: rank hashed
+    into the id must equal the emitted rank.
+    """
     for rank, pair in enumerate(pairs or []):
         if not isinstance(pair, dict):
             continue
         try:
             pair["pair_rank"] = rank
-            if not pair.get("pair_id"):
-                pair["pair_id"] = pair_id_for(
-                    pair, repo=repo, pr=pr, base_rev=base_rev,
-                    head_rev=head_rev, rank=rank)
+            pair["pair_id"] = pair_id_for(
+                pair, repo=repo, pr=pr, base_rev=base_rev,
+                head_rev=head_rev, rank=rank)
         except Exception:
             continue
     return pairs

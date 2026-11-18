@@ -63,6 +63,17 @@ def test_normalize_bad_secondary_dropped_not_fabricated():
     assert got["primary_category"] == "maintainability"
 
 
+def test_normalize_unknown_forces_uncertainty():
+    got = CL.normalize_classification({"primary_category": "unknown",
+                                       "divergence_impact": "unknown",
+                                       "uncertainty": False})
+    assert got["uncertainty"] is True
+    ok = CL.normalize_classification({"primary_category": "state_integrity",
+                                      "divergence_impact": "high",
+                                      "uncertainty": False})
+    assert ok["uncertainty"] is False
+
+
 def test_validate_editor_output_ignores_classification():
     from codatiel_i2.semdup_dev import editor as ED
     base = {"decision": "KEEP", "revised_comment": "c", "reason": "r"}
@@ -128,13 +139,15 @@ def _pair():
 
 
 def test_pair_id_deterministic_and_digest_only():
+    import re
     kw = dict(repo="r", pr=1, base_rev="b" * 40, head_rev="h" * 40,
               rank=0)
     a = PA.pair_id_for(_pair(), **kw)
     b = PA.pair_id_for(_pair(), **kw)
     assert a == b
-    assert a.startswith("spair-")
-    assert "a.py" not in a and " ourselves" not in a
+    assert re.fullmatch(r"spair-[0-9a-f]{24}", a)
+    # Digest only: no unit identities, separators or source leak in.
+    assert "a.py" not in a and "::" not in a and "/" not in a
 
 
 def test_pair_id_changes_on_direction_rank_rev_symbol():
@@ -200,8 +213,14 @@ def test_price_entries_unknown_never_zero():
     led.record_response("zzz", None)
     got = led.price_entries(["zzz"])
     assert got["unknown"] == 1
-    assert got["confirmed_usd"] == 0.0  # no confirmed spend, not $0 claim
+    # Unknown is never priced at $0: confirmed is None, not 0.0.
+    assert got["confirmed_usd"] is None
     assert led.entries["zzz"]["usage_known"] is False
+    empty = led.price_entries([])
+    assert empty == {"confirmed_usd": 0.0, "known": 0, "unknown": 0,
+                     "unavailable": 0}
+    absent = led.price_entries(["no-such-response"])
+    assert absent["confirmed_usd"] is None and absent["unknown"] == 1
 
 
 # --------------------------------------------------------------------------
@@ -225,6 +244,11 @@ def test_budget_status_mapping():
         {"reason": "budget_stop", "assess_ran": True,
          "terra_completed": True, "luna_response_ids": []}) == \
         "terra_held_luna_refused"
+    # Partial Luna spend outranks the clean-hold label.
+    assert ES.budget_status(
+        {"reason": "budget_stop", "assess_ran": True,
+         "terra_completed": True, "luna_response_ids": ["r1"]}) == \
+        "interrupted_after_partial_spend"
     assert ES.budget_status({"reason": "terra_no_lead"}) == ""
 
 
@@ -305,13 +329,128 @@ def test_budget_refusal_states_end_to_end(tmp_path, monkeypatch):
 def test_preflight_refusal_before_first_request(tmp_path, monkeypatch):
     import sys
     sys.path.insert(0, "tests")
-    from semdup_testkit import run_judged, pair, publish_assess, publish_edit
+    from semdup_testkit import (backends, indexed_two_file_repo, pair,
+                                publish_assess, publish_edit)
+    from codatiel_i2.semdup_dev import editorial_shadow as ES
+    backends(monkeypatch)
     base, head = _lib_files()
+    repo, base_rev, head_rev, db = indexed_two_file_repo(
+        tmp_path, base, head)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    out = ES.review_candidate_pairs(
+        [pair("new.py", "add_one_new", "lib.py", "add_one")],
+        repo="o/r", repo_path=repo, merged_db=db,
+        base_rev=base_rev, head_rev=head_rev, head_tree=tmp_path,
+        base_tree=tmp_path, run_dir=run_dir, ceiling_usd=0.000001,
+        assess_fn=publish_assess, edit_fn=publish_edit, pr=7)
+    assert out["ok"] is True
+    assert out["suppressed"][0]["reason"] == "budget_stop"
+    assert out["suppressed"][0]["budget_status"] == \
+        "refused_before_first_request"
+    assert out["budget_refusals"]["by_status"][
+        "refused_before_first_request"] == {"count": 1,
+                                           "confirmed_usd": 0.0,
+                                           "unknown": False}
+
+
+def _usage(requests, in_tok, out_tok, cached=0, reasoning=0):
+    from types import SimpleNamespace
+    return SimpleNamespace(requests=requests, input_tokens=in_tok,
+                           output_tokens=out_tok)
+
+
+def test_multi_turn_ledger_attribution_end_to_end(tmp_path, monkeypatch):
+    import json as _json
+    import sys
+    sys.path.insert(0, "tests")
+    from semdup_testkit import run_judged, pair
+    base, head = _lib_files()
+
+    def multi_assess(**kwargs):
+        ledger = kwargs.get("ledger")
+        ledger.record_response("terra-r1", _usage(1, 1000, 10),
+                               cached_input_tokens=200,
+                               reasoning_output_tokens=5)
+        ledger.record_response("terra-r2", _usage(1, 3000, 20))
+        return {"ok": True,
+                "terra": {"overlap": True, "relationship": "equivalent",
+                          "opportunity": "direct_reuse",
+                          "shared_component": "add-one", "differences": []},
+                "transcript": {"tool_calls": [
+                    {"tool": "read_file", "args": {},
+                     "summary": "x" * 100}], "wall_s": 1.2}}
+
+    def single_edit(**kwargs):
+        ledger = kwargs.get("ledger")
+        ledger.record_response("luna-r1", _usage(1, 500, 30))
+        return {"ok": True,
+                "editor": {"decision": "KEEP",
+                           "revised_comment": "use helper()",
+                           "reason": "concrete reuse",
+                           "classification": {
+                               "primary_category": "maintainability",
+                               "divergence_impact": "low"}},
+                "transcript": {"tool_calls": [], "wall_s": 0.4},
+                "error": ""}
+
     out = run_judged(tmp_path, monkeypatch, base, head,
                      [pair("new.py", "add_one_new", "lib.py", "add_one")],
-                     publish_assess, publish_edit, pr=7)
-    # Sanity: with a normal ceiling the pair is judged, not refused.
-    assert out["ok"] is True
+                     multi_assess, single_edit, pr=7)
+    assert len(out["published"]) == 1
+    pub = out["published"][0]
+    assert pub["classification"]["primary_category"] == "maintainability"
+    assert pub["inference"]["terra_wall_s"] == 1.2
+    assert pub["inference"]["terra_tool_calls"] == 1
+    rec = _json.loads((tmp_path / "run" / "semdup_pairs.jsonl")
+                      .read_text().splitlines()[0])
+    assert rec["terra"]["responses"] == 2
+    assert rec["terra"]["usage"]["input_tokens"] == 4000
+    assert rec["terra"]["usage"]["cached_input_tokens"] == 200
+    assert rec["terra"]["usage"]["reasoning_output_tokens"] == 5
+    assert rec["luna"]["responses"] == 1
+    assert rec["terra"]["tool_calls"] == [{"name": "read_file",
+                                          "summary_chars": 100}]
+    # Priced math: (1000-200)/1e6*1 + 200/1e6*1 + 10/1e6*1
+    #            + 3000/1e6*1 + 20/1e6*1 + 500/1e6*1 + 30/1e6*1
+    assert rec["pair_priced_usd"] == round(
+        0.0008 + 0.0002 + 0.00001 + 0.003 + 0.00002 + 0.0005
+        + 0.00003, 6)
+    assert out["suppressed"] == []
+    # Spend sinks carry provider rows; settlement schema untouched.
+    terra_rows = (tmp_path / "run" / "spend_semdup_terra.jsonl") \
+        .read_text().splitlines()
+    assert len(terra_rows) == 2
+    assert all("pair_id" not in line for line in terra_rows)
+
+
+def test_interrupted_pair_retains_partial_attribution(tmp_path,
+                                                      monkeypatch):
+    import json as _json
+    import sys
+    sys.path.insert(0, "tests")
+    from semdup_testkit import run_judged, pair
+    import pytest
+    base, head = _lib_files()
+
+    def boom_assess(**kwargs):
+        ledger = kwargs.get("ledger")
+        ledger.record_response("terra-r1", _usage(1, 1000, 10))
+        raise RuntimeError("synthetic interruption")
+
+    def never_edit(**kwargs):  # pragma: no cover
+        raise AssertionError("must not run")
+
+    with pytest.raises(RuntimeError):
+        run_judged(tmp_path, monkeypatch, base, head,
+                   [pair("new.py", "add_one_new", "lib.py", "add_one")],
+                   boom_assess, never_edit, pr=7)
+    rec = _json.loads((tmp_path / "run" / "semdup_pairs.jsonl")
+                      .read_text().splitlines()[0])
+    assert rec["outcome"]["path"] == "interrupted"
+    assert rec["terra"]["responses"] == 1
+    assert rec["terra"]["usage"]["input_tokens"] == 1000
+    assert rec["pair_priced_usd"] == round(1000 / 1e6 + 10 / 1e6, 6)
 
 
 def test_no_additional_model_calls(tmp_path, monkeypatch):

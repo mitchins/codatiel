@@ -556,32 +556,48 @@ class SpendLedger:
         Same pricing semantics as confirmed_usd, restricted to the given
         response ids. Never mutates entries, order, sinks, reservations
         or ceilings — settlement is untouched; this is a query for
-        per-examination attribution only. Unknown usage stays unknown:
-        ``confirmed_usd`` covers known entries only and ``unknown``
-        counts the rest (never priced at $0).
+        per-examination attribution only.
+
+        Unknown stays unknown, never $0: ``confirmed_usd`` is None when
+        any wanted response lacks priced usage (unrecorded usage,
+        unrecorded id, or a tiered PRICING_UNAVAILABLE entry), and 0.0
+        only when the wanted subset is empty. ``unavailable`` counts
+        tiered entries whose usage is known but unpriced, so callers
+        can tell unpriced apart from unrecorded.
         """
-        wanted = set(str(r) for r in (response_ids or []))
-        known = [self.entries[k] for k in self.order
-                 if k in wanted and isinstance(
-                     self.entries.get(k), dict)
-                 and self.entries[k].get("usage_known")]
-        unknown = sum(1 for k in self.order
-                      if k in wanted and not (
-                          isinstance(self.entries.get(k), dict)
-                          and self.entries[k].get("usage_known")))
+        wanted = [str(r) for r in (response_ids or [])]
+        seen: set[str] = set()
+        known: list[dict[str, Any]] = []
+        unknown = 0
+        for rid in wanted:
+            if rid in seen:
+                continue
+            seen.add(rid)
+            entry = self.entries.get(rid)
+            if (isinstance(entry, dict) and entry.get("usage_known")):
+                known.append(entry)
+            else:
+                unknown += 1
         rate_in, rate_out = self._rate_pair()
         if rate_in is None or rate_out is None:
             return {"confirmed_usd": None, "known": len(known),
-                    "unknown": unknown}
+                    "unknown": unknown, "unavailable": 0}
         card = self._tier_card()
         total = 0.0
+        unavailable = 0
         if card is not None:
             for entry in known:
                 priced = self._price_entry_tiered(entry, card)
                 if priced["pricing_status"] in (PRICED, PRICING_PARTIAL):
                     total += priced["cost_usd"] or 0.0
+                else:
+                    unavailable += 1
+                    unknown += 1
+            if unknown:
+                return {"confirmed_usd": None, "known": len(known),
+                        "unknown": unknown, "unavailable": unavailable}
             return {"confirmed_usd": total, "known": len(known),
-                    "unknown": unknown}
+                    "unknown": 0, "unavailable": 0}
         rate_hit = self._rate_hit()
         rate_write = self._rate_write(rate_in)
         for entry in known:
@@ -601,8 +617,11 @@ class SpendLedger:
             if written:
                 total += written / 1e6 * rate_write
             total += entry["output_tokens"] / 1e6 * rate_out
+        if unknown:
+            return {"confirmed_usd": None, "known": len(known),
+                    "unknown": unknown, "unavailable": 0}
         return {"confirmed_usd": total, "known": len(known),
-                "unknown": unknown}
+                "unknown": 0, "unavailable": 0}
 
     def bounded_reserve_usd(self) -> float | None:
         """Conservative bounded reservation for PRICING_UNAVAILABLE entries.

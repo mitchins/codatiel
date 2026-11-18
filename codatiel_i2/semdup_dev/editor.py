@@ -75,7 +75,7 @@ _LOCATION_RE = re.compile(
 
 
 def editor_instructions_id() -> str:
-    return (f"semdup-comment-editor-0.1@"
+    return (f"{EDITOR_INSTRUCTIONS_VERSION}@"
             f"{hashlib.sha256(EDITOR_INSTRUCTIONS.encode()).hexdigest()[:12]}")
 
 

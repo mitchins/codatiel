@@ -4,6 +4,11 @@ Reads run dirs (semdup.json + semdup_pairs.jsonl + rate_snapshot.json)
 and emits the C1-C4 distributions. Historical semdup.json rows predate
 per-pair telemetry: run-level aggregates are reported exactly, and
 per-pair splits are marked unavailable rather than estimated.
+rate_snapshot.json files contribute the pricing-identity mix
+(post-SIGNAL-01 runs only).
+
+Run layouts: both <state>/runs/<base>/<head>/ (devstate) and
+<state>/semdup/runs/<slug>/<pr>/<head12>/ (worker) are scanned.
 
 Usage:
   python eval/semdup_signal01_report.py [devstate_dir]
@@ -14,7 +19,6 @@ from __future__ import annotations
 import glob
 import json
 import os
-import statistics
 import sys
 
 
@@ -35,24 +39,48 @@ def _pct(values, pct):
 
 
 def main(devstate):
+    semdup_paths = sorted(glob.glob(os.path.join(
+        devstate, "runs", "*", "*", "semdup.json")))
+    semdup_paths += sorted(glob.glob(os.path.join(
+        devstate, "semdup", "runs", "*", "*", "*", "semdup.json")))
+    pair_paths = sorted(glob.glob(os.path.join(
+        devstate, "runs", "*", "*", "semdup_pairs.jsonl")))
+    pair_paths += sorted(glob.glob(os.path.join(
+        devstate, "semdup", "runs", "*", "*", "*", "semdup_pairs.jsonl")))
+    snap_paths = sorted(glob.glob(os.path.join(
+        devstate, "runs", "*", "*", "rate_snapshot.json")))
+    snap_paths += sorted(glob.glob(os.path.join(
+        devstate, "semdup", "runs", "*", "*", "*", "rate_snapshot.json")))
     runs = []
-    for path in sorted(glob.glob(os.path.join(
-            devstate, "runs", "*", "*", "semdup.json"))):
+    for path in semdup_paths:
         doc = _load(path)
         if isinstance(doc, dict) and doc.get("status") == "ok":
             runs.append((path, doc))
-    pair_rows = []
-    for path in sorted(glob.glob(os.path.join(
-            devstate, "runs", "*", "*", "semdup_pairs.jsonl"))):
+    # Dedup by pair_id, keep last: re-drives into the same run dir
+    # append follow-up rows for re-examined pairs.
+    pair_by_id: dict[str, dict] = {}
+    for path in pair_paths:
         try:
             with open(path, encoding="utf-8") as handle:
                 for line in handle:
                     if line.strip():
                         row = json.loads(line)
-                        if isinstance(row, dict):
-                            pair_rows.append(row)
+                        if isinstance(row, dict) and row.get("pair_id"):
+                            pair_by_id[str(row["pair_id"])] = row
         except Exception:
             continue
+    pair_rows = sorted(pair_by_id.values(),
+                       key=lambda r: str(r.get("pair_id")))
+    rate_mix: dict[str, int] = {}
+    for path in snap_paths:
+        snap = _load(path)
+        if not isinstance(snap, dict):
+            continue
+        for side in ("terra", "luna"):
+            info = snap.get(side) or {}
+            key = (f"{side}:{info.get('model')}:"
+                   f"{info.get('rate_status')}")
+            rate_mix[key] = rate_mix.get(key, 0) + 1
 
     examined = sum(int(d.get("pairs_examined") or 0) for _, d in runs)
     spend = sum(float(d.get("spend_usd") or 0.0) for _, d in runs
@@ -78,6 +106,15 @@ def main(devstate):
         print(f"cost_per_examined={spend / examined:.6f}")
     if published:
         print(f"cost_per_published={spend / published:.6f}")
+    per_run_cost = [float(d.get("spend_usd") or 0.0)
+                    / max(1, int(d.get("pairs_examined") or 0))
+                    for _, d in runs
+                    if isinstance(d.get("spend_usd"), (int, float))]
+    if per_run_cost:
+        print(f"per_run_cost_per_examined_p50={_pct(per_run_cost, 50):.6f} "
+              f"p95={_pct(per_run_cost, 95):.6f}")
+    if rate_mix:
+        print(f"rate_snapshot_mix={json.dumps(rate_mix, sort_keys=True)}")
     print(f"suppressed_by_reason={json.dumps(reasons, sort_keys=True)}")
     print(f"budget_refusals={json.dumps(refusals, sort_keys=True)} "
           f"(empty = pre-SIGNAL-01 runs without refusal states)")
