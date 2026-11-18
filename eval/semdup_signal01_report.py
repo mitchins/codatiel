@@ -39,18 +39,22 @@ def _pct(values, pct):
 
 
 def main(devstate):
-    semdup_paths = sorted(glob.glob(os.path.join(
-        devstate, "runs", "*", "*", "semdup.json")))
-    semdup_paths += sorted(glob.glob(os.path.join(
-        devstate, "semdup", "runs", "*", "*", "*", "semdup.json")))
-    pair_paths = sorted(glob.glob(os.path.join(
-        devstate, "runs", "*", "*", "semdup_pairs.jsonl")))
-    pair_paths += sorted(glob.glob(os.path.join(
-        devstate, "semdup", "runs", "*", "*", "*", "semdup_pairs.jsonl")))
-    snap_paths = sorted(glob.glob(os.path.join(
-        devstate, "runs", "*", "*", "rate_snapshot.json")))
-    snap_paths += sorted(glob.glob(os.path.join(
-        devstate, "semdup", "runs", "*", "*", "*", "rate_snapshot.json")))
+    # Research-only eval script, never shipped; the operator passes an
+    # explicit local state dir (read-only globs, no writes).
+    layouts = (("runs", "*", "*", "semdup.json"),
+               ("semdup", "runs", "*", "*", "*", "semdup.json"),
+               ("runs", "*", "*", "semdup_pairs.jsonl"),
+               ("semdup", "runs", "*", "*", "*", "semdup_pairs.jsonl"),
+               ("runs", "*", "*", "rate_snapshot.json"),
+               ("semdup", "runs", "*", "*", "*", "rate_snapshot.json"))
+    found: dict[str, list[str]] = {"semdup": [], "pairs": [], "snap": []}
+    for parts in layouts:
+        kind = ("semdup" if parts[-1] == "semdup.json"
+                else "pairs" if parts[-1].endswith(".jsonl") else "snap")
+        found[kind] += sorted(glob.glob(  # NOSONAR - operator-supplied local state dir; read-only eval script, never shipped
+            os.path.join(devstate, *parts)))
+    semdup_paths, pair_paths, snap_paths = (
+        found["semdup"], found["pairs"], found["snap"])
     runs = []
     for path in semdup_paths:
         doc = _load(path)

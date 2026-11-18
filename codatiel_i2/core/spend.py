@@ -550,6 +550,29 @@ class SpendLedger:
             total += entry["output_tokens"] / 1e6 * rate_out
         return total
 
+    @staticmethod
+    def _price_flat_entry(entry: dict[str, Any], rate_in: float,
+                          rate_hit: float | None, rate_write: float,
+                          rate_out: float) -> float:
+        """Price one known-usage entry under flat (non-tiered) rates."""
+        cached = entry.get("cached_input_tokens") or 0
+        written = entry.get("cache_write_input_tokens") or 0
+        if entry.get("cache_in_input", True):
+            uncached = max(0, entry["input_tokens"] - cached - written)
+        else:
+            uncached = entry["input_tokens"]
+        total = 0.0
+        if (rate_hit is not None
+                and entry.get("cached_input_tokens") is not None):
+            total += (uncached / 1e6 * rate_in
+                      + cached / 1e6 * rate_hit)
+        else:
+            total += entry["input_tokens"] / 1e6 * rate_in
+        if written:
+            total += written / 1e6 * rate_write
+        total += entry["output_tokens"] / 1e6 * rate_out
+        return total
+
     def price_entries(self, response_ids: list) -> dict[str, Any]:
         """Price a subset of recorded responses (read-only attribution).
 
@@ -601,22 +624,8 @@ class SpendLedger:
         rate_hit = self._rate_hit()
         rate_write = self._rate_write(rate_in)
         for entry in known:
-            cached = entry.get("cached_input_tokens") or 0
-            written = entry.get("cache_write_input_tokens") or 0
-            if entry.get("cache_in_input", True):
-                uncached = max(0, entry["input_tokens"] - cached
-                               - written)
-            else:
-                uncached = entry["input_tokens"]
-            if (rate_hit is not None
-                    and entry.get("cached_input_tokens") is not None):
-                total += (uncached / 1e6 * rate_in
-                          + cached / 1e6 * rate_hit)
-            else:
-                total += entry["input_tokens"] / 1e6 * rate_in
-            if written:
-                total += written / 1e6 * rate_write
-            total += entry["output_tokens"] / 1e6 * rate_out
+            total += self._price_flat_entry(
+                entry, rate_in, rate_hit, rate_write, rate_out)
         if unknown:
             return {"confirmed_usd": None, "known": len(known),
                     "unknown": unknown, "unavailable": 0}
