@@ -18,7 +18,7 @@ Safety properties (all tested in tests/test_semdup_decisions_screen.py):
   itself does not fit, everything advances (baseline spend profile).
 
 Modes (SEMDUP_DECISIONS_SCREEN): off (default), eco, eco-protected,
-priority. Thresholds frozen per DECISIONS-03 FROZEN03.
+priority, order (ordering-only: no calls, no skips). Thresholds frozen per DECISIONS-03 FROZEN03.
 """
 
 from __future__ import annotations
@@ -46,8 +46,12 @@ Q_UNSAFE = (
     "candidate without further investigation unsafe?"
 )
 
-# Frozen operating points (FROZEN03).
-MODES = ("off", "eco", "eco-protected", "priority")
+# Frozen operating points (FROZEN03) plus DECISIONS-04 ordering-only mode.
+# "order" performs NO Decisions calls and NEVER skips: it applies the
+# production-first demotion to the incoming credibility order and tags rows
+# for audit/presentation. Zero suppression risk, zero marginal cost, works
+# with no API key. This is the only mode enablable without the E-sample.
+MODES = ("off", "eco", "eco-protected", "priority", "order")
 ECO_P1 = 0.3
 PROTECTED_P1 = 0.3
 PROTECTED_P2 = 0.6
@@ -229,6 +233,24 @@ def screen_pairs(pairs: list, *, mode: str, head_rev: str,
         return {"advanced": list(pairs), "screened": [],
                 "screen_spend_usd": 0.0, "screen_calls": 0,
                 "screen_failures": 0}
+    if mode == "order":
+        # Genuine ordering-only (DECISIONS-04 correction): no evidence
+        # fetch, no provider calls, no skips. Stable production-first
+        # demotion over the incoming credibility order; every pair
+        # advances. Tagged for audit and presentation ordering.
+        advanced = []
+        for pair in pairs:
+            pair = dict(pair)
+            pair["screen_p_overlap"] = None
+            pair["screen_p_unsafe"] = None
+            pair["screen_test_involved"] = pair_test_involved(pair)
+            pair["screen_mode"] = "order"
+            advanced.append(pair)
+        advanced.sort(key=lambda p: (1 if p.get("screen_test_involved")
+                                     else 0))
+        return {"advanced": advanced, "screened": [],
+                "screen_spend_usd": 0.0, "screen_calls": 0,
+                "screen_failures": 0, "mode": "order"}
     if api_key is None:
         api_key = os.environ.get("SEMDUP_API_KEY") or os.environ.get(
             "OPENAI_API_KEY") or ""

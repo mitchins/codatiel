@@ -306,3 +306,34 @@ def test_order_published_production_and_keep_first():
     assert [(r["target"]["path"], r["decision"]) for r in ordered] == [
         ("src/c.py", "KEEP"), ("src/a.py", "REVISE"),
         ("tests/test_a.py", "KEEP")]
+
+
+def test_order_mode_never_calls_never_skips(monkeypatch):
+    monkeypatch.delenv("SEMDUP_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    pairs = [_tpair("t1", path="tests/test_a.py", symbol="test_x"),
+             _tpair("p1", path="src/a.py", symbol="f"),
+             _tpair("p2", path="src/b.py", symbol="g")]
+
+    def post(key, text):
+        raise AssertionError("order mode must not call the provider")
+
+    out = DS.screen_pairs(list(pairs), mode="order", head_rev="abc",
+                          evidence_fn=lambda p: (_ for _ in ()).throw(
+                              AssertionError("no evidence fetch needed")),
+                          post_fn=post)
+    assert [p["pair_id"] for p in out["advanced"]] == ["p1", "p2", "t1"]
+    assert out["screened"] == []
+    assert out["screen_calls"] == 0
+    assert out["screen_spend_usd"] == 0.0
+    assert all(p["screen_mode"] == "order" for p in out["advanced"])
+    assert out["advanced"][0]["screen_test_involved"] is False
+    assert out["advanced"][-1]["screen_test_involved"] is True
+
+
+def test_order_mode_empty_and_stable():
+    assert DS.screen_pairs([], mode="order", head_rev="x")["advanced"] == []
+    a = _tpair("a", path="src/a.py", symbol="f")
+    b = _tpair("b", path="src/b.py", symbol="g")
+    out = DS.screen_pairs([a, b], mode="order", head_rev="x")
+    assert [p["pair_id"] for p in out["advanced"]] == ["a", "b"]
