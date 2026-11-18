@@ -716,6 +716,8 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     # Dedup against the ordinary review's advisory anchors.
     published, dups = _dedup(run_dir, published)
     suppressed.extend(dups)
+    if screen_out.get("mode", "off") != "off":
+        published = _order_published(published)
     outcome["published"] = published
     outcome["suppressed"] = suppressed
     # SIGNAL-01 B4: budget-refusal states over fresh judgments (reused
@@ -724,6 +726,39 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     _persist(run_dir, outcome)
     return outcome
+
+
+def _order_published(published: list) -> list:
+    """DECISIONS-04 §6: presentation order follows demonstrated importance
+    signals only — never an assigned severity. Production pairs (neither
+    side test-marked) first, Luna KEEP before REVISE, otherwise the
+    examination order is preserved (stable sort). Not a severity label:
+    a verified bypass and a stylistic note keep their own verdicts; the
+    bypass merely surfaces first. Applied only when Decisions routing is
+    enabled; flag off preserves the exact baseline order."""
+    try:
+        from codatiel_i2.semdup_dev import decisions_screen as _DS
+        test_of = _DS.pair_test_involved
+    except Exception:
+        return list(published)
+
+    def _decision_rank(row: dict) -> int:
+        d = str((row or {}).get("decision") or "").upper()
+        if d == "KEEP":
+            return 0
+        if d == "REVISE":
+            return 1
+        return 2
+
+    def _key(row: dict) -> tuple:
+        pair = {"target": (row or {}).get("target"),
+                "counterpart": (row or {}).get("counterpart")}
+        try:
+            test = test_of(pair)
+        except Exception:
+            test = False
+        return (1 if test else 0, _decision_rank(row))
+    return sorted(published, key=_key)
 
 
 def _ensure_base(IX, repo_path, repo, rev, state_dir,

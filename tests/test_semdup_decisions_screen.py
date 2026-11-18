@@ -214,3 +214,95 @@ def test_price_usage_cached_and_write():
                           ) == pytest.approx(800 * DS.RATE_IN + 200 *
                                              DS.RATE_CACHED + 100 *
                                              DS.RATE_WRITE)
+
+
+def _tpair(pid, path="src/pay.py", symbol="charge", rank=0):
+    return {"pair_id": pid, "pair_rank": rank,
+            "target": {"path": path, "symbol": symbol,
+                       "start_line": 1, "end_line": 10},
+            "counterpart": {"path": "src/other.py", "symbol": "helper",
+                            "start_line": 1, "end_line": 10},
+            "head_rev": "abc123"}
+
+
+def test_pair_test_involved():
+    assert DS.pair_test_involved(
+        _tpair("x", path="tests/test_pay.py")) is True
+    assert DS.pair_test_involved(
+        _tpair("x", symbol="test_charge")) is True
+    assert DS.pair_test_involved(
+        _tpair("x", path="src/pay.py", symbol="charge")) is False
+    assert DS.pair_test_involved({}) is False
+
+
+def test_priority_demotes_test_pairs():
+    # Same scores: production pair must precede the test-involved one in
+    # both the risk band and the main band; nothing is suppressed.
+    prod = _tpair("prod", path="src/pay.py", symbol="charge")
+    tst = _tpair("tst", path="tests/test_pay.py", symbol="test_charge")
+
+    def post(key, text):
+        return _ok(0.9, 0.9)
+
+    out = DS.screen_pairs([tst, prod], mode="priority", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post)
+    assert [p["pair_id"] for p in out["advanced"]][:2] == ["prod", "tst"]
+    assert out["screened"] == []
+    assert out["advanced"][0]["screen_test_involved"] is False
+    assert out["advanced"][1]["screen_test_involved"] is True
+
+
+def test_priority_exploration_uniform_bottom_quartile():
+    # 10 production + 10 test pairs, equal scores: main order is
+    # production-first; the 2 exploration slots (10%) come from the
+    # bottom quartile; the seed is deterministic across runs.
+    pairs = ([_tpair(f"p{i}", path="src/m.py", symbol=f"f{i}")
+              for i in range(10)]
+             + [_tpair(f"t{i}", path="tests/test_m.py",
+                       symbol=f"test_f{i}") for i in range(10)])
+
+    def post(key, text):
+        return _ok(0.5, 0.5)
+
+    def run():
+        return DS.screen_pairs(list(pairs), mode="priority", head_rev="abc",
+                               evidence_fn=_ev, post_fn=post)["advanced"]
+    a, b = run(), run()
+    assert [p["pair_id"] for p in a] == [p["pair_id"] for p in b]
+    assert len(a) == 20
+    assert all(not p.get("screen_test_involved") for p in a[:10])
+    assert all(p.get("screen_test_involved") for p in a[10:])
+
+
+def test_priority_risk_band_never_delayed():
+    risky = _tpair("risky", path="src/auth.py", symbol="check")
+    lows = [_tpair(f"l{i}", path="src/m.py", symbol=f"f{i}")
+            for i in range(12)]
+    scores = iter([(0.9, 0.9)] + [(0.5, 0.5)] * 12)
+
+    def post(key, text):
+        a, b = next(scores)
+        return _ok(a, b)
+
+    out = DS.screen_pairs([risky] + lows, mode="priority", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post)
+    assert out["advanced"][0]["pair_id"] == "risky"
+
+
+def test_order_published_production_and_keep_first():
+    from codatiel_i2.semdup_dev.stage import _order_published
+    rows = [
+        {"target": {"path": "tests/test_a.py", "symbol": "test_x"},
+         "counterpart": {"path": "tests/test_b.py", "symbol": "test_y"},
+         "decision": "KEEP"},
+        {"target": {"path": "src/a.py", "symbol": "f"},
+         "counterpart": {"path": "src/b.py", "symbol": "g"},
+         "decision": "REVISE"},
+        {"target": {"path": "src/c.py", "symbol": "h"},
+         "counterpart": {"path": "src/d.py", "symbol": "i"},
+         "decision": "KEEP"},
+    ]
+    ordered = _order_published(rows)
+    assert [(r["target"]["path"], r["decision"]) for r in ordered] == [
+        ("src/c.py", "KEEP"), ("src/a.py", "REVISE"),
+        ("tests/test_a.py", "KEEP")]

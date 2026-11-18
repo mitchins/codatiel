@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.request
 import urllib.error
@@ -60,6 +61,33 @@ RATE_CACHED = 0.01 / 1e6
 RATE_WRITE = 0.125 / 1e6
 
 SCREEN_REASON = "decisions_screened"
+
+# DECISIONS-04: local test-code detector (path/symbol only, $0, no text
+# needed). Test-involved pairs are DEMOTED in priority ordering, never
+# suppressed: all 23 independently-audited useful records are non-test,
+# so demotion cannot displace a confirmed-useful pair by construction.
+# Domain flags do NOT advance rows in-band (replay showed flagged-boosts
+# displacing confirmed-useful ordinary rows).
+_TEST_PATH = re.compile(
+    r"(^|/)(test|tests|spec|specs|mock|mocks|fixture|fixtures|stub|stubs"
+    r"|e2e)(/|_|\.|$)|_test\.|_spec\.|conftest|Test\.swift|Tests?/",
+    re.IGNORECASE)
+_TEST_SYM = re.compile(
+    r"^(test_|test|Test|spec_|should_|mock_|fake_|stub_)", re.IGNORECASE)
+
+
+def pair_test_involved(pair: dict) -> bool:
+    """True when either side looks like test/mock/fixture code."""
+    try:
+        t = pair.get("target") or {}
+        c = pair.get("counterpart") or {}
+        return bool(
+            _TEST_PATH.search(str(t.get("path") or ""))
+            or _TEST_PATH.search(str(c.get("path") or ""))
+            or _TEST_SYM.search(str(t.get("symbol") or ""))
+            or _TEST_SYM.search(str(c.get("symbol") or "")))
+    except Exception:
+        return False
 
 
 def screen_mode() -> str:
@@ -280,20 +308,28 @@ def screen_pairs(pairs: list, *, mode: str, head_rev: str,
             pair = dict(pair)
             pair["screen_p_overlap"] = parsed["p_overlap"]
             pair["screen_p_unsafe"] = parsed["p_unsafe"]
+            pair["screen_test_involved"] = pair_test_involved(pair)
             advanced.append(pair)
     if mode == "priority":
-        risky = [p for p in advanced
-                 if (p.get("screen_p_unsafe") or 0) >= RISK_BAND_P2]
+        # DECISIONS-04 P4: production-first within each band (non-test
+        # before test-involved; score decides within tiers). Exploration
+        # is uniform from the non-risk bottom quartile (Amendment A3:
+        # stratified sampling systematically delayed flagged rows into
+        # cut-off slots; seed ranges showed draw composition does not
+        # move headline metrics). Risk-band rows never enter the pool.
+        def _pkey(p):
+            return (1 if p.get("screen_test_involved") else 0,
+                    -priority_score(p.get("screen_p_overlap"),
+                                    p.get("screen_p_unsafe")),
+                    str((p.get("target") or {}).get("path") or ""),
+                    str((p.get("target") or {}).get("symbol") or ""))
+        risky = sorted(
+            [p for p in advanced
+             if (p.get("screen_p_unsafe") or 0) >= RISK_BAND_P2],
+            key=_pkey)
         risky_ids = set(map(id, risky))
         rest = sorted(
-            [p for p in advanced if id(p) not in risky_ids],
-            key=lambda p: priority_score(p.get("screen_p_overlap"),
-                                         p.get("screen_p_unsafe")),
-            reverse=True)
-        risky = sorted(
-            risky, key=lambda p: priority_score(p.get("screen_p_overlap"),
-                                                p.get("screen_p_unsafe")),
-            reverse=True)
+            [p for p in advanced if id(p) not in risky_ids], key=_pkey)
         main = risky + rest
         n_exp = max(1, int(len(main) * EXPLORATION_FRAC)) if main else 0
         pool = rest[-(max(1, len(rest) // 4)):] if rest else []
