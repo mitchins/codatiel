@@ -9,6 +9,16 @@ Safety properties (all tested in tests/test_semdup_decisions_screen.py):
 - Default OFF: with the flag unset/invalid the pair list is untouched.
 - Fail-open: API errors, refusals, malformed/incomplete answers and
   timeouts advance every pair (baseline behaviour, never a silent drop).
+  A refused/missing UNSAFE answer never suppresses (unknown safety is
+  treated as unsafe); unknown Q1 never suppresses.
+- No API key configured also fails open locally WITHOUT issuing calls:
+  screening degrades to the ordering-only path (pairs still demote and
+  the presentation order still applies when the mode is enabled).
+- Adversarial note: candidate source text travels inside the Decisions
+  request, so a malicious PR could in principle shape its own scores to
+  dodge Terra. Screening is therefore a cost control, never a verdict —
+  screened rows are "not examined, not rejected", and any suppression
+  mode stays HELD until the E-sample adjudicates yield.
 - Screened rows are NOT verdicts: they carry completed=False and the
   reason is listed in cache.is_completed_row's never-cache set, so they
   can never seed continuation or cross-revision reuse.
@@ -76,8 +86,11 @@ _TEST_PATH = re.compile(
     r"(^|/)(test|tests|spec|specs|mock|mocks|fixture|fixtures|stub|stubs"
     r"|e2e)(/|_|\.|$)|_test\.|_spec\.|conftest|Test\.swift|Tests?/",
     re.IGNORECASE)
+# Word-boundary on "test": production symbols like testing/testament/
+# testify must NOT demote (review finding: bare ^test prefix overmatched).
 _TEST_SYM = re.compile(
-    r"^(test_|test|Test|spec_|should_|mock_|fake_|stub_)", re.IGNORECASE)
+    r"^(test_|test(?![A-Za-z])|spec_|should_|mock_|fake_|stub_)",
+    re.IGNORECASE)
 
 
 def pair_test_involved(pair: dict) -> bool:
@@ -189,50 +202,107 @@ def parse_answer(res: dict) -> dict:
             "error": None}
 
 
-def price_usage(usage: dict) -> float:
+def _normalize_rate(card: dict | None) -> dict:
+    """Map a provider rate card to {rate_in, rate_cached, rate_write}.
+
+    Provider cards (model_profiles.json) use input/input_cache_hit/
+    input_cache_write, possibly under tiers.short (Decisions inputs are
+    always short-context). Falls back to the module Luna card. Tier
+    note: provider semantics include cache reads AND writes inside
+    input_tokens (verified live), so the uncached slice subtracts both.
+    """
+    base = {"rate_in": RATE_IN, "rate_cached": RATE_CACHED,
+            "rate_write": RATE_WRITE}
+    if not isinstance(card, dict):
+        return base
+    tier = ((card.get("tiers") or {}).get("short") or {})
+    src = tier or card
+    try:
+        # Card values are USD per 1M tokens; normalize to USD per token.
+        return {"rate_in": float(src.get("input", base["rate_in"] * 1e6))
+                / 1e6,
+                "rate_cached": float(src.get(
+                    "input_cache_hit", base["rate_cached"] * 1e6)) / 1e6,
+                "rate_write": float(src.get(
+                    "input_cache_write", base["rate_write"] * 1e6)) / 1e6}
+    except (TypeError, ValueError):
+        return base
+
+
+def price_usage(usage: dict, rate: dict | None = None) -> float:
+    """Price one Decisions response in USD.
+
+    ``rate`` is a resolved provider card (model_profiles shape) or an
+    already-normalized {rate_in, rate_cached, rate_write} mapping;
+    without it the module Luna card is used, so the reported total and
+    the spend ledger agree. OpenAI-family semantics (cache_in_input=True):
+    cache-write tokens are already inside input_tokens, so the uncached
+    slice subtracts reads AND writes — matching core/spend.py. Unknown /
+    missing usage prices to None upstream (callers must propagate unknown,
+    never confirm $0).
+    """
+    if isinstance(rate, dict) and "rate_in" in rate:
+        r = rate
+    else:
+        r = _normalize_rate(rate)
     n = (usage or {}).get("input_tokens") or 0
     det = ((usage or {}).get("input_tokens_details") or {})
     cached = det.get("cached_tokens") or 0
     written = det.get("cache_write_tokens") or 0
-    return max(0, n - cached) * RATE_IN + cached * RATE_CACHED + written * RATE_WRITE
+    return (max(0, n - cached - written) * r["rate_in"]
+            + cached * r["rate_cached"] + written * r["rate_write"])
 
 
 def should_skip(p_overlap: float | None, p_unsafe: float | None,
-                failed: bool, mode: str) -> bool:
+                  failed: bool, mode: str) -> bool:
+    # Fail-open (review blocker B1): a missing/refused UNSAFE answer must
+    # NEVER suppress. Unknown safety is treated as unsafe until proven
+    # otherwise — skip only on an explicitly answered safe pair.
     if failed or p_overlap is None:
         return False
     if mode == "eco":
         return p_overlap < ECO_P1
     if mode in ("eco-protected", "priority"):
-        return (p_overlap < PROTECTED_P1 and (p_unsafe or 0) < PROTECTED_P2)
+        return (p_overlap < PROTECTED_P1
+                and p_unsafe is not None and p_unsafe < PROTECTED_P2)
     return False
 
 
 def priority_score(p_overlap: float | None, p_unsafe: float | None) -> float:
-    return PRIORITY_W1 * (p_overlap or 0) + (1 - PRIORITY_W1) * (p_unsafe or 0)
+    # Unknown safety ranks as MAXIMUM risk (examine first), never minimum.
+    q1 = p_overlap or 0
+    q2 = p_unsafe if p_unsafe is not None else 1.0
+    return PRIORITY_W1 * q1 + (1 - PRIORITY_W1) * q2
 
 
 def screen_pairs(pairs: list, *, mode: str, head_rev: str,
                  evidence_fn=None, api_key: str | None = None,
                  ledger=None, ceiling_remaining: float | None = None,
-                 post_fn=None) -> dict:
+                 post_fn=None, rate: dict | None = None) -> dict:
     """Route one pair list through the Decisions screen.
 
     Returns {"advanced": [...], "screened": [...], "screen_spend_usd",
-    "screen_calls", "screen_failures"}. ``evidence_fn(pair)`` returns
-    (target_text, counterpart_text); ``post_fn`` performs the HTTP call
-    (injectable for tests). Screened rows carry completed=False and are
-    never cacheable (see cache.is_completed_row).
+    "screen_calls", "screen_failures", "screen_spend_unknown"}. ``rate``
+    is the resolved provider card (keys rate_in/rate_cached/rate_write per
+    1M tokens); without it the module Luna card is used. ``evidence_fn``
+    returns (target_text, counterpart_text); ``post_fn`` performs the HTTP
+    call (injectable for tests). Screened rows carry completed=False, keep
+    their pre-filter pair_rank for telemetry only, and are never cacheable
+    (see cache.is_completed_row).
+
+    Unknown provider usage on any billed call makes the batch spend
+    unconfirmable: screen_spend_usd is then None with
+    screen_spend_unknown=True (unknown is never confirmed $0).
     """
     if mode in (None, "", "off") or not pairs:
         return {"advanced": list(pairs), "screened": [],
-                "screen_spend_usd": 0.0, "screen_calls": 0,
-                "screen_failures": 0}
+                "screen_spend_usd": 0.0, "screen_spend_unknown": False,
+                "screen_calls": 0, "screen_failures": 0}
     if mode not in MODES:
         mode = "off"
         return {"advanced": list(pairs), "screened": [],
-                "screen_spend_usd": 0.0, "screen_calls": 0,
-                "screen_failures": 0}
+                "screen_spend_usd": 0.0, "screen_spend_unknown": False,
+                "screen_calls": 0, "screen_failures": 0}
     if mode == "order":
         # Genuine ordering-only (DECISIONS-04 correction): no evidence
         # fetch, no provider calls, no skips. Stable production-first
@@ -249,11 +319,30 @@ def screen_pairs(pairs: list, *, mode: str, head_rev: str,
         advanced.sort(key=lambda p: (1 if p.get("screen_test_involved")
                                      else 0))
         return {"advanced": advanced, "screened": [],
-                "screen_spend_usd": 0.0, "screen_calls": 0,
-                "screen_failures": 0, "mode": "order"}
+                "screen_spend_usd": 0.0, "screen_spend_unknown": False,
+                "screen_calls": 0, "screen_failures": 0, "mode": "order"}
     if api_key is None:
         api_key = os.environ.get("SEMDUP_API_KEY") or os.environ.get(
             "OPENAI_API_KEY") or ""
+    if not api_key and post_fn is None:
+        # No credentials: fail open LOCALLY without issuing calls.
+        # Ordering/demotion/presentation still apply when the mode is
+        # enabled (degrades to the ordering-only path for routing).
+        advanced = []
+        for pair in pairs:
+            pair = dict(pair)
+            pair["screen_p_overlap"] = None
+            pair["screen_p_unsafe"] = None
+            pair["screen_test_involved"] = pair_test_involved(pair)
+            pair["screen_mode"] = mode
+            advanced.append(pair)
+        if mode == "priority":
+            advanced.sort(key=lambda p: (1 if p.get(
+                "screen_test_involved") else 0))
+        return {"advanced": advanced, "screened": [],
+                "screen_spend_usd": 0.0, "screen_spend_unknown": False,
+                "screen_calls": 0, "screen_failures": 0,
+                "screen_no_key": True, "mode": mode}
     post = post_fn or (lambda key, text: _post_decision(key, text))
     inputs: list = []
     for pair in pairs:
@@ -274,24 +363,35 @@ def screen_pairs(pairs: list, *, mode: str, head_rev: str,
         RATE_IN + RATE_WRITE)
     if ceiling_remaining is not None and est > ceiling_remaining:
         return {"advanced": list(pairs), "screened": [],
-                "screen_spend_usd": 0.0, "screen_calls": 0,
-                "screen_failures": 0, "screen_deferred": True}
+                "screen_spend_usd": 0.0, "screen_spend_unknown": False,
+                "screen_calls": 0, "screen_failures": 0,
+                "screen_deferred": True}
     advanced, screened = [], []
-    spend, calls, failures = 0.0, 0, 0
+    spend, calls, failures, unknown_spend = 0.0, 0, 0, False
     for pair, text, has_evidence in inputs:
         if not has_evidence:
+            pair = dict(pair)
+            pair["screen_test_involved"] = pair_test_involved(pair)
             advanced.append(pair)  # no evidence to screen on: advance
             continue
         res = post(api_key, text)
         parsed = parse_answer(res)
         usage = (res.get("body") or {}).get("usage", {}) if res.get(
             "ok") else {}
-        cost = round(price_usage(usage), 9)
-        spend = round(spend + cost, 9)
+        usage_known = bool(res.get("ok")) and isinstance(
+            (usage or {}).get("input_tokens"), (int, float))
+        cost = None
+        if usage_known:
+            cost = round(price_usage(usage, rate), 9)
+            spend = round(spend + cost, 9)
+        else:
+            # Billed call without provider-confirmed usage: the batch
+            # total is unconfirmable (never confirmed $0 downstream).
+            unknown_spend = True
         calls += 1
         if parsed["failed"]:
             failures += 1
-        if ledger is not None and res.get("ok") and usage:
+        if ledger is not None and usage_known:
             try:
                 from types import SimpleNamespace
                 ledger.record_response(
@@ -317,12 +417,14 @@ def screen_pairs(pairs: list, *, mode: str, head_rev: str,
                 "detail": (f"decisions screen {SCREEN_VERSION} "
                            f"p_overlap={parsed['p_overlap']} "
                            f"p_unsafe={parsed['p_unsafe']} mode={mode}; "
-                           f"not examined, not rejected"),
+                           f"not examined, not rejected; pre-filter "
+                           f"pair_rank kept for telemetry only"),
                 "completed": False,
                 "screened": True,
                 "screen_p_overlap": parsed["p_overlap"],
                 "screen_p_unsafe": parsed["p_unsafe"],
-                "screen_spend_usd": cost,
+                "screen_test_involved": pair_test_involved(pair),
+                "screen_spend_usd": (cost if usage_known else None),
                 "assess_ran": False,
             })
             screened.append(row)
@@ -347,7 +449,8 @@ def screen_pairs(pairs: list, *, mode: str, head_rev: str,
                     str((p.get("target") or {}).get("symbol") or ""))
         risky = sorted(
             [p for p in advanced
-             if (p.get("screen_p_unsafe") or 0) >= RISK_BAND_P2],
+             if (p.get("screen_p_unsafe") is not None
+                 and p.get("screen_p_unsafe") >= RISK_BAND_P2)],
             key=_pkey)
         risky_ids = set(map(id, risky))
         rest = sorted(
@@ -361,5 +464,6 @@ def screen_pairs(pairs: list, *, mode: str, head_rev: str,
         ex_ids = set(map(id, explore))
         advanced = ([p for p in main if id(p) not in ex_ids] + explore)
     return {"advanced": advanced, "screened": screened,
-            "screen_spend_usd": spend, "screen_calls": calls,
-            "screen_failures": failures}
+            "screen_spend_usd": (None if unknown_spend else spend),
+            "screen_spend_unknown": unknown_spend,
+            "screen_calls": calls, "screen_failures": failures}

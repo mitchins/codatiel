@@ -135,7 +135,11 @@ def test_screen_end_to_end_eco_advances_failures():
     assert row["completed"] is False
     assert row["assess_ran"] is False
     assert row["pair_id"] == "a" and row["pair_rank"] == 0
-    assert out["screen_spend_usd"] == pytest.approx(2 * 500 * DS.RATE_IN)
+    # The failed third call carries no provider usage: batch spend is
+    # unconfirmable (unknown, never confirmed $0), even though two calls
+    # priced fine.
+    assert out["screen_spend_usd"] is None
+    assert out["screen_spend_unknown"] is True
 
 
 def test_screened_rows_never_cacheable():
@@ -198,7 +202,9 @@ def test_missing_evidence_advances():
     out = DS.screen_pairs(pairs, mode="eco", head_rev="abc",
                           evidence_fn=lambda p: ("", ""),
                           post_fn=post)
-    assert out["advanced"] == pairs
+    # No-evidence pairs advance untouched in membership, tagged for audit.
+    assert [p["pair_id"] for p in out["advanced"]] == ["spair-1"]
+    assert out["advanced"][0]["screen_test_involved"] is False
     assert out["screened"] == []
 
 
@@ -208,12 +214,86 @@ def test_price_usage_cached_and_write():
                            "input_tokens_details": {"cached_tokens": 1000,
                                                     "cache_write_tokens": 0}}
                           ) == pytest.approx(1000 * DS.RATE_CACHED)
+    # OpenAI-family semantics: writes are inside input_tokens, so the
+    # uncached slice subtracts reads AND writes (core/spend.py).
     assert DS.price_usage({"input_tokens": 1000,
                            "input_tokens_details": {"cached_tokens": 200,
                                                     "cache_write_tokens": 100}}
-                          ) == pytest.approx(800 * DS.RATE_IN + 200 *
+                          ) == pytest.approx(700 * DS.RATE_IN + 200 *
                                              DS.RATE_CACHED + 100 *
                                              DS.RATE_WRITE)
+
+
+def test_price_usage_provider_card():
+    card = {"input": 0.1, "input_cache_hit": 0.01,
+            "input_cache_write": 0.125}
+    assert DS.price_usage({"input_tokens": 1000,
+                           "input_tokens_details": {"cached_tokens": 0,
+                                                    "cache_write_tokens": 0}},
+                          card) == pytest.approx(1000 * 0.10 / 1e6)
+    assert DS.price_usage({"input_tokens": 1000,
+                           "input_tokens_details": {"cached_tokens": 200,
+                                                    "cache_write_tokens": 100}},
+                          {"tiers": {"short": card}}) == pytest.approx(
+        700 * 0.10 / 1e6 + 200 * 0.01 / 1e6 + 100 * 0.125 / 1e6)
+    assert DS.price_usage({"input_tokens": 100}, {}) == pytest.approx(
+        100 * DS.RATE_IN)
+
+
+def test_q2_refusal_or_missing_never_skips():
+    # B1: unknown safety is treated as unsafe — never suppress.
+    assert DS.should_skip(0.1, None, False, "eco-protected") is False
+    assert DS.should_skip(0.1, None, False, "priority") is False
+    assert DS.should_skip(0.29, None, False, "eco-protected") is False
+    assert DS.should_skip(0.29, 0.59, False, "eco-protected") is True
+    assert DS.should_skip(0.1, 0.2, False, "eco") is True  # eco: Q1 only
+    assert DS.priority_score(0.5, None) == pytest.approx(
+        0.75 * 0.5 + 0.25 * 1.0)
+
+
+def test_missing_usage_marks_spend_unknown():
+    pairs = [_pair("a", 0)]
+
+    def post(key, text):
+        return {"ok": True, "body": {"model": "x", "answers": [
+            {"type": "predicate", "name": "plausible_overlap",
+             "probability": 0.1},
+            {"type": "predicate", "name": "unsafe_to_dismiss",
+             "probability": 0.1}]}, "wall_s": 0.2}  # no usage block
+
+    out = DS.screen_pairs(pairs, mode="eco", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post)
+    assert out["screen_calls"] == 1
+    assert out["screen_spend_usd"] is None
+    assert out["screen_spend_unknown"] is True
+    assert [p["pair_id"] for p in out["screened"]] == ["a"]
+
+
+def test_no_key_fails_open_locally(monkeypatch):
+    monkeypatch.delenv("SEMDUP_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    pairs = [_pair("a", 0), _tpair("t1", path="tests/x.py",
+                                   symbol="test_y")]
+
+    def post(key, text):
+        raise AssertionError("must not issue network calls without a key")
+
+    out = DS.screen_pairs(pairs, mode="eco", head_rev="abc",
+                          evidence_fn=_ev, post_fn=None)
+    # post_fn=None forces the real path, which must refuse without a key.
+    assert [p["pair_id"] for p in out["advanced"]] == ["a", "t1"]
+    assert out["screened"] == []
+    assert out["screen_calls"] == 0
+    assert out["screen_no_key"] is True
+
+
+def test_production_symbols_not_demoted():
+    for sym in ("testing", "testament", "testify", "contest"):
+        assert DS.pair_test_involved(
+            _tpair("x", path="src/lib.py", symbol=sym)) is False
+    for sym in ("test", "test_x", "Test"):
+        assert DS.pair_test_involved(
+            _tpair("x", path="src/lib.py", symbol=sym)) is True
 
 
 def _tpair(pid, path="src/pay.py", symbol="charge", rank=0):
@@ -337,3 +417,33 @@ def test_order_mode_empty_and_stable():
     b = _tpair("b", path="src/b.py", symbol="g")
     out = DS.screen_pairs([a, b], mode="order", head_rev="x")
     assert [p["pair_id"] for p in out["advanced"]] == ["a", "b"]
+
+
+def test_confirmed_spend_sums_priced_calls():
+    pairs = [_pair("a", 0), _pair("b", 1)]
+
+    def post(key, text):
+        return _ok(0.9, 0.9)
+
+    out = DS.screen_pairs(pairs, mode="eco", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post)
+    assert out["screen_spend_usd"] == pytest.approx(2 * 500 * DS.RATE_IN)
+    assert out["screen_spend_unknown"] is False
+
+
+def test_q2_refusal_advances_in_priority():
+    pairs = [_pair("a", 0)]
+
+    def post(key, text):
+        return {"ok": True, "body": {"model": "x", "answers": [
+            {"type": "predicate", "name": "plausible_overlap",
+             "probability": 0.1},
+            {"type": "refusal", "name": "unsafe_to_dismiss"}]},
+                "wall_s": 0.2}
+
+    out = DS.screen_pairs(pairs, mode="priority", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post)
+    assert [p["pair_id"] for p in out["advanced"]] == ["a"]
+    assert out["screened"] == []
+    # Unknown safety ranks first (max risk), not last.
+    assert out["advanced"][0]["screen_p_unsafe"] is None
