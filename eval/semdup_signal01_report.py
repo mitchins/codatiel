@@ -110,13 +110,32 @@ def main(devstate):
         print(f"cost_per_examined={spend / examined:.6f}")
     if published:
         print(f"cost_per_published={spend / published:.6f}")
+    # Per-run cost/examined distribution (USD per examined pair per
+    # run, unweighted). Defined ONLY over runs with pairs_examined > 0:
+    # legacy runs with zero examinations carry spend but no denominator
+    # and are reported separately, never divided by max(1, 0).
     per_run_cost = [float(d.get("spend_usd") or 0.0)
-                    / max(1, int(d.get("pairs_examined") or 0))
+                    / int(d.get("pairs_examined") or 0)
                     for _, d in runs
-                    if isinstance(d.get("spend_usd"), (int, float))]
+                    if isinstance(d.get("spend_usd"), (int, float))
+                    and int(d.get("pairs_examined") or 0) > 0]
+    zero_exam = [(path, d) for path, d in runs
+                 if not int(d.get("pairs_examined") or 0)]
     if per_run_cost:
-        print(f"per_run_cost_per_examined_p50={_pct(per_run_cost, 50):.6f} "
-              f"p95={_pct(per_run_cost, 95):.6f}")
+        print(f"per_run_cost_per_examined_USD_n={len(per_run_cost)} "
+              f"mean={sum(per_run_cost) / len(per_run_cost):.6f} "
+              f"p50={_pct(per_run_cost, 50):.6f} "
+              f"p95={_pct(per_run_cost, 95):.6f} "
+              f"min={min(per_run_cost):.6f} "
+              f"max={max(per_run_cost):.6f}")
+    if zero_exam:
+        zero_spend = sum(float(d.get("spend_usd") or 0.0)
+                         for _, d in zero_exam
+                         if isinstance(d.get("spend_usd"), (int, float)))
+        print(f"zero_examined_runs={len(zero_exam)} "
+              f"zero_examined_spend_usd={zero_spend:.4f} "
+              f"(legacy schema: spend without a denominator, "
+              f"excluded from the distribution)")
     if rate_mix:
         print(f"rate_snapshot_mix={json.dumps(rate_mix, sort_keys=True)}")
     print(f"suppressed_by_reason={json.dumps(reasons, sort_keys=True)}")
