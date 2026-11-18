@@ -1,0 +1,216 @@
+"""Tests for the Decisions screening gate (DECISIONS-03).
+
+No network: all provider calls are injected via post_fn. Verifies the
+frozen routing table, fail-open behaviour, cache exclusion, flag parsing,
+spend accounting and priority ordering.
+"""
+import os
+
+import pytest
+
+from codatiel_i2.semdup_dev import decisions_screen as DS
+from codatiel_i2.semdup_dev import cache as CACHE
+
+
+def _pair(pid="spair-1", rank=0):
+    return {"pair_id": pid, "pair_rank": rank,
+            "target": {"path": "a.py", "symbol": "f",
+                       "start_line": 1, "end_line": 10},
+            "counterpart": {"path": "b.py", "symbol": "g",
+                            "start_line": 1, "end_line": 10},
+            "head_rev": "abc123"}
+
+
+def _ev(pair):
+    return "def f(): return 1", "def g(): return 1"
+
+
+def _ok(p1, p2, usage=None):
+    usage = usage if usage is not None else {
+        "input_tokens": 500,
+        "input_tokens_details": {"cached_tokens": 0,
+                                 "cache_write_tokens": 0},
+        "output_tokens": 0, "total_tokens": 500}
+    return {"ok": True,
+            "body": {"model": "gpt-6-luna",
+                     "answers": [
+                         {"type": "predicate", "name": "plausible_overlap",
+                          "probability": p1},
+                         {"type": "predicate", "name": "unsafe_to_dismiss",
+                          "probability": p2}],
+                     "usage": usage},
+            "wall_s": 0.2}
+
+
+def _fail():
+    return {"ok": False, "error": "timeout", "wall_s": 1.0}
+
+
+def test_off_is_baseline(monkeypatch):
+    monkeypatch.delenv("SEMDUP_DECISIONS_SCREEN", raising=False)
+    assert DS.screen_mode() == "off"
+    pairs = [_pair()]
+    out = DS.screen_pairs(pairs, mode="off", head_rev="abc",
+                          evidence_fn=_ev,
+                          post_fn=lambda k, t: (_ for _ in ()).throw(
+                              AssertionError("must not call provider")))
+    assert out["advanced"] == pairs
+    assert out["screened"] == []
+    assert out["screen_calls"] == 0
+
+
+def test_invalid_flag_means_off(monkeypatch):
+    monkeypatch.setenv("SEMDUP_DECISIONS_SCREEN", "turbo")
+    assert DS.screen_mode() == "off"
+    for bad in ("ECO", " Eco ", "1", "yes"):
+        monkeypatch.setenv("SEMDUP_DECISIONS_SCREEN", bad)
+        assert DS.screen_mode() == ("eco" if bad.strip().lower() == "eco"
+                                    else "off")
+
+
+def test_eco_routing_table():
+    assert DS.should_skip(0.29, 0.9, False, "eco") is True
+    assert DS.should_skip(0.30, 0.0, False, "eco") is False
+    assert DS.should_skip(0.0, 0.0, False, "eco") is True
+    assert DS.should_skip(0.1, 0.1, True, "eco") is False  # fail-open
+    assert DS.should_skip(None, 0.1, False, "eco") is False
+    assert DS.should_skip(0.29, 0.9, False, "eco-protected") is False
+    assert DS.should_skip(0.29, 0.59, False, "eco-protected") is True
+    assert DS.should_skip(0.29, 0.6, False, "eco-protected") is False
+    assert DS.should_skip(0.1, 0.1, False, "priority") is True
+    assert DS.should_skip(0.5, 0.5, False, "priority") is False
+
+
+def test_parse_answer_fail_open():
+    assert parse_failed(DS.parse_answer(_fail())) is True
+    refusal = {"ok": True, "body": {"answers": [
+        {"type": "refusal", "name": "plausible_overlap"},
+        {"type": "predicate", "name": "unsafe_to_dismiss",
+         "probability": 0.8}]}, "wall_s": 0.1}
+    # Single-question refusal: parsed without failure flag, but the None
+    # probability fail-opens at the routing layer (never skipped).
+    parsed = DS.parse_answer(refusal)
+    assert parsed["p_overlap"] is None
+    assert DS.should_skip(parsed["p_overlap"], parsed["p_unsafe"], False,
+                           "eco") is False
+    incomplete = {"ok": True, "body": {"answers": [
+        {"type": "predicate", "name": "plausible_overlap",
+         "probability": 0.1}]}, "wall_s": 0.1}
+    assert parse_failed(DS.parse_answer(incomplete)) is True
+    wrong = {"ok": True, "body": {"answers": [
+        {"type": "predicate", "name": "something_else",
+         "probability": 0.1},
+        {"type": "predicate", "name": "unsafe_to_dismiss",
+         "probability": 0.1}]}, "wall_s": 0.1}
+    assert parse_failed(DS.parse_answer(wrong)) is True
+    good = DS.parse_answer(_ok(0.2, 0.7))
+    assert good == {"p_overlap": 0.2, "p_unsafe": 0.7, "failed": False,
+                    "error": None}
+
+
+def parse_failed(parsed):
+    return parsed["failed"]
+
+
+def test_screen_end_to_end_eco_advances_failures():
+    pairs = [_pair("a", 0), _pair("b", 1), _pair("c", 2)]
+    calls = {"n": 0}
+
+    def post(key, text):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _ok(0.1, 0.1)  # skip
+        if calls["n"] == 2:
+            return _ok(0.9, 0.9)  # advance
+        return _fail()  # fail-open advance
+
+    out = DS.screen_pairs(pairs, mode="eco", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post)
+    assert [p["pair_id"] for p in out["advanced"]] == ["b", "c"]
+    assert [p["pair_id"] for p in out["screened"]] == ["a"]
+    assert out["screen_calls"] == 3
+    assert out["screen_failures"] == 1
+    row = out["screened"][0]
+    assert row["reason"] == DS.SCREEN_REASON
+    assert row["completed"] is False
+    assert row["assess_ran"] is False
+    assert row["pair_id"] == "a" and row["pair_rank"] == 0
+    assert out["screen_spend_usd"] == pytest.approx(2 * 500 * DS.RATE_IN)
+
+
+def test_screened_rows_never_cacheable():
+    row = {"reason": DS.SCREEN_REASON, "completed": False}
+    assert CACHE.is_completed_row(row) is False
+    # Even if a future writer forgets the flag, the reason alone blocks.
+    assert CACHE.is_completed_row({"reason": DS.SCREEN_REASON}) is False
+
+
+def test_protected_keeps_high_p2():
+    pairs = [_pair("a", 0)]
+
+    def post(key, text):
+        return _ok(0.2, 0.7)
+
+    out = DS.screen_pairs(pairs, mode="eco-protected", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post)
+    assert [p["pair_id"] for p in out["advanced"]] == ["a"]
+    assert out["screened"] == []
+    out2 = DS.screen_pairs(pairs, mode="eco", head_rev="abc",
+                           evidence_fn=_ev, post_fn=post)
+    assert out2["screened"] and [p["pair_id"] for p in out2["screened"]] == ["a"]
+
+
+def test_priority_orders_risk_first_then_score():
+    pairs = [_pair("low", 0), _pair("mid", 1), _pair("risky", 2)]
+    scripted = iter([(0.1, 0.1), (0.5, 0.5), (0.4, 0.9)])
+
+    def post2(key, text):
+        a, b = next(scripted)
+        return _ok(a, b)
+
+    out = DS.screen_pairs(pairs, mode="priority", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post2)
+    # protected rule skips low (p1<0.3, p2<0.6); risky band first.
+    assert [p["pair_id"] for p in out["screened"]] == ["low"]
+    assert [p["pair_id"] for p in out["advanced"]][0] == "risky"
+
+
+def test_ceiling_preflight_defers_screen():
+    pairs = [_pair()]
+
+    def post(key, text):
+        raise AssertionError("preflight should have deferred")
+
+    out = DS.screen_pairs(pairs, mode="eco", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post,
+                          ceiling_remaining=0.0000001)
+    assert out["advanced"] == pairs
+    assert out.get("screen_deferred") is True
+    assert out["screen_calls"] == 0
+
+
+def test_missing_evidence_advances():
+    pairs = [_pair()]
+
+    def post(key, text):
+        raise AssertionError("no evidence: must not call")
+
+    out = DS.screen_pairs(pairs, mode="eco", head_rev="abc",
+                          evidence_fn=lambda p: ("", ""),
+                          post_fn=post)
+    assert out["advanced"] == pairs
+    assert out["screened"] == []
+
+
+def test_price_usage_cached_and_write():
+    assert DS.price_usage({}) == 0.0
+    assert DS.price_usage({"input_tokens": 1000,
+                           "input_tokens_details": {"cached_tokens": 1000,
+                                                    "cache_write_tokens": 0}}
+                          ) == pytest.approx(1000 * DS.RATE_CACHED)
+    assert DS.price_usage({"input_tokens": 1000,
+                           "input_tokens_details": {"cached_tokens": 200,
+                                                    "cache_write_tokens": 100}}
+                          ) == pytest.approx(800 * DS.RATE_IN + 200 *
+                                             DS.RATE_CACHED + 100 *
+                                             DS.RATE_WRITE)

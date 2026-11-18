@@ -475,8 +475,60 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         # _dedup_mirrors below, preserving the old delivery behavior.
         # Rejections never seed a skip.
         known_published = mirror_seed_keys(continuation_reused)
+        # DECISIONS-03 screening (flag-gated, default off): cheap
+        # Decisions pre-screen routes low-scoring pairs away from Terra.
+        # Screened rows are recorded as suppressed with completed=False
+        # and are never cacheable (see cache.is_completed_row); the flag
+        # being off (or any screen failure) yields the exact baseline
+        # pair list. Screen spend is priced and added to spend_usd below.
+        screen_out = {"advanced": new_pairs, "screened": [],
+                      "screen_spend_usd": 0.0, "screen_calls": 0,
+                      "screen_failures": 0, "mode": "off"}
+        try:
+            from codatiel_i2.semdup_dev import decisions_screen as _DS
+            _mode = _DS.screen_mode()
+            if _mode != "off" and new_pairs:
+                from codatiel_i2.semdup_dev import oai_dupe as _OD
+                _merged = Path(merged["db"])
+
+                def _ev(_pair: dict) -> tuple:
+                    _evd = _OD.build_pair_evidence(
+                        _merged, _pair.get("target") or {},
+                        _pair.get("counterpart") or {})
+                    if not _evd.get("ok"):
+                        return "", ""
+                    return (_evd["target"]["text"],
+                            _evd["counterpart"]["text"])
+
+                from codatiel_i2.core import spend as _SP
+                # Decisions screen is priced with the Luna rate card:
+                # same model (gpt-6-luna), same tier, same endpoint
+                # family (/v1/decisions rates match Responses Luna
+                # prompt-caching rates; output tokens are not charged
+                # by Decisions and price to $0 in use).
+                try:
+                    import codatiel_i2.providers as _PV
+                    _luna_rate = _PV.resolve_backend("luna")
+                    _screen_ledger = _SP.SpendLedger(
+                        rate=_luna_rate.get("rate_usd_per_mtok") or {},
+                        rate_status=_luna_rate.get("rate_status",
+                                                   "unconfirmed"))
+                except Exception:
+                    _screen_ledger = _SP.SpendLedger()
+                _screen_ledger.attach_sink(
+                    run_dir / "spend_semdup_decisions.jsonl")
+                screen_out = _DS.screen_pairs(
+                    new_pairs, mode=_mode, head_rev=head_rev,
+                    evidence_fn=_ev, ledger=_screen_ledger,
+                    ceiling_remaining=(ceiling_usd if isinstance(
+                        ceiling_usd, (int, float)) else None))
+                screen_out["mode"] = _mode
+        except Exception:
+            screen_out = {"advanced": new_pairs, "screened": [],
+                          "screen_spend_usd": 0.0, "screen_calls": 0,
+                          "screen_failures": 0, "mode": "off"}
         judged = ES.review_candidate_pairs(
-            new_pairs, repo=repo, repo_path=repo_path,
+            screen_out["advanced"], repo=repo, repo_path=repo_path,
             merged_db=Path(merged["db"]), base_rev=base_rev,
             head_rev=head_rev, head_tree=head_tree, base_tree=base_tree,
             run_dir=run_dir, ceiling_usd=ceiling_usd,
@@ -500,6 +552,28 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     outcome["spend_luna_usd"] = judged.get("spend_luna_usd")
     outcome["spend_terra_unknown"] = judged.get("spend_terra_unknown", False)
     outcome["spend_luna_unknown"] = judged.get("spend_luna_unknown", False)
+    # DECISIONS-03: provider-confirmed screen spend joins the run total.
+    # Screen unknown stays unknown, never $0 (same convention as above).
+    _screen_spend = screen_out.get("screen_spend_usd")
+    _screen_unknown = (
+        bool(screen_out.get("screen_calls")) and _screen_spend is None)
+    if _screen_spend is None:
+        _screen_spend = 0.0 if not screen_out.get("screen_calls") else None
+    outcome["spend_decisions_usd"] = _screen_spend
+    outcome["spend_decisions_unknown"] = bool(_screen_unknown)
+    outcome["decisions_screen"] = {
+        "mode": screen_out.get("mode", "off"),
+        "calls": screen_out.get("screen_calls", 0),
+        "failures": screen_out.get("screen_failures", 0),
+        "screened": len(screen_out.get("screened", [])),
+    }
+    if isinstance(outcome["spend_usd"], (int, float)) and isinstance(
+            _screen_spend, (int, float)):
+        outcome["spend_usd"] = round(outcome["spend_usd"] + _screen_spend, 6)
+    elif isinstance(_screen_spend, (int, float)) and _screen_spend:
+        outcome["spend_usd"] = round(_screen_spend, 6)
+    if _screen_unknown:
+        outcome["spend_unknown"] = True
     outcome["preflight_usd"] = judged.get("preflight_usd")
     # MIRROR-01 / SCAFFOLD-01 savings (estimates labeled _est).
     for prefix in ("mirror", "scaffold"):
@@ -530,6 +604,12 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     new_rows = [r for r in judged.get("pairs", []) if isinstance(r, dict)]
     published = list(judged.get("published", []))
     suppressed = list(judged.get("suppressed", []))
+    # DECISIONS-03: screened rows rejoin as suppressed (never examined,
+    # never cached). They keep their stamped pair_id/pair_rank so the
+    # telemetry sink can attribute them.
+    for r in screen_out.get("screened", []):
+        if isinstance(r, dict):
+            suppressed.append(ES._suppressed_row(r))
     # SIGNAL-01 B1: reused rows are not examinations of this run —
     # their spend was attributed when originally judged. Drop stale
     # correlation labels (a cached id encodes the old head/rank and

@@ -183,6 +183,11 @@ def is_completed_row(row: dict) -> bool:
         return False
     if reason in ("evidence_failed", "stale_superseded"):
         return False
+    if reason == "decisions_screened":
+        # Routing skip, never a verdict: screened pairs were not examined
+        # and must never seed continuation or cross-revision reuse, even
+        # if a future writer forgets the completed=False flag.
+        return False
     if reason in ("terra_no_lead", "editor_unpublishable"):
         # Ambiguous without flags (provider failure vs completed no-lead)
         # → retry. New flagged rows keep the completed no-lead reusable.
