@@ -121,6 +121,20 @@ def run_stage(*, repo_path: Path, repo: str, pr: int,
         return outcome
 
 
+def _review_ceiling(ceiling_usd, screen_spend) -> float:
+    """Review budget after confirmed screen spend (same ceiling).
+
+    Screen dollars come out of the whole-PR remainder: the review below
+    can never spend ceiling + screen. Unknown/zero screen spend leaves
+    the ceiling untouched (unknown screen spend is handled by the
+    spend_unknown flag, never by inflating the review budget).
+    """
+    if isinstance(ceiling_usd, (int, float)) and isinstance(
+            screen_spend, (int, float)) and screen_spend:
+        return max(0.0, round(ceiling_usd - screen_spend, 6))
+    return ceiling_usd
+
+
 def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
          state_dir, max_pairs_per_target, max_pairs,
          ceiling_usd, allow_embeddings, assess_fn, edit_fn,
@@ -560,19 +574,13 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                           "screen_error": f"{type(exc).__name__}: "
                                           f"{str(exc)[:200]}"}
             _mode = "off"
-        _review_ceiling = ceiling_usd
-        _confirmed_screen = screen_out.get("screen_spend_usd")
-        if isinstance(ceiling_usd, (int, float)) and isinstance(
-                _confirmed_screen, (int, float)) and _confirmed_screen:
-            # Screen dollars come out of the same whole-PR remainder:
-            # the review below can never spend ceiling + screen.
-            _review_ceiling = max(0.0, round(
-                ceiling_usd - _confirmed_screen, 6))
+        _review_ceiling_usd = _review_ceiling(
+            ceiling_usd, screen_out.get("screen_spend_usd"))
         judged = ES.review_candidate_pairs(
             screen_out["advanced"], repo=repo, repo_path=repo_path,
             merged_db=Path(merged["db"]), base_rev=base_rev,
             head_rev=head_rev, head_tree=head_tree, base_tree=base_tree,
-            run_dir=run_dir, ceiling_usd=_review_ceiling,
+            run_dir=run_dir, ceiling_usd=_review_ceiling_usd,
             assess_fn=assess_fn, edit_fn=edit_fn,
             on_pair=_on_pair, is_stale=is_stale,
             known_published_keys=known_published, pr=pr)
