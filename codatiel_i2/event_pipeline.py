@@ -604,6 +604,10 @@ def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
     result["semdup_pairs_reused"] = 0
     result["semdup_pairs_cache_hits"] = 0
     result["semdup_budget_usd"] = 0.0
+    result["semdup_decisions_mode"] = "off"
+    result["semdup_decisions_screened"] = 0
+    result["semdup_decisions_spend_usd"] = 0.0
+    result["semdup_decisions_spend_unknown"] = False
     if cfg.env != "dev" or not cfg.semdup_enabled or not run_dir:
         return result
     # COST-01B: live-head check before starting semantic duplication

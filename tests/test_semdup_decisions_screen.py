@@ -350,8 +350,11 @@ def test_priority_exploration_uniform_bottom_quartile():
     a, b = run(), run()
     assert [p["pair_id"] for p in a] == [p["pair_id"] for p in b]
     assert len(a) == 20
-    assert all(not p.get("screen_test_involved") for p in a[:10])
-    assert all(p.get("screen_test_involved") for p in a[10:])
+    # Production-first head, then interleaved (not tail-appended) gamble
+    # slots: at least one exploration row lands in the first half.
+    assert not a[0].get("screen_test_involved")
+    assert sum(1 for p in a[1:10]
+               if p.get("screen_test_involved")) >= 1
 
 
 def test_priority_risk_band_never_delayed():
@@ -447,3 +450,90 @@ def test_q2_refusal_advances_in_priority():
     assert out["screened"] == []
     # Unknown safety ranks first (max risk), not last.
     assert out["advanced"][0]["screen_p_unsafe"] is None
+
+
+def test_path_detector_anchored():
+    for p in ("src/latest/x.py", "src/contest/y.py", "protest/z.py",
+              "src/my_tests_helpers/a.py"):
+        assert DS.pair_test_involved(
+            _tpair("x", path=p, symbol="f")) is False, p
+    for p in ("tests/x.py", "src/tests/y.py", "spec/z.py", "a/b/Tests/c.py"):
+        assert DS.pair_test_involved(
+            _tpair("x", path=p, symbol="f")) is True, p
+
+
+def test_screen_per_call_budget_stop():
+    pairs = [_pair("a", 0), _pair("b", 1), _pair("c", 2)]
+    calls = {"n": 0}
+
+    def post(key, text):
+        calls["n"] += 1
+        return _ok(0.1, 0.1)
+
+    out = DS.screen_pairs(pairs, mode="eco", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post,
+                          ceiling_remaining=0.0000001)
+    # Preflight already defers the whole batch at this ceiling.
+    assert out["screen_calls"] == 0
+    assert [p["pair_id"] for p in out["advanced"]] == ["a", "b", "c"]
+    assert out.get("screen_deferred") is True
+
+
+def test_screen_mid_batch_budget_stop():
+    pairs = [_pair("a", 0), _pair("b", 1), _pair("c", 2)]
+
+    def post(key, text):
+        # Actual cost ($0.0002) exceeds the char estimate: after the
+        # first call the second would breach the ceiling.
+        return {"ok": True, "body": {"model": "x", "answers": [
+            {"type": "predicate", "name": "plausible_overlap",
+             "probability": 0.9},
+            {"type": "predicate", "name": "unsafe_to_dismiss",
+             "probability": 0.9}],
+            "usage": {"input_tokens": 2000,
+                      "input_tokens_details": {}}}, "wall_s": 0.1}
+
+    out = DS.screen_pairs(pairs, mode="eco", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post,
+                          ceiling_remaining=0.0002)
+    assert out["screen_calls"] == 1
+    assert out["screen_stopped_by_budget"] is True
+    assert [p["pair_id"] for p in out["advanced"]] == ["a", "b", "c"]
+    assert out["screened"] == []
+
+
+def test_screen_post_raise_advances():
+    pairs = [_pair("a", 0)]
+
+    def post(key, text):
+        raise RuntimeError("boom")
+
+    out = DS.screen_pairs(pairs, mode="priority", head_rev="abc",
+                          evidence_fn=_ev, post_fn=post)
+    assert [p["pair_id"] for p in out["advanced"]] == ["a"]
+    assert out["screened"] == []
+    assert out["screen_failures"] == 1
+
+
+def test_interleave_keeps_head_and_spreads():
+    main = [{"pair_id": f"m{i}"} for i in range(20)]
+    explore = [{"pair_id": f"e{i}"} for i in range(2)]
+    out = DS._interleave_order(main, explore)
+    assert len(out) == 22
+    assert out[0]["pair_id"] == "m0"  # head undisplaced
+    positions = [i for i, p in enumerate(out)
+                 if p["pair_id"].startswith("e")]
+    assert positions[1] - positions[0] >= 5  # spread, not tail-clustered
+    assert out[-1]["pair_id"] == "m19"  # tail not explore-dominated
+    # Deterministic given the same sample.
+    again = DS._interleave_order(list(main), list(explore))
+    assert [p["pair_id"] for p in again] == [p["pair_id"] for p in out]
+
+
+def test_review_ceiling_helper():
+    from codatiel_i2.semdup_dev.stage import _review_ceiling
+    assert _review_ceiling(2.0, 0.15) == pytest.approx(1.85)
+    assert _review_ceiling(2.0, 0.0) == 2.0
+    assert _review_ceiling(2.0, None) == 2.0
+    assert _review_ceiling(0.1, 0.15) == 0.0  # clamp, never negative
+    assert _review_ceiling(None, 0.15) is None

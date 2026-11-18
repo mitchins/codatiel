@@ -9,8 +9,12 @@ Safety properties (all tested in tests/test_semdup_decisions_screen.py):
 - Default OFF: with the flag unset/invalid the pair list is untouched.
 - Fail-open: API errors, refusals, malformed/incomplete answers and
   timeouts advance every pair (baseline behaviour, never a silent drop).
-  A refused/missing UNSAFE answer never suppresses (unknown safety is
-  treated as unsafe); unknown Q1 never suppresses.
+  A refused/missing UNSAFE answer never suppresses in eco-protected/
+  priority (unknown safety is treated as unsafe); unknown Q1 never
+  suppresses anywhere. ("eco" consults Q1 alone by frozen design and
+  has no Q2 fail-open question.)
+- Screen spend comes out of the same review ceiling: batch preflight
+  plus a per-call hard stop keep screen + review within ceiling_usd.
 - No API key configured also fails open locally WITHOUT issuing calls:
   screening degrades to the ordering-only path (pairs still demote and
   the presentation order still applies when the mode is enabled).
@@ -84,7 +88,7 @@ SCREEN_REASON = "decisions_screened"
 # displacing confirmed-useful ordinary rows).
 _TEST_PATH = re.compile(
     r"(^|/)(test|tests|spec|specs|mock|mocks|fixture|fixtures|stub|stubs"
-    r"|e2e)(/|_|\.|$)|_test\.|_spec\.|conftest|Test\.swift|Tests?/",
+    r"|e2e)(/|_|\.|$)|_test\.|_spec\.|conftest|Test\.swift|(^|/)Tests?/",
     re.IGNORECASE)
 # Word-boundary on "test": production symbols like testing/testament/
 # testify must NOT demote (review finding: bare ^test prefix overmatched).
@@ -249,15 +253,20 @@ def price_usage(usage: dict, rate: dict | None = None) -> float:
     det = ((usage or {}).get("input_tokens_details") or {})
     cached = det.get("cached_tokens") or 0
     written = det.get("cache_write_tokens") or 0
+    # Short tier assumed: screen inputs are a few KB (target+counterpart
+    # code), far below the 272K long-tier threshold, so the short card
+    # always applies. Revisit if screen inputs ever grow ~100x.
     return (max(0, n - cached - written) * r["rate_in"]
             + cached * r["rate_cached"] + written * r["rate_write"])
 
 
 def should_skip(p_overlap: float | None, p_unsafe: float | None,
-                  failed: bool, mode: str) -> bool:
-    # Fail-open (review blocker B1): a missing/refused UNSAFE answer must
-    # NEVER suppress. Unknown safety is treated as unsafe until proven
-    # otherwise — skip only on an explicitly answered safe pair.
+                failed: bool, mode: str) -> bool:
+    # Fail-open: a missing/refused UNSAFE answer must NEVER suppress in
+    # the protected modes. Unknown safety is treated as unsafe until
+    # proven otherwise — skip only on an explicitly answered safe pair.
+    # NOTE "eco" consults Q1 alone by frozen design (FROZEN03) and has no
+    # Q2 fail-open question; use eco-protected/priority where Q2 matters.
     if failed or p_overlap is None:
         return False
     if mode == "eco":
@@ -266,6 +275,30 @@ def should_skip(p_overlap: float | None, p_unsafe: float | None,
         return (p_overlap < PROTECTED_P1
                 and p_unsafe is not None and p_unsafe < PROTECTED_P2)
     return False
+
+
+def _interleave_order(main: list, explore: list) -> list:
+    """Splice exploration rows back at evenly spaced positions.
+
+    Exploration appended at the tail is cut first under a binding ceiling
+    — exactly when novelty matters most. Even spacing guarantees every
+    budget level executes a proportional share of gamble slots while the
+    risk band (head of main) is never displaced. Deterministic given the
+    sampled set (positions derive from lengths only). Shared with the
+    offline replay (sim04) so shipped and simulated orders coincide.
+    """
+    if not explore or not main:
+        return list(main) + list(explore)
+    ex_ids = set(map(id, explore))
+    rest = [p for p in main if id(p) not in ex_ids]
+    n = len(explore)
+    # Slots start at 1: the head of main (risk band) is never displaced.
+    slots = sorted({min(len(rest), max(
+        1, (i + 1) * len(rest) // (n + 1))) for i in range(n)})
+    out = list(rest)
+    for offset, (slot, row) in enumerate(zip(slots, explore)):
+        out.insert(min(len(out), slot + offset), row)
+    return out
 
 
 def priority_score(p_overlap: float | None, p_unsafe: float | None) -> float:
@@ -368,14 +401,29 @@ def screen_pairs(pairs: list, *, mode: str, head_rev: str,
                 "screen_deferred": True}
     advanced, screened = [], []
     spend, calls, failures, unknown_spend = 0.0, 0, 0, False
+    stopped_by_budget = False
     for pair, text, has_evidence in inputs:
         if not has_evidence:
             pair = dict(pair)
             pair["screen_test_involved"] = pair_test_involved(pair)
             advanced.append(pair)  # no evidence to screen on: advance
             continue
-        res = post(api_key, text)
-        parsed = parse_answer(res)
+        if stopped_by_budget:
+            pair = dict(pair)
+            pair["screen_p_overlap"] = None
+            pair["screen_p_unsafe"] = None
+            pair["screen_test_involved"] = pair_test_involved(pair)
+            advanced.append(pair)
+            continue
+        try:
+            res = post(api_key, text)
+            parsed = parse_answer(res)
+        except Exception:
+            # The screen itself must never raise: a failed screen call
+            # advances the pair (fail-open), never loses it.
+            res, parsed = {"ok": False, "error": "screen-call-raised"}, {
+                "p_overlap": None, "p_unsafe": None, "failed": True,
+                "error": "screen-call-raised"}
         usage = (res.get("body") or {}).get("usage", {}) if res.get(
             "ok") else {}
         usage_known = bool(res.get("ok")) and isinstance(
@@ -391,6 +439,14 @@ def screen_pairs(pairs: list, *, mode: str, head_rev: str,
         calls += 1
         if parsed["failed"]:
             failures += 1
+        # Per-call hard stop: the screen must never consume the budget
+        # it is meant to protect. When the next estimated call would
+        # exceed the remaining ceiling, screening ends here — every
+        # remaining pair advances unscreened.
+        if (ceiling_remaining is not None and not unknown_spend
+                and spend + len(text) / 3.0 * (
+                    RATE_IN + RATE_WRITE) > ceiling_remaining):
+            stopped_by_budget = True
         if ledger is not None and usage_known:
             try:
                 from types import SimpleNamespace
@@ -461,9 +517,9 @@ def screen_pairs(pairs: list, *, mode: str, head_rev: str,
         import random as _random
         explore = _random.Random(SCREEN_VERSION).sample(
             pool, min(n_exp, len(pool))) if pool else []
-        ex_ids = set(map(id, explore))
-        advanced = ([p for p in main if id(p) not in ex_ids] + explore)
+        advanced = _interleave_order(main, explore)
     return {"advanced": advanced, "screened": screened,
             "screen_spend_usd": (None if unknown_spend else spend),
             "screen_spend_unknown": unknown_spend,
+            "screen_stopped_by_budget": stopped_by_budget,
             "screen_calls": calls, "screen_failures": failures}
