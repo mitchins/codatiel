@@ -269,7 +269,8 @@ def _process(cfg, store, repo_path, repo, pr, base_rev, head_rev,
                 base_rev=base_rev, head_rev=head_rev, records=records,
                 run_dir=run_dir,
                 head_tree=Path(head_tree) if head_tree else None,
-                base_tree=Path(base_tree) if base_tree else None)
+                base_tree=Path(base_tree) if base_tree else None,
+                pr=pr)
         except Exception as exc:  # noqa: BLE001 - never fail a run
             editorial = {"enabled": True, "ok": False,
                          "error": f"{type(exc).__name__}: {str(exc)[:300]}"}

@@ -77,6 +77,7 @@ def mirror_preskip_row(pair: dict, *, head_rev: str, base_rev: str,
         "target": pair.get("target"), "counterpart": pair.get("counterpart"),
         "record_status": pair.get("record_status"),
         "classification": pair.get("classification"),
+        "pair_id": pair.get("pair_id"), "pair_rank": pair.get("pair_rank"),
         "head_rev": head_rev, "base_rev": base_rev,
         "path": "suppressed", "reason": "mirror_of_published",
         "detail": ("same unordered unit pair already published"
@@ -85,6 +86,368 @@ def mirror_preskip_row(pair: dict, *, head_rev: str, base_rev: str,
         "assess_ran": False, "completed": False, "budget_refused": False,
         "terra_completed": False, "luna_completed": None,
     }
+
+
+def budget_status(row: dict) -> str:
+    """Classify a budget refusal into an auditable state (SIGNAL-01 B4).
+
+    Distinguishes: refused before the first provider request (preflight
+    gate, $0 possible), refused after examination started but before
+    any billed response was recorded (spend unknown, never assumed
+    $0), interrupted after one or more billed responses (partial
+    spend confirmed), and Terra-held/Luna-refused. Non-budget rows
+    return "".
+    """
+    try:
+        row = row or {}
+        if row.get("reason") != "budget_stop":
+            return ""
+        terra_ids = row.get("terra_response_ids") or []
+        luna_ids = row.get("luna_response_ids") or []
+        if not row.get("assess_ran"):
+            return "refused_before_first_request"
+        # Partial billed spend outranks stage labels: a Luna refusal
+        # after billed Luna turns is an interruption, not a clean hold.
+        if terra_ids or luna_ids:
+            return "interrupted_after_partial_spend"
+        if row.get("terra_completed"):
+            return "terra_held_luna_refused"
+        return "refused_before_first_billed_response"
+    except Exception:
+        return ""
+
+
+def _ledger_order(ledger: Any) -> list:
+    """Snapshot of recorded response ids (duck-typed; [] when unknown)."""
+    try:
+        order = getattr(ledger, "order", None)
+        return list(order) if order is not None else []
+    except Exception:
+        return []
+
+
+def _num_wall(value: Any) -> float:
+    """Wall seconds as float; non-numeric transcripts degrade to 0.0."""
+    try:
+        return round(float(value or 0.0), 1)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _ledger_delta_ids(ledger: Any, before: list) -> list:
+    """Response ids recorded during one examination stage (serial loop)."""
+    try:
+        after = _ledger_order(ledger)
+        seen = set(before or [])
+        return [rid for rid in after if rid not in seen]
+    except Exception:
+        return []
+
+
+def _tool_summary(tool_calls: Any) -> list:
+    """Compact per-call record: name + observed summary chars.
+
+    Summary chars are an exact character count of the logged tool
+    result, NOT provider tokens — never presented as token usage.
+    """
+    out = []
+    try:
+        for entry in tool_calls or []:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("tool") or entry.get("name") or ""
+            summary = entry.get("summary")
+            try:
+                chars = len(str(summary)) if summary is not None else 0
+            except Exception:
+                chars = 0
+            out.append({"name": str(name), "summary_chars": chars})
+    except Exception:
+        pass
+    return out
+
+
+def _stage_usage(ledger: Any, response_ids: list) -> dict:
+    """Exact provider-reported usage for one stage (never estimated).
+
+    Sums only provider-reported token fields over the stage's response
+    ids. ``usage_known`` counts entries with provider payloads;
+    ``unknown`` counts recorded responses without them (never priced,
+    never zero-filled). ``priced_usd`` uses live ledger rates or None.
+    """
+    result: dict[str, Any] = {
+        "responses": len(response_ids or []), "requests": 0,
+        "input_tokens": 0, "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0, "output_tokens": 0,
+        "reasoning_output_tokens": 0, "usage_known": 0,
+        "unknown": 0, "priced_usd": None,
+    }
+    try:
+        entries = getattr(ledger, "entries", None)
+        if not isinstance(entries, dict):
+            result["unknown"] = len(response_ids or [])
+            return result
+        for rid in response_ids or []:
+            entry = entries.get(str(rid))
+            if not isinstance(entry, dict) or not entry.get("usage_known"):
+                result["unknown"] += 1
+                continue
+            result["usage_known"] += 1
+            try:
+                result["requests"] += int(entry.get("requests") or 0)
+                for key in ("input_tokens", "cached_input_tokens",
+                            "cache_write_input_tokens", "output_tokens",
+                            "reasoning_output_tokens"):
+                    value = entry.get(key)
+                    if isinstance(value, (int, float)) and value:
+                        result[key] += int(value)
+            except Exception:
+                continue
+        try:
+            priced = ledger.price_entries(response_ids or [])
+            result["priced_usd"] = priced.get("confirmed_usd")
+            if priced.get("unknown"):
+                result["unknown"] = max(
+                    result["unknown"], int(priced["unknown"]))
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return result
+
+
+def _price_row(row: dict, terra_ledger: Any,
+               luna_ledger: Any) -> float | None:
+    """Confirmed spend for one pair's recorded responses (or None).
+
+    Sums per-side confirmed prices; any side with recorded-but-unknown
+    spend taints the total to None (unknown, never $0). A side with no
+    recorded responses contributes $0. Shared by the row field and the
+    telemetry builder so the two can never disagree.
+    """
+    try:
+        row = row or {}
+        terra_ids = list(row.get("terra_response_ids") or [])
+        luna_ids = list(row.get("luna_response_ids") or [])
+        if not terra_ids and not luna_ids:
+            # No recorded responses: unknown, never $0 (the only
+            # certain-$0 case — refused before the first request — is
+            # classified by budget_status, not priced here).
+            return None
+        total = 0.0
+        for ledger, ids in ((terra_ledger, terra_ids),
+                            (luna_ledger, luna_ids)):
+            if not ids:
+                continue
+            try:
+                priced = ledger.price_entries(ids)
+            except Exception:
+                return None
+            if not isinstance(priced, dict):
+                return None
+            if priced.get("unknown"):
+                return None
+            confirmed = priced.get("confirmed_usd")
+            if not isinstance(confirmed, (int, float)):
+                return None
+            total += confirmed
+        return round(total, 6)
+    except Exception:
+        return None
+
+
+def _pair_telemetry_row(row: dict, *, repo: str, pr: Any,
+                        terra_ledger: Any, luna_ledger: Any,
+                        models: Any = None) -> dict:
+    """Assemble one per-pair economics record (SIGNAL-01 B2).
+
+    Joins row fields with provider-reported ledger usage. Every token
+    count is provider-reported; prompt/source sizes are exact character
+    counts labeled as such; priced USD comes from live ledger rates.
+    """
+    row = row or {}
+    terra_ids = list(row.get("terra_response_ids") or [])
+    luna_ids = list(row.get("luna_response_ids") or [])
+    terra_usage = _stage_usage(terra_ledger, terra_ids)
+    luna_usage = _stage_usage(luna_ledger, luna_ids)
+    priced = _price_row(row, terra_ledger, luna_ledger)
+    try:
+        models = models or {}
+        terra_model = (models.get("terra") or {}).get("model")
+        terra_iid = (models.get("terra") or {}).get("instructions_id")
+        luna_model = (models.get("luna") or {}).get("model")
+        luna_iid = (models.get("luna") or {}).get("instructions_id")
+    except Exception:
+        terra_model = terra_iid = luna_model = luna_iid = None
+    record = {
+        "pair_id": row.get("pair_id"), "pair_rank": row.get("pair_rank"),
+        "repo": repo, "pr": pr,
+        "base_rev": row.get("base_rev"), "head_rev": row.get("head_rev"),
+        "target": {"path": (row.get("target") or {}).get("path"),
+                   "symbol": (row.get("target") or {}).get("symbol"),
+                   "chars": row.get("target_chars")},
+        "counterpart": {"path": (row.get("counterpart") or {}).get("path"),
+                        "symbol": (row.get("counterpart") or {}).get("symbol"),
+                        "chars": row.get("counterpart_chars")},
+        "terra_prompt_chars": row.get("terra_prompt_chars"),
+        "luna_prompt_chars": row.get("luna_prompt_chars"),
+        "terra": {"model": terra_model, "instructions_id": terra_iid,
+                  "responses": terra_usage["responses"],
+                  "requests": terra_usage["requests"],
+                  "usage": {k: terra_usage[k] for k in
+                            ("input_tokens", "cached_input_tokens",
+                             "cache_write_input_tokens", "output_tokens",
+                             "reasoning_output_tokens")},
+                  "usage_known": terra_usage["usage_known"],
+                  "unknown": terra_usage["unknown"],
+                  "priced_usd": terra_usage["priced_usd"],
+                  "response_ids": terra_ids,
+                  "tool_calls": row.get("terra_tools") or [],
+                  "wall_s": row.get("terra_wall_s")},
+        "luna": {"model": luna_model, "instructions_id": luna_iid,
+                 "responses": luna_usage["responses"],
+                 "requests": luna_usage["requests"],
+                 "usage": {k: luna_usage[k] for k in
+                           ("input_tokens", "cached_input_tokens",
+                            "cache_write_input_tokens", "output_tokens",
+                            "reasoning_output_tokens")},
+                 "usage_known": luna_usage["usage_known"],
+                 "unknown": luna_usage["unknown"],
+                 "priced_usd": luna_usage["priced_usd"],
+                 "response_ids": luna_ids,
+                 "tool_calls": row.get("luna_tools") or [],
+                 "wall_s": row.get("luna_wall_s")},
+        "pair_priced_usd": priced,
+        "outcome": {"path": row.get("path"), "reason": row.get("reason"),
+                    "decision": row.get("decision")},
+        "classification": ((row.get("editor") or {}).get("classification")
+                           if isinstance(row.get("editor"), dict) else None),
+        "budget_status": budget_status(row),
+        "wall_s": row.get("wall_s"),
+    }
+    return record
+
+
+def _telemetry_for_interrupted(
+        pair: dict, *, repo: str, pr: Any, base_rev: str, head_rev: str,
+        terra_ledger: Any, luna_ledger: Any, models: Any,
+        terra_before: list, luna_before: list) -> dict:
+    """Attribution record for a pair whose examination raised.
+
+    Spend responses recorded before the interruption are in the
+    ledgers; this maps them to the pair before the exception
+    propagates (behavior unchanged: the caller re-raises).
+    """
+    try:
+        row = {
+            "target": (pair or {}).get("target"),
+            "counterpart": (pair or {}).get("counterpart"),
+            "pair_id": (pair or {}).get("pair_id"),
+            "pair_rank": (pair or {}).get("pair_rank"),
+            "base_rev": base_rev, "head_rev": head_rev,
+            "terra_response_ids": _ledger_delta_ids(
+                terra_ledger, terra_before),
+            "luna_response_ids": _ledger_delta_ids(
+                luna_ledger, luna_before),
+            "path": "interrupted", "reason": "exception",
+        }
+        return _pair_telemetry_row(
+            row, repo=repo, pr=pr, terra_ledger=terra_ledger,
+            luna_ledger=luna_ledger, models=models)
+    except Exception:
+        return {}
+
+
+def _append_pair_telemetry(run_dir: Any, record: dict) -> None:
+    """Append one pair record to semdup_pairs.jsonl (crash-durable).
+
+    Best-effort per-pair append, mirroring the spend sinks: an
+    interrupted examination retains every completed pair's record.
+    Never raises.
+    """
+    try:
+        import json as _json
+        path = Path(run_dir) / "semdup_pairs.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(_json.dumps(record, sort_keys=True,
+                                     default=str) + "\n")
+            handle.flush()
+            try:
+                import os as _os
+                _os.fsync(handle.fileno())
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _write_rate_snapshot(run_dir: Any, *, terra_res: dict,
+                         luna_res: dict, terra_model: str,
+                         luna_model: str) -> None:
+    """Persist the pricing identity for future offline repricing (B3).
+
+    Immutable snapshot of the rate cards + statuses + model ids in
+    effect for this review. Never rewrites history; one file per run.
+    """
+    try:
+        import json as _json
+        snapshot = {
+            "recorded": "review_start",
+            "terra": {"model": terra_model,
+                      "provider": (terra_res or {}).get("provider"),
+                      "rate_usd_per_mtok": dict(
+                          (terra_res or {}).get("rate_usd_per_mtok") or {}),
+                      "rate_status": (terra_res or {}).get("rate_status")},
+            "luna": {"model": luna_model,
+                     "provider": (luna_res or {}).get("provider"),
+                     "rate_usd_per_mtok": dict(
+                         (luna_res or {}).get("rate_usd_per_mtok") or {}),
+                     "rate_status": (luna_res or {}).get("rate_status")},
+        }
+        (Path(run_dir) / "rate_snapshot.json").write_text(
+            _json.dumps(snapshot, indent=1, sort_keys=True, default=str),
+            encoding="utf-8")
+    except Exception:
+        pass
+
+
+def summarize_budget_refusals(rows: list) -> dict:
+    """Counts + confirmed spend per budget state over judged rows."""
+    summary: dict[str, Any] = {"total": 0, "by_status": {},
+                               "confirmed_usd": 0.0,
+                               "confirmed_unknown": False}
+    try:
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            status = budget_status(row)
+            if not status:
+                continue
+            summary["total"] += 1
+            entry = summary["by_status"].setdefault(
+                status, {"count": 0, "confirmed_usd": 0.0,
+                         "unknown": False})
+            entry["count"] += 1
+            # refused_before_first_request attempted no provider call:
+            # confirmed $0. Every other state prices recorded responses
+            # (None = unknown, never $0).
+            if status == "refused_before_first_request":
+                priced: Any = 0.0
+            else:
+                priced = (row.get("pair_priced_usd")
+                          if isinstance(row.get("pair_priced_usd"),
+                                       (int, float)) else None)
+            if priced is None:
+                entry["unknown"] = True
+                summary["confirmed_unknown"] = True
+            else:
+                entry["confirmed_usd"] = round(
+                    entry["confirmed_usd"] + priced, 6)
+                summary["confirmed_usd"] = round(
+                    summary["confirmed_usd"] + priced, 6)
+    except Exception:
+        pass
+    return summary
 
 
 def _mirror_preskip(pair: dict, *, head_rev: str, base_rev: str,
@@ -606,7 +969,8 @@ def run_editorial(*, cfg, repo_path: Path, merged_db: Path,
                   base_tree: Path | None, max_pairs: int | None = None,
                   ceiling_usd: float | None = None,
                   assess_fn: Callable | None = None,
-                  edit_fn: Callable | None = None) -> dict:
+                  edit_fn: Callable | None = None,
+                  pr: Any = None) -> dict:
     """Run the editorial shadow pass for one delta. Never raises."""
     t0 = time.monotonic()
     outcome: dict[str, Any] = {
@@ -625,7 +989,7 @@ def run_editorial(*, cfg, repo_path: Path, merged_db: Path,
                     run_dir=run_dir, head_tree=head_tree,
                     base_tree=base_tree, max_pairs=max_pairs,
                     ceiling_usd=ceiling_usd, assess_fn=assess_fn,
-                    edit_fn=edit_fn, outcome=outcome, t0=t0)
+                    edit_fn=edit_fn, outcome=outcome, t0=t0, pr=pr)
     except Exception as exc:  # noqa: BLE001 - degrade, never raise
         outcome["ok"] = False
         outcome["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
@@ -635,7 +999,7 @@ def run_editorial(*, cfg, repo_path: Path, merged_db: Path,
 
 def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
          run_dir, head_tree, base_tree, max_pairs, ceiling_usd,
-         assess_fn, edit_fn, outcome, t0) -> dict:
+         assess_fn, edit_fn, outcome, t0, pr=None) -> dict:
     from codatiel_i2 import providers as P
     from codatiel_i2 import runtime_sdk as R
     from codatiel_i2.core.spend import SpendLedger
@@ -693,6 +1057,17 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
     }
     assess = assess_fn or OD.assess_pair
     edit = edit_fn or ED.edit_pair
+    # SIGNAL-01 B1/B3: stable pair ids + pricing snapshot (best-effort).
+    try:
+        from codatiel_i2.semdup_dev import pairing as _PA
+        _PA.stamp_pairs(pairs, repo=(cfg.repos[0] if getattr(
+            cfg, "repos", None) else "dev"), pr=pr, base_rev=base_rev,
+            head_rev=head_rev)
+    except Exception:
+        pass
+    _write_rate_snapshot(run_dir, terra_res=terra_res, luna_res=luna_res,
+                         terra_model=str(terra_model_id),
+                         luna_model=str(luna_model_id))
     # MIRROR-01: first-published-wins within this run. A reverse pair is
     # skipped before any paid call only after its twin published.
     published_keys: dict[str, str] = {}
@@ -702,15 +1077,41 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
             published_keys=published_keys, outcome=outcome)
         if skipped:
             continue
-        row = _review_pair(
-            pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
-            base_rev=base_rev, head_rev=head_rev, head_tree=head_tree,
-            base_tree=base_tree, terra_res=terra_res, luna_res=luna_res,
-            terra_model_id=terra_model_id, terra_settings=terra_settings,
-            luna_model_id=luna_model_id, luna_settings=luna_settings,
-            terra_ledger=terra_ledger, luna_ledger=luna_ledger,
-            ceiling_usd=ceiling_usd, half=half, assess=assess, edit=edit,
-            OD=OD, ED=ED, R=R)
+        # Ledger marks for interruption attribution (serial loop:
+        # responses recorded between the marks belong to this pair).
+        terra_before = _ledger_order(terra_ledger)
+        luna_before = _ledger_order(luna_ledger)
+        try:
+            row = _review_pair(
+                pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
+                base_rev=base_rev, head_rev=head_rev, head_tree=head_tree,
+                base_tree=base_tree, terra_res=terra_res, luna_res=luna_res,
+                terra_model_id=terra_model_id, terra_settings=terra_settings,
+                luna_model_id=luna_model_id, luna_settings=luna_settings,
+                terra_ledger=terra_ledger, luna_ledger=luna_ledger,
+                ceiling_usd=ceiling_usd, half=half, assess=assess, edit=edit,
+                OD=OD, ED=ED, R=R)
+        except Exception:
+            # Interruption (D8): retain partial attribution, then
+            # propagate unchanged — failure semantics are preserved.
+            _append_pair_telemetry(
+                run_dir, _telemetry_for_interrupted(
+                    pair, repo=(cfg.repos[0] if getattr(
+                        cfg, "repos", None) else "dev"), pr=pr,
+                    base_rev=base_rev, head_rev=head_rev,
+                    terra_ledger=terra_ledger, luna_ledger=luna_ledger,
+                    models=outcome.get("models"),
+                    terra_before=terra_before, luna_before=luna_before))
+            raise
+        try:
+            _append_pair_telemetry(
+                run_dir, _pair_telemetry_row(
+                    row, repo=(cfg.repos[0] if getattr(
+                        cfg, "repos", None) else "dev"), pr=pr,
+                    terra_ledger=terra_ledger, luna_ledger=luna_ledger,
+                    models=outcome.get("models")))
+        except Exception:
+            pass
         _record_judged(outcome, row, mkey, published_keys)
     spent_t, spent_l = _spent(terra_ledger), _spent(luna_ledger)
     outcome["spend_terra_usd"] = spent_t
@@ -724,6 +1125,8 @@ def _run(*, cfg, repo_path, merged_db, base_rev, head_rev, records,
         outcome["spend_usd"] = round(spent_t + spent_l, 6)
     outcome["spend_unknown"] = spent_t is None or spent_l is None
     _record_preskip_savings(outcome, spent_t, spent_l, t0)
+    outcome["budget_refusals"] = summarize_budget_refusals(
+        outcome.get("pairs"))
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     return outcome
@@ -789,6 +1192,14 @@ def _review_pair(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         ceiling_usd=ceiling_usd, half=half, assess=assess, edit=edit,
         OD=OD, ED=ED, R=R)
     row["wall_s"] = round(time.monotonic() - pt0, 1)
+    # Confirmed spend for this pair's recorded responses (None =
+    # unknown, never $0). Single point: telemetry and the run summary
+    # share it via _price_row and can never disagree.
+    try:
+        row["pair_priced_usd"] = _price_row(
+            row, terra_ledger, luna_ledger)
+    except Exception:
+        row["pair_priced_usd"] = None
     return row
 
 
@@ -801,7 +1212,10 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         "target": pair["target"], "counterpart": pair["counterpart"],
         "record_status": pair.get("record_status"),
         "classification": pair.get("classification"),
+        # SIGNAL-01 correlation label (never a cache/continuation key).
+        "pair_id": pair.get("pair_id"), "pair_rank": pair.get("pair_rank"),
         "head_rev": head_rev, "base_rev": base_rev,
+        "terra_response_ids": [], "luna_response_ids": [],
     }
     ev = ED.build_evidence_package(
         merged_db, repo_path, head_rev,
@@ -822,6 +1236,10 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
                         ("path", "symbol", "start_line", "end_line",
                          "sha256")},
     }
+    # SIGNAL-01 B2 evidence-size measures (exact chars, never estimates
+    # presented as provider tokens).
+    row["target_chars"] = len(ev["target"].get("text") or "")
+    row["counterpart_chars"] = len(ev["counterpart"].get("text") or "")
     pre = ED.wrapper_prefilter(ev["target"]["text"],
                                ev["counterpart"]["symbol"],
                                ev["target"]["symbol"])
@@ -868,9 +1286,13 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         repo=cfg.repos[0] if cfg.repos else "dev", base_sha=base_rev,
         head_sha=head_rev, base_dir=base_tree, head_dir=head_tree,
         diff_repo=repo_path, tool_budget=OD.TERRA_TOOL_BUDGET)
+    # SIGNAL-01 B2: exact rendered prompt size (chars), reused for
+    # the preflight estimate so the gate and the telemetry agree.
+    row["terra_prompt_chars"] = _input_chars(
+        OD.render_terra_input, ev, head_rev,
+        pair.get("classification") or "introduced")
     est = OD.estimate_call_usd(
-        _input_chars(OD.render_terra_input, ev, head_rev,
-                     pair.get("classification") or "introduced")
+        row["terra_prompt_chars"]
         or (len(OD.TERRA_INSTRUCTIONS) + 12000),
         terra_res["rate_usd_per_mtok"])
     s = _spent(terra_ledger)
@@ -882,6 +1304,7 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
                     "completed": False, "budget_refused": True,
                     "terra_completed": False, "luna_completed": None})
         return row
+    terra_order_before = _ledger_order(terra_ledger)
     ta = assess(
         evidence={"target": ev["target"],
                   "counterpart": ev["counterpart"],
@@ -891,8 +1314,14 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         tools=OD.scoped_tools(terra_ctx), model=terra_model_id,
         model_settings=terra_settings, ledger=terra_ledger, ctx=terra_ctx)
     row["assess_ran"] = True
+    row["terra_response_ids"] = _ledger_delta_ids(
+        terra_ledger, terra_order_before)
+    row["terra_wall_s"] = _num_wall(
+        (ta.get("transcript") or {}).get("wall_s"))
     row["terra_tool_calls"] = len(
         ((ta.get("transcript") or {}).get("tool_calls", [])))
+    row["terra_tools"] = _tool_summary(
+        (ta.get("transcript") or {}).get("tool_calls", []))
     if not ta.get("ok") or not (ta.get("terra") or {}).get("overlap"):
         err = str(ta.get("error", "") or "")
         if _is_budget_error(err):
@@ -937,8 +1366,10 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         repo=cfg.repos[0] if cfg.repos else "dev", base_sha=base_rev,
         head_sha=head_rev, base_dir=base_tree, head_dir=head_tree,
         diff_repo=repo_path, tool_budget=8)
+    row["luna_prompt_chars"] = _input_chars(
+        OD.render_luna_input, ev, terra)
     est_l = OD.estimate_call_usd(
-        _input_chars(OD.render_luna_input, ev, terra)
+        row["luna_prompt_chars"]
         or (len(ED.EDITOR_INSTRUCTIONS) + 12000),
         luna_res["rate_usd_per_mtok"])
     sl = _spent(luna_ledger)
@@ -952,14 +1383,19 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
                     "budget_refused": True, "completed": False})
         return row
     lt0 = time.monotonic()
+    luna_order_before = _ledger_order(luna_ledger)
     luna = edit(
         package=ev, proposed_comment=proposed,
         tools=R.build_i2_tools(luna_ctx), model=luna_model_id,
         model_settings=luna_settings, ledger=luna_ledger, ctx=luna_ctx)
     row["edit_ran"] = True
     row["luna_wall_s"] = round(time.monotonic() - lt0, 1)
+    row["luna_response_ids"] = _ledger_delta_ids(
+        luna_ledger, luna_order_before)
     row["luna_tool_calls"] = len(
         ((luna.get("transcript") or {}).get("tool_calls", [])))
+    row["luna_tools"] = _tool_summary(
+        (luna.get("transcript") or {}).get("tool_calls", []))
     row["editor"] = luna.get("editor")
     row["editor_error"] = luna.get("error", "")
     if not luna.get("ok"):
@@ -996,12 +1432,24 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
 
 
 def _public_row(row: dict) -> dict:
+    editor = row.get("editor") if isinstance(row.get("editor"), dict) \
+        else {}
+    # SIGNAL-01 A3: missing/malformed metadata falls back to unknown
+    # here too (injected editors, legacy rows) — never invalidates.
+    try:
+        from codatiel_i2.semdup_dev.classification import (
+            normalize_classification as _normalize)
+        classification = _normalize(editor.get("classification"))
+    except Exception:
+        classification = None
     return {
         "target": row["target"], "counterpart": row["counterpart"],
         "head_rev": row.get("head_rev"),
+        "pair_id": row.get("pair_id"), "pair_rank": row.get("pair_rank"),
         "decision": row.get("decision"),
         "revised_comment": row.get("revised_comment", ""),
         "reason": row.get("reason", ""),
+        "classification": classification,
         "anchors": row.get("anchors", {}),
         "inference": {
             "terra_wall_s": row.get("terra_wall_s", 0.0),
@@ -1016,7 +1464,15 @@ def _suppressed_row(row: dict) -> dict:
     return {
         "target": row["target"], "counterpart": row["counterpart"],
         "head_rev": row.get("head_rev"),
+        "pair_id": row.get("pair_id"), "pair_rank": row.get("pair_rank"),
         "reason": row.get("reason", ""),
+        "budget_status": budget_status(row),
+        # Audit inputs for the derived budget_status (counts only;
+        # full response ids live in semdup_pairs.jsonl).
+        "assess_ran": bool(row.get("assess_ran")),
+        "terra_completed": row.get("terra_completed"),
+        "terra_responses": len(row.get("terra_response_ids") or []),
+        "luna_responses": len(row.get("luna_response_ids") or []),
         "detail": str(row.get("detail", "") or "")[:600],
         "terra": row.get("terra", {}),
         "terra_note": str(row.get("terra_note", "") or "")[:600],
@@ -1033,7 +1489,8 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
                            edit_fn: Callable | None = None,
                            on_pair: Callable | None = None,
                            is_stale: Callable[[], bool] | None = None,
-                           known_published_keys=None) -> dict:
+                           known_published_keys=None,
+                           pr: Any = None) -> dict:
     """Terra-propose / Luna-edit over directly-retrieved pairs.
 
     SEMDUP-08 integrated stage: pairs come from deterministic retrieval
@@ -1129,6 +1586,18 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
                  "provider": luna_res.get("provider"),
                  "instructions_id": ED.editor_instructions_id()},
     }
+    # SIGNAL-01 B1: every pair carries a stable correlation id + rank
+    # (idempotent: stage stamps first; direct callers get stamped here).
+    try:
+        from codatiel_i2.semdup_dev import pairing as _PA
+        _PA.stamp_pairs(pairs, repo=repo, pr=pr, base_rev=base_rev,
+                        head_rev=head_rev)
+    except Exception:
+        pass
+    # SIGNAL-01 B3: immutable pricing identity for offline repricing.
+    _write_rate_snapshot(run_dir, terra_res=terra_res, luna_res=luna_res,
+                         terra_model=str(terra_model_id),
+                         luna_model=str(luna_model_id))
     cfg = SimpleNamespace(repos=[repo])
     assess = assess_fn or OD.assess_pair
     edit = edit_fn or ED.edit_pair
@@ -1163,6 +1632,10 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
                             "counterpart": remaining["counterpart"],
                             "head_rev": head_rev,
                             "base_rev": base_rev,
+                            "pair_id": (remaining if isinstance(
+                                remaining, dict) else {}).get("pair_id"),
+                            "pair_rank": (remaining if isinstance(
+                                remaining, dict) else {}).get("pair_rank"),
                             "reason": "stale_superseded",
                             "detail": "stale head; skipped before inference",
                             "path": "suppressed",
@@ -1178,15 +1651,36 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
             on_pair=on_pair)
         if skipped:
             continue
-        row = _review_pair(
-            pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
-            base_rev=base_rev, head_rev=head_rev, head_tree=head_tree,
-            base_tree=base_tree, terra_res=terra_res, luna_res=luna_res,
-            terra_model_id=terra_model_id, terra_settings=terra_settings,
-            luna_model_id=luna_model_id, luna_settings=luna_settings,
-            terra_ledger=terra_ledger, luna_ledger=luna_ledger,
-            ceiling_usd=ceiling_usd, half=half, assess=assess, edit=edit,
-            OD=OD, ED=ED, R=R)
+        terra_before = _ledger_order(terra_ledger)
+        luna_before = _ledger_order(luna_ledger)
+        try:
+            row = _review_pair(
+                pair, cfg=cfg, repo_path=repo_path, merged_db=merged_db,
+                base_rev=base_rev, head_rev=head_rev, head_tree=head_tree,
+                base_tree=base_tree, terra_res=terra_res, luna_res=luna_res,
+                terra_model_id=terra_model_id, terra_settings=terra_settings,
+                luna_model_id=luna_model_id, luna_settings=luna_settings,
+                terra_ledger=terra_ledger, luna_ledger=luna_ledger,
+                ceiling_usd=ceiling_usd, half=half, assess=assess, edit=edit,
+                OD=OD, ED=ED, R=R)
+        except Exception:
+            _append_pair_telemetry(
+                run_dir, _telemetry_for_interrupted(
+                    pair, repo=repo, pr=pr,
+                    base_rev=base_rev, head_rev=head_rev,
+                    terra_ledger=terra_ledger, luna_ledger=luna_ledger,
+                    models=outcome.get("models"),
+                    terra_before=terra_before, luna_before=luna_before))
+            raise
+        # SIGNAL-01 B2/B3: crash-durable per-pair economics, appended
+        # as each examination completes (never raises, never blocks).
+        try:
+            _append_pair_telemetry(
+                run_dir, _pair_telemetry_row(
+                    row, repo=repo, pr=pr, terra_ledger=terra_ledger,
+                    luna_ledger=luna_ledger, models=outcome.get("models")))
+        except Exception:
+            pass
         _record_judged(outcome, row, mkey, published_keys, on_pair=on_pair)
     spent_t, spent_l = _spent(terra_ledger), _spent(luna_ledger)
     # Per-model spend from the priced ledger results (persisted with the
@@ -1205,6 +1699,8 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
     outcome["spend_unknown"] = spent_t is None or spent_l is None
     outcome["preflight_usd"] = judged_preflight
     _record_preskip_savings(outcome, spent_t, spent_l, t0)
+    outcome["budget_refusals"] = summarize_budget_refusals(
+        outcome.get("pairs"))
     outcome["ok"] = True
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     return outcome

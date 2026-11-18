@@ -369,6 +369,16 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         except Exception:
             # Cache is best-effort; never break judging.
             pass
+        # SIGNAL-01 B1: stamp the actually-examined list in
+        # credibility order. The rank hashed into each id equals the
+        # emitted rank. Ids are correlation labels only — never
+        # continuation/cache key inputs.
+        try:
+            from codatiel_i2.semdup_dev import pairing as _PA
+            _PA.stamp_pairs(new_pairs, repo=repo, pr=pr, base_rev=base_rev,
+                            head_rev=head_rev)
+        except Exception:
+            pass
         # Keep continuation and cache hits separate for publication policy
         reused_rows = list(continuation_reused)
         outcome["pairs_reused"] = len(continuation_reused) + len(cache_hits)
@@ -472,7 +482,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             run_dir=run_dir, ceiling_usd=ceiling_usd,
             assess_fn=assess_fn, edit_fn=edit_fn,
             on_pair=_on_pair, is_stale=is_stale,
-            known_published_keys=known_published)
+            known_published_keys=known_published, pr=pr)
         if cont_buf:
             _merge_continuation(state_dir, repo, pr, base_rev, head_rev,
                                 cont_buf)
@@ -520,9 +530,16 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     new_rows = [r for r in judged.get("pairs", []) if isinstance(r, dict)]
     published = list(judged.get("published", []))
     suppressed = list(judged.get("suppressed", []))
+    # SIGNAL-01 B1: reused rows are not examinations of this run —
+    # their spend was attributed when originally judged. Drop stale
+    # correlation labels (a cached id encodes the old head/rank and
+    # must never resurface under a new revision).
     for r in continuation_reused:
         if not isinstance(r, dict):
             continue
+        r = dict(r)
+        r.pop("pair_id", None)
+        r.pop("pair_rank", None)
         if r.get("path") == "published":
             published.append(ES._public_row(r))
         else:
@@ -530,6 +547,9 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     for r in cache_hits:
         if not isinstance(r, dict):
             continue
+        r = dict(r)
+        r.pop("pair_id", None)
+        r.pop("pair_rank", None)
         if r.get("path") == "published":
             published.append(ES._public_row(r))
         else:
@@ -618,6 +638,9 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     suppressed.extend(dups)
     outcome["published"] = published
     outcome["suppressed"] = suppressed
+    # SIGNAL-01 B4: budget-refusal states over fresh judgments (reused
+    # rows predate the classification and report no status).
+    outcome["budget_refusals"] = judged.get("budget_refusals")
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     _persist(run_dir, outcome)
     return outcome
@@ -890,7 +913,12 @@ def _merge_continuation(state_dir: Path, repo: str, pr: int,
             t, c = row.get("target") or {}, row.get("counterpart") or {}
             if not t.get("path") or not c.get("path"):
                 continue
-            known[_pair_key(t, c)] = row
+            # SIGNAL-01 B1: continuation stores verdicts, not run
+            # correlation labels (rank/order may shift on re-drive).
+            stored = dict(row)
+            stored.pop("pair_id", None)
+            stored.pop("pair_rank", None)
+            known[_pair_key(t, c)] = stored
         if known:
             _save_continuation(state_dir, repo, pr, base_rev, head_rev,
                                known)
