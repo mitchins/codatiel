@@ -259,6 +259,14 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                               "classification": kind,
                               "channels": list(p.get("via") or [])})
         pairs = _order_pairs(pairs)
+        # SIGNAL-01 B1: stable correlation ids in credibility order.
+        # Ids are labels only — never continuation/cache key inputs.
+        try:
+            from codatiel_i2.semdup_dev import pairing as _PA
+            _PA.stamp_pairs(pairs, repo=repo, pr=pr, base_rev=base_rev,
+                            head_rev=head_rev)
+        except Exception:
+            pass
         if max_pairs is not None and len(pairs) > max_pairs:
             # Explicit controlled-experiment limit only (None disables).
             cut = pairs[max_pairs:]
@@ -472,7 +480,7 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
             run_dir=run_dir, ceiling_usd=ceiling_usd,
             assess_fn=assess_fn, edit_fn=edit_fn,
             on_pair=_on_pair, is_stale=is_stale,
-            known_published_keys=known_published)
+            known_published_keys=known_published, pr=pr)
         if cont_buf:
             _merge_continuation(state_dir, repo, pr, base_rev, head_rev,
                                 cont_buf)
@@ -618,6 +626,9 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     suppressed.extend(dups)
     outcome["published"] = published
     outcome["suppressed"] = suppressed
+    # SIGNAL-01 B4: budget-refusal states over fresh judgments (reused
+    # rows predate the classification and report no status).
+    outcome["budget_refusals"] = judged.get("budget_refusals")
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     _persist(run_dir, outcome)
     return outcome

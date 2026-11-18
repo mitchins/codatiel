@@ -32,7 +32,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
-EDITOR_INSTRUCTIONS_VERSION = "semdup-comment-editor-0.1"
+EDITOR_INSTRUCTIONS_VERSION = "semdup-comment-editor-0.2"
 
 EDITOR_INSTRUCTIONS = """You are the second reviewer deciding whether a proposed code-review comment about possible code duplication is worth sending to a developer. Be sceptical: similar algorithms, patterns and general responsibilities are NOT sufficient to publish. Publish only comments that identify a concrete opportunity to reuse existing implementation or extract a concrete shared component.
 
@@ -49,10 +49,18 @@ Rules:
 - If the delivered evidence is insufficient to judge (missing code or data, unverified values), DROP as inadequately supported. Do not guess.
 - The revised comment must describe only code present in the delivered evidence; introduce no new file locations or claims about unseen code.
 
-Respond with exactly one JSON object, no prose:
+ Respond with exactly one JSON object, no prose:
 {"decision": "KEEP|REVISE|DROP",
  "revised_comment": "the comment to publish (KEEP may restate the proposal briefly; REVISE narrows it; DROP uses \\"\\")",
  "reason": "why, citing the delivered evidence"}"""
+
+# Classification metadata rides in the same editorial response (no extra
+# call). Appended after the verdict schema so the KEEP/REVISE/DROP
+# judgment stays primary; classification never alters the decision.
+from codatiel_i2.semdup_dev.classification import (  # noqa: E402
+    CLASSIFICATION_PROMPT_BLOCK as _CLASSIFICATION_PROMPT_BLOCK)
+
+EDITOR_INSTRUCTIONS = EDITOR_INSTRUCTIONS + _CLASSIFICATION_PROMPT_BLOCK
 
 EDITOR_DECISIONS = ("KEEP", "REVISE", "DROP")
 
@@ -298,6 +306,16 @@ def edit_pair(*, package: dict, proposed_comment: str, tools: list,
         return {"ok": False, "transcript": transcript,
                 "error": "invalid editor output: " + "; ".join(errors),
                 "editor": None}
+    # SIGNAL-01: classification metadata is advisory only. It is
+    # normalized with an unknown fallback and can never invalidate an
+    # otherwise valid verdict.
+    from codatiel_i2.semdup_dev.classification import (  # noqa: E402
+        normalize_classification as _normalize)
+    try:
+        value = dict(value)
+        value["classification"] = _normalize(value.get("classification"))
+    except Exception:
+        pass
     paths = [package["target"]["path"], package["counterpart"]["path"]]
     violations = check_comment_locations(value.get("revised_comment", ""),
                                          paths)
@@ -309,7 +327,8 @@ def edit_pair(*, package: dict, proposed_comment: str, tools: list,
                          + "; ".join(violations),
                 "editor": None}
     transcript.update({"status": "edited",
-                       "decision": value.get("decision")})
+                       "decision": value.get("decision"),
+                       "classification": (value.get("classification") or {})})
     return {"ok": True, "transcript": transcript, "editor": value,
             "error": ""}
 

@@ -550,6 +550,60 @@ class SpendLedger:
             total += entry["output_tokens"] / 1e6 * rate_out
         return total
 
+    def price_entries(self, response_ids: list) -> dict[str, Any]:
+        """Price a subset of recorded responses (read-only attribution).
+
+        Same pricing semantics as confirmed_usd, restricted to the given
+        response ids. Never mutates entries, order, sinks, reservations
+        or ceilings — settlement is untouched; this is a query for
+        per-examination attribution only. Unknown usage stays unknown:
+        ``confirmed_usd`` covers known entries only and ``unknown``
+        counts the rest (never priced at $0).
+        """
+        wanted = set(str(r) for r in (response_ids or []))
+        known = [self.entries[k] for k in self.order
+                 if k in wanted and isinstance(
+                     self.entries.get(k), dict)
+                 and self.entries[k].get("usage_known")]
+        unknown = sum(1 for k in self.order
+                      if k in wanted and not (
+                          isinstance(self.entries.get(k), dict)
+                          and self.entries[k].get("usage_known")))
+        rate_in, rate_out = self._rate_pair()
+        if rate_in is None or rate_out is None:
+            return {"confirmed_usd": None, "known": len(known),
+                    "unknown": unknown}
+        card = self._tier_card()
+        total = 0.0
+        if card is not None:
+            for entry in known:
+                priced = self._price_entry_tiered(entry, card)
+                if priced["pricing_status"] in (PRICED, PRICING_PARTIAL):
+                    total += priced["cost_usd"] or 0.0
+            return {"confirmed_usd": total, "known": len(known),
+                    "unknown": unknown}
+        rate_hit = self._rate_hit()
+        rate_write = self._rate_write(rate_in)
+        for entry in known:
+            cached = entry.get("cached_input_tokens") or 0
+            written = entry.get("cache_write_input_tokens") or 0
+            if entry.get("cache_in_input", True):
+                uncached = max(0, entry["input_tokens"] - cached
+                               - written)
+            else:
+                uncached = entry["input_tokens"]
+            if (rate_hit is not None
+                    and entry.get("cached_input_tokens") is not None):
+                total += (uncached / 1e6 * rate_in
+                          + cached / 1e6 * rate_hit)
+            else:
+                total += entry["input_tokens"] / 1e6 * rate_in
+            if written:
+                total += written / 1e6 * rate_write
+            total += entry["output_tokens"] / 1e6 * rate_out
+        return {"confirmed_usd": total, "known": len(known),
+                "unknown": unknown}
+
     def bounded_reserve_usd(self) -> float | None:
         """Conservative bounded reservation for PRICING_UNAVAILABLE entries.
 
