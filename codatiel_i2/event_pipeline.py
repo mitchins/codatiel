@@ -685,6 +685,14 @@ def _maybe_semdup_stage(*, cfg: EventConfig, repo: str, pr: int,
                "pairs_total", "continuation_reused", "spend_unknown"):
         if sem.get(_k) is not None:
             result["semdup_" + _k] = sem.get(_k)
+    # Decisions routing visibility (H16): mode and screened count ride
+    # with the run result so operators can see screening and its spend.
+    _ds = sem.get("decisions_screen") or {}
+    result["semdup_decisions_mode"] = _ds.get("mode", "off")
+    result["semdup_decisions_screened"] = _ds.get("screened", 0)
+    result["semdup_decisions_spend_usd"] = sem.get("spend_decisions_usd")
+    result["semdup_decisions_spend_unknown"] = bool(
+        sem.get("spend_decisions_unknown", False))
     result["semdup_reason"] = str(sem.get("reason") or "")[:300]
     return result
 

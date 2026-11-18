@@ -16,6 +16,12 @@ Rules:
   only (None disables it).
 - No numerical cap on validated findings: every Luna-approved pair is
   published (deduplicated against the ordinary review).
+- Decisions routing (flag-gated SEMDUP_DECISIONS_SCREEN modes) may route
+  retrieved pairs away from Terra BEFORE examination: eco/eco-protected/
+  priority screen low-scoring pairs (recorded as suppressed with
+  completed=False, never verdicts); "order" only reorders, never skips.
+  Screening modes are experimental, default off, and every screened pair
+  is reported with its reason — never a silent drop.
 - Never misrepresents inability as a clean scan: when inference is
   impossible the status is "unavailable"/"degraded" with an explicit
   reason, never "ok with zero findings".
@@ -475,11 +481,98 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
         # _dedup_mirrors below, preserving the old delivery behavior.
         # Rejections never seed a skip.
         known_published = mirror_seed_keys(continuation_reused)
+        # DECISIONS screening (flag-gated, default off): cheap Decisions
+        # pre-screen routes low-scoring pairs away from Terra (screening
+        # modes), or reorders pairs production-first with no calls and no
+        # skips ("order" mode). Screened rows are recorded as suppressed
+        # with completed=False and are never cacheable (see
+        # cache.is_completed_row); the flag being off (or any screen
+        # failure) yields the exact baseline pair list. Confirmed screen
+        # spend comes OUT of the review ceiling below (same budget); the
+        # review never spends ceiling + screen.
+        screen_out = {"advanced": new_pairs, "screened": [],
+                      "screen_spend_usd": 0.0, "screen_spend_unknown": False,
+                      "screen_calls": 0, "screen_failures": 0,
+                      "mode": "off"}
+        _mode = "off"
+        try:
+            from codatiel_i2.semdup_dev import decisions_screen as _DS
+            _mode = _DS.screen_mode()
+            screen_out["mode"] = _mode
+            if _mode != "off" and new_pairs:
+                from codatiel_i2.semdup_dev import oai_dupe as _OD
+                _merged = Path(merged["db"])
+
+                def _ev(_pair: dict) -> tuple:
+                    _evd = _OD.build_pair_evidence(
+                        _merged, _pair.get("target") or {},
+                        _pair.get("counterpart") or {})
+                    if not _evd.get("ok"):
+                        return "", ""
+                    return (_evd["target"]["text"],
+                            _evd["counterpart"]["text"])
+
+                if _mode == "order":
+                    # Ordering-only: no provider calls possible, so no
+                    # ledger or spend sink is constructed.
+                    screen_out = _DS.screen_pairs(
+                        new_pairs, mode=_mode, head_rev=head_rev,
+                        evidence_fn=_ev)
+                    screen_out["mode"] = _mode
+                else:
+                    from codatiel_i2.core import spend as _SP
+                    # Decisions screen is priced with the Luna rate card:
+                    # same model (gpt-6-luna), same tier, same endpoint
+                    # family (/v1/decisions rates match Responses Luna
+                    # prompt-caching rates; output tokens are not charged
+                    # by Decisions and price to $0 in use). The resolved
+                    # card is passed through so the reported total and
+                    # the ledger agree.
+                    try:
+                        import codatiel_i2.providers as _PV
+                        _luna_rate = _PV.resolve_backend("luna")
+                        _luna_card = (_luna_rate.get(
+                            "rate_usd_per_mtok") or {})
+                        _screen_ledger = _SP.SpendLedger(
+                            rate=_luna_card,
+                            rate_status=_luna_rate.get("rate_status",
+                                                       "unconfirmed"))
+                    except Exception:
+                        _luna_card = {}
+                        _screen_ledger = _SP.SpendLedger()
+                    _screen_ledger.attach_sink(
+                        run_dir / "spend_semdup_decisions.jsonl")
+                    screen_out = _DS.screen_pairs(
+                        new_pairs, mode=_mode, head_rev=head_rev,
+                        evidence_fn=_ev, ledger=_screen_ledger,
+                        ceiling_remaining=(ceiling_usd if isinstance(
+                            ceiling_usd, (int, float)) else None),
+                        rate=_luna_card or None)
+                    screen_out["mode"] = _mode
+                    if screen_out.get("screen_error"):
+                        pass  # surfaced in the decisions_screen block below
+        except Exception as exc:
+            screen_out = {"advanced": new_pairs, "screened": [],
+                          "screen_spend_usd": 0.0,
+                          "screen_spend_unknown": False,
+                          "screen_calls": 0, "screen_failures": 0,
+                          "mode": "off",
+                          "screen_error": f"{type(exc).__name__}: "
+                                          f"{str(exc)[:200]}"}
+            _mode = "off"
+        _review_ceiling = ceiling_usd
+        _confirmed_screen = screen_out.get("screen_spend_usd")
+        if isinstance(ceiling_usd, (int, float)) and isinstance(
+                _confirmed_screen, (int, float)) and _confirmed_screen:
+            # Screen dollars come out of the same whole-PR remainder:
+            # the review below can never spend ceiling + screen.
+            _review_ceiling = max(0.0, round(
+                ceiling_usd - _confirmed_screen, 6))
         judged = ES.review_candidate_pairs(
-            new_pairs, repo=repo, repo_path=repo_path,
+            screen_out["advanced"], repo=repo, repo_path=repo_path,
             merged_db=Path(merged["db"]), base_rev=base_rev,
             head_rev=head_rev, head_tree=head_tree, base_tree=base_tree,
-            run_dir=run_dir, ceiling_usd=ceiling_usd,
+            run_dir=run_dir, ceiling_usd=_review_ceiling,
             assess_fn=assess_fn, edit_fn=edit_fn,
             on_pair=_on_pair, is_stale=is_stale,
             known_published_keys=known_published, pr=pr)
@@ -500,6 +593,36 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     outcome["spend_luna_usd"] = judged.get("spend_luna_usd")
     outcome["spend_terra_unknown"] = judged.get("spend_terra_unknown", False)
     outcome["spend_luna_unknown"] = judged.get("spend_luna_unknown", False)
+    # DECISIONS: provider-confirmed screen spend joins the run total.
+    # Screen unknown stays unknown, never $0 (same convention as above).
+    _screen_spend = screen_out.get("screen_spend_usd")
+    _screen_unknown = bool(screen_out.get("screen_spend_unknown")) or (
+        bool(screen_out.get("screen_calls")) and _screen_spend is None)
+    if _screen_spend is None:
+        _screen_spend = 0.0 if not screen_out.get("screen_calls") else None
+    outcome["spend_decisions_usd"] = _screen_spend
+    outcome["spend_decisions_unknown"] = bool(_screen_unknown)
+    outcome["decisions_screen"] = {
+        "mode": screen_out.get("mode", "off"),
+        "calls": screen_out.get("screen_calls", 0),
+        "failures": screen_out.get("screen_failures", 0),
+        "screened": len(screen_out.get("screened", [])),
+        "screen_error": screen_out.get("screen_error"),
+        "screen_no_key": bool(screen_out.get("screen_no_key")),
+        "screen_deferred": bool(screen_out.get("screen_deferred")),
+    }
+    _judged_unknown = bool(judged.get("spend_unknown"))
+    if isinstance(outcome["spend_usd"], (int, float)) and isinstance(
+            _screen_spend, (int, float)):
+        outcome["spend_usd"] = round(outcome["spend_usd"] + _screen_spend, 6)
+    elif isinstance(_screen_spend, (int, float)) and _screen_spend:
+        # Screen-only figure is not a run total: keep the run unknown
+        # rather than overwrite an unknown judged total with a partial.
+        outcome["spend_usd"] = round(_screen_spend, 6)
+        outcome["spend_unknown"] = _judged_unknown or outcome.get(
+            "spend_unknown", False)
+    if _screen_unknown:
+        outcome["spend_unknown"] = True
     outcome["preflight_usd"] = judged.get("preflight_usd")
     # MIRROR-01 / SCAFFOLD-01 savings (estimates labeled _est).
     for prefix in ("mirror", "scaffold"):
@@ -530,6 +653,12 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     new_rows = [r for r in judged.get("pairs", []) if isinstance(r, dict)]
     published = list(judged.get("published", []))
     suppressed = list(judged.get("suppressed", []))
+    # DECISIONS-03: screened rows rejoin as suppressed (never examined,
+    # never cached). They keep their stamped pair_id/pair_rank so the
+    # telemetry sink can attribute them.
+    for r in screen_out.get("screened", []):
+        if isinstance(r, dict):
+            suppressed.append(ES._suppressed_row(r))
     # SIGNAL-01 B1: reused rows are not examinations of this run —
     # their spend was attributed when originally judged. Drop stale
     # correlation labels (a cached id encodes the old head/rank and
@@ -633,9 +762,24 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
                              f"{examined_pairs} pairs{reused_note}; "
                              f"{len(published)} approved"
                              f"{skip_summary}{guard_note}{mirror_note}{scaffold_note}")
+    _screened_n = len(screen_out.get("screened", []))
+    _screening_mode = screen_out.get("mode", "off") in (
+        "eco", "eco-protected", "priority")
+    if _screened_n and _screening_mode:
+        # Screening suppressed pairs without examining them: that is a
+        # real coverage gap, never a clean full scan.
+        outcome["coverage"] = "partial"
+        outcome["reason"] += (f"; {_screened_n} decisions-screened "
+                              f"(not examined, mode "
+                              f"{screen_out.get('mode')})")
     # Dedup against the ordinary review's advisory anchors.
     published, dups = _dedup(run_dir, published)
     suppressed.extend(dups)
+    if screen_out.get("mode", "off") != "off":
+        try:
+            published = _order_published(published)
+        except Exception:
+            pass  # presentation reorder must never lose findings
     outcome["published"] = published
     outcome["suppressed"] = suppressed
     # SIGNAL-01 B4: budget-refusal states over fresh judgments (reused
@@ -644,6 +788,42 @@ def _run(*, repo_path, repo, pr, base_rev, head_rev, run_dir,
     outcome["wall_s"] = round(time.monotonic() - t0, 1)
     _persist(run_dir, outcome)
     return outcome
+
+
+def _order_published(published: list) -> list:
+    """DECISIONS-04 §6: presentation order follows demonstrated importance
+    signals only — never an assigned severity. Production pairs (neither
+    side test-marked) first, Luna KEEP before REVISE, otherwise the
+    examination order is preserved (stable sort). Not a severity label:
+    a verified bypass and a stylistic note keep their own verdicts; the
+    bypass merely surfaces first. Applied only when Decisions routing is
+    enabled; flag off preserves the exact baseline order."""
+    try:
+        from codatiel_i2.semdup_dev import decisions_screen as _DS
+        test_of = _DS.pair_test_involved
+    except Exception:
+        return list(published)
+
+    def _decision_rank(row) -> int:
+        try:
+            d = str((row or {}).get("decision") or "").upper()
+        except Exception:
+            return 2
+        if d == "KEEP":
+            return 0
+        if d == "REVISE":
+            return 1
+        return 2
+
+    def _key(row) -> tuple:
+        try:
+            pair = {"target": (row or {}).get("target"),
+                    "counterpart": (row or {}).get("counterpart")}
+            test = test_of(pair)
+        except Exception:
+            test = False
+        return (1 if test else 0, _decision_rank(row))
+    return sorted(published, key=_key)
 
 
 def _ensure_base(IX, repo_path, repo, rev, state_dir,

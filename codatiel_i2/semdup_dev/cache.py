@@ -172,6 +172,13 @@ def is_completed_row(row: dict) -> bool:
     """
     if not isinstance(row, dict):
         return False
+    reason = row.get("reason")
+    if reason == "decisions_screened":
+        # Routing skip, never a verdict: screened pairs were not examined
+        # and must never seed continuation or cross-revision reuse, even
+        # if a future writer forgets the completed=False flag. Checked
+        # FIRST so no completion flag can ever make a screened row reusable.
+        return False
     if _has_completion_flags(row):
         return bool(row.get("completed"))
     # Legacy fallback for rows predating completion flags: retry unless
