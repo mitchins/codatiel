@@ -40,6 +40,12 @@ SHARED_DEFAULT_MEAN_EDIT_USD = 0.002
 SHARED_RESERVE_CAP_FRAC = 0.5
 SHARED_MIN_EDITS_FOR_MEAN = 3
 
+# SCOPE: the shared allocation applies to review_candidate_pairs (the
+# integrated semdup stage path). The worker-path run_editorial below
+# keeps the fixed 50/50 split unconditionally — wiring it would change
+# the DEV shadow worker's behavior, which is out of scope for this
+# experiment. Operators: the flag has no effect on run_editorial runs.
+
 
 def shared_budget_enabled() -> bool:
     """Independent flag; anything but exactly "1" means fixed 50/50."""
@@ -82,9 +88,11 @@ def shared_remaining_usd(cap: float, spent_terra, spent_luna,
             or bounded_terra is None or bounded_luna is None):
         return None
     try:
-        return max(0.0, float(cap) - float(spent_terra)
-                   - float(spent_luna) - float(bounded_terra)
-                   - float(bounded_luna))
+        cap_f = float(cap)
+        if not (cap_f == cap_f):  # NaN cap fails closed
+            return None
+        return max(0.0, cap_f - float(spent_terra) - float(spent_luna)
+                   - float(bounded_terra) - float(bounded_luna))
     except (TypeError, ValueError):
         return None
 
@@ -106,16 +114,23 @@ def terra_admitted(est_t, est_l, remaining, reserve) -> tuple:
     if not (rem == rem):  # NaN never admits
         return False, "shared-remainder-exhausted"
     try:
-        rsv = max(0.0, float(reserve))
+        _r = float(reserve)
     except (TypeError, ValueError):
         return False, "editorial-reserve"
+    if not (_r == _r):  # NaN reserve fails closed (before max() swallows it)
+        return False, "editorial-reserve"
+    rsv = max(0.0, _r)
     try:
         te = float(est_t) if est_t is not None else None
     except (TypeError, ValueError):
         return False, "shared-remainder-exhausted"
+    if te is not None and not (te == te):  # NaN estimate never admits
+        return False, "shared-remainder-exhausted"
     try:
         le = float(est_l) if est_l is not None else None
     except (TypeError, ValueError):
+        return False, "shared-remainder-exhausted"
+    if le is not None and not (le == le):
         return False, "shared-remainder-exhausted"
     # Completability first: a pair that cannot fit is exhausted,
     # regardless of the reserve. Reserve second: a pair that fits but
@@ -1463,9 +1478,14 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         except Exception:
             b_l = None
         rem = shared_remaining_usd(ceiling_usd, s, sl, b_t, b_l)
-        rsv = editorial_reserve_usd(
-            ceiling_usd, shared.get("outstanding", 0),
-            shared_mean_edit_usd(shared))
+        try:
+            rsv = editorial_reserve_usd(
+                ceiling_usd, shared.get("outstanding", 0),
+                shared_mean_edit_usd(shared))
+        except Exception:
+            # Reserve uncomputable: fall back to the fixed-split half
+            # (F8). Never looser than status quo, never a raise.
+            rsv = max(float(ceiling_usd), 0.0) / 2.0
         # Luna estimate for a potential lead, bounded from the actual
         # evidence sizes (F6: no fixed character proxy).
         try:
@@ -1594,6 +1614,7 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         if rem_l is None or (est_l is not None and est_l > rem_l):
             if shared is not None:
                 _shared_release(shared)  # held = terminal this run (F3)
+                row["budget_reason"] = "shared-remainder-exhausted"
             row.update({"path": "suppressed", "reason": "budget_stop",
                         "detail": ("luna estimate exceeds the shared "
                                    f"remainder ${rem_l}; Terra proposal "
@@ -1610,11 +1631,14 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
         model_settings=luna_settings, ledger=luna_ledger, ctx=luna_ctx)
     row["edit_ran"] = True
     if shared is not None:
-        # Release at pair finalization (F3); mean updates on decided edits.
-        _shared_release(
-            shared, luna_ledger, sl_before,
-            decided=((luna.get("editor") or {}).get("decision")
-                     in ("KEEP", "REVISE", "DROP")))
+        # Single release point per pair that reaches edit (no double
+        # counting): every path below returns, so exactly one release
+        # happens here. (sl_before is always bound: the shared Luna
+        # preflight that precedes any edit sets it.) The Luna-preflight
+        # refusal above releases separately — edit never runs there.
+        _decided = ((luna.get("editor") or {}).get("decision")
+                    in ("KEEP", "REVISE", "DROP"))
+        _shared_release(shared, luna_ledger, sl_before, decided=_decided)
     row["luna_wall_s"] = round(time.monotonic() - lt0, 1)
     row["luna_response_ids"] = _ledger_delta_ids(
         luna_ledger, luna_order_before)
@@ -1626,8 +1650,6 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
     row["editor_error"] = luna.get("error", "")
     if not luna.get("ok"):
         if _is_budget_error(luna.get("error", "")):
-            if shared is not None:
-                _shared_release(shared)  # held = terminal this run (F3)
             row.update({"path": "suppressed", "reason": "budget_stop",
                         "detail": ("Luna call refused by the spending "
                                    "guard; Terra proposal held, never "
@@ -1635,8 +1657,6 @@ def _review_inner(pair, *, cfg, repo_path, merged_db, base_rev, head_rev,
                         "terra_completed": True, "luna_completed": False,
                         "budget_refused": True, "completed": False})
             return row
-        if shared is not None:
-            _shared_release(shared)  # failed edit = terminal drop (F3)
         row.update({"path": "suppressed",
                     "reason": "editor_unpublishable",
                     "detail": str(luna.get("error", "") or "")[:600],
@@ -1691,12 +1711,11 @@ def _public_row(row: dict) -> dict:
 
 
 def _suppressed_row(row: dict) -> dict:
-    return {
+    out = {
         "target": row["target"], "counterpart": row["counterpart"],
         "head_rev": row.get("head_rev"),
         "pair_id": row.get("pair_id"), "pair_rank": row.get("pair_rank"),
         "reason": row.get("reason", ""),
-        "budget_reason": row.get("budget_reason"),
         "budget_status": budget_status(row),
         # Audit inputs for the derived budget_status (counts only;
         # full response ids live in semdup_pairs.jsonl).
@@ -1709,6 +1728,11 @@ def _suppressed_row(row: dict) -> dict:
         "terra_note": str(row.get("terra_note", "") or "")[:600],
         "anchors": row.get("anchors", {}),
     }
+    # budget_reason only when set (shared-mode refusals): keeps the
+    # serialized shape identical for the default-off path.
+    if row.get("budget_reason") is not None:
+        out["budget_reason"] = row.get("budget_reason")
+    return out
 
 
 def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
@@ -1897,31 +1921,38 @@ def review_candidate_pairs(pairs: list, *, repo: str, repo_path: Path,
         if skipped:
             continue
         if shared is not None:
-            # Reserve-aware loop bounds (F2): each ledger is capped so the
-            # two TOGETHER can never exceed C, whatever the actuals do.
+            # Reserve-aware loop bounds (F2+F4): each ledger is capped so
+            # the two TOGETHER can never exceed C, whatever the actuals
+            # do — bounded unknown-usage reserves count against the caps.
             # Terra may fill everything above the reserve; Luna may use
             # anything Terra leaves. Admission (estimate-based) decides
             # what starts; these caps bound what runs.
             try:
                 st = _spent(terra_ledger)
                 sl = _spent(luna_ledger)
+                b_t = (terra_ledger.bounded_reserve_usd()
+                       if st is not None else None)
+                b_l = (luna_ledger.bounded_reserve_usd()
+                       if sl is not None else None)
+                if (st is None or sl is None or b_t is None
+                        or b_l is None):
+                    raise ValueError("unaccountable spend")
                 _r = editorial_reserve_usd(
                     ceiling_usd, shared.get("outstanding", 0),
                     shared_mean_edit_usd(shared))
-                if st is not None and sl is not None:
-                    terra_ledger.ceiling_usd = max(
-                        st, float(ceiling_usd) - _r - sl)
-                    luna_ledger.ceiling_usd = max(
-                        sl, float(ceiling_usd) - st)
-                else:
-                    # Unknown spend: fail closed (F4) — freeze both loops
-                    # at confirmed spend until accounting recovers.
-                    terra_ledger.ceiling_usd = st if st is not None else 0.0
-                    luna_ledger.ceiling_usd = sl if sl is not None else 0.0
+                terra_ledger.ceiling_usd = max(
+                    st, float(ceiling_usd) - _r - sl - b_t - b_l)
+                luna_ledger.ceiling_usd = max(
+                    sl, float(ceiling_usd) - st - b_t - b_l)
             except Exception:
                 try:
+                    # Fail closed (F8): freeze both loops at confirmed spend.
                     _st = _spent(terra_ledger)
-                    terra_ledger.ceiling_usd = _st if _st is not None else 0.0
+                    terra_ledger.ceiling_usd = (
+                        _st if _st is not None else 0.0)
+                    _sl = _spent(luna_ledger)
+                    luna_ledger.ceiling_usd = (
+                        _sl if _sl is not None else 0.0)
                 except Exception:
                     pass
         terra_before = _ledger_order(terra_ledger)

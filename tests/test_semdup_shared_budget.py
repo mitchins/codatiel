@@ -202,3 +202,92 @@ def test_reserve_refusal_is_recorded(tmp_path, monkeypatch):
                if r.get("reason") == "budget_stop")
     assert "editorial reserve" in row.get("detail", "")
     assert row.get("budget_reason") == "editorial-reserve"
+
+
+def test_nan_inputs_fail_closed():
+    import math
+    A = ES.terra_admitted
+    assert A(float("nan"), 0.01, 1.0, 0.01) == (
+        False, "shared-remainder-exhausted")
+    assert A(0.05, float("nan"), 1.0, 0.01) == (
+        False, "shared-remainder-exhausted")
+    assert A(0.05, 0.01, 1.0, float("nan")) == (False, "editorial-reserve")
+    assert ES.shared_remaining_usd(float("nan"), 0.0, 0.0, 0.0,
+                                   0.0) is None
+
+
+def _spending_edit(input_tokens):
+    calls = {"n": 0}
+
+    def fake(**kwargs):
+        calls["n"] += 1
+        ledger = kwargs.get("ledger")
+        if ledger is not None:
+            from types import SimpleNamespace
+            try:
+                ledger.record_response(
+                    f"test-luna-{calls['n']}",
+                    SimpleNamespace(requests=1,
+                                    input_tokens=input_tokens,
+                                    output_tokens=100),
+                    cache_in_input=True)
+            except Exception:
+                pass
+        return {"ok": True, "editor": {"decision": "KEEP",
+                                       "revised_comment": "use helper()",
+                                       "reason": "concrete reuse"},
+                "transcript": {"tool_calls": []}, "error": ""}
+    fake.calls = calls
+    return fake
+
+
+def test_shared_luna_spend_counts(tmp_path, monkeypatch):
+    """Luna-spending edit path: completed edits fold into the mean."""
+    from codatiel_i2.semdup_dev import editorial_shadow as ES2
+    repo, base, head, db = _indexed(tmp_path, monkeypatch, None)
+    run = tmp_path / "run"
+    run.mkdir()
+    assess = _spending_assess(
+        {"overlap": True, "relationship": "equivalent",
+         "opportunity": "direct_reuse",
+         "shared_component": "add-one", "differences": []}, 100)
+    edit = _spending_edit(5000)
+    monkeypatch.setenv("SEMDUP_SHARED_BUDGET", "1")
+    out = ES2.review_candidate_pairs(
+        _pairs(4), repo="o/r", repo_path=repo, merged_db=db,
+        base_rev=base, head_rev=head, head_tree=tmp_path,
+        base_tree=tmp_path, run_dir=run, ceiling_usd=0.50,
+        assess_fn=assess, edit_fn=edit,
+        on_pair=None, is_stale=None, known_published_keys={}, pr=1)
+    assert edit.calls["n"] == 4
+    assert len(out.get("published", [])) == 4
+    assert float(out.get("spend_usd") or 0) <= 0.50 + 1e-9
+
+
+def test_off_path_golden_equivalence(tmp_path, monkeypatch):
+    """Default off: shared and fixed paths produce identical results."""
+    from codatiel_i2.semdup_dev import editorial_shadow as ES2
+    results = []
+    for i, flag in enumerate((None, "1")):
+        sub = tmp_path / f"case{i}"
+        sub.mkdir()
+        repo, base, head, db = _indexed(sub, monkeypatch, None)
+        run = sub / ("run_" + (flag or "off"))
+        run.mkdir()
+        if flag is None:
+            monkeypatch.delenv("SEMDUP_SHARED_BUDGET", raising=False)
+        else:
+            monkeypatch.setenv("SEMDUP_SHARED_BUDGET", flag)
+        assess = _spending_assess(
+            {"overlap": True, "relationship": "equivalent",
+             "opportunity": "direct_reuse",
+             "shared_component": "add-one", "differences": []}, 100)
+        out = ES2.review_candidate_pairs(
+            _pairs(4), repo="o/r", repo_path=repo, merged_db=db,
+            base_rev=base, head_rev=head, head_tree=tmp_path,
+            base_tree=tmp_path, run_dir=run, ceiling_usd=5.0,
+            assess_fn=assess, edit_fn=TK.fake_edit("KEEP"),
+            on_pair=None, is_stale=None, known_published_keys={}, pr=1)
+        results.append([(r.get("pair_id"), r.get("path"), r.get("reason"))
+                        for r in out.get("pairs", [])])
+    assert results[0] == results[1]
