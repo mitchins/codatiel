@@ -107,30 +107,38 @@ def terra_admitted(est_t, est_l, remaining, reserve) -> tuple:
     reason_code is one of "ok", "shared-remainder-exhausted",
     "editorial-reserve".
     """
+    import math as _math
+
+    def _isnan(v):
+        try:
+            return _math.isnan(float(v))
+        except (TypeError, ValueError):
+            return False
+
     try:
         rem = float(remaining)
     except (TypeError, ValueError):
         return False, "shared-remainder-exhausted"
-    if not (rem == rem):  # NaN never admits
+    if _isnan(rem):  # NaN never admits
         return False, "shared-remainder-exhausted"
     try:
         _r = float(reserve)
     except (TypeError, ValueError):
         return False, "editorial-reserve"
-    if not (_r == _r):  # NaN reserve fails closed (before max() swallows it)
+    if _isnan(_r):  # NaN reserve fails closed (before max() swallows it)
         return False, "editorial-reserve"
     rsv = max(0.0, _r)
     try:
         te = float(est_t) if est_t is not None else None
     except (TypeError, ValueError):
         return False, "shared-remainder-exhausted"
-    if te is not None and not (te == te):  # NaN estimate never admits
+    if te is not None and _isnan(te):  # NaN estimate never admits
         return False, "shared-remainder-exhausted"
     try:
         le = float(est_l) if est_l is not None else None
     except (TypeError, ValueError):
         return False, "shared-remainder-exhausted"
-    if le is not None and not (le == le):
+    if le is not None and _isnan(le):
         return False, "shared-remainder-exhausted"
     # Completability first: a pair that cannot fit is exhausted,
     # regardless of the reserve. Reserve second: a pair that fits but
